@@ -66,6 +66,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
     vertexProvider: "google" as "google" | "anthropic",
     googleCloudProject: "",
     googleCloudLocation: "",
+    gcpServiceAccountJson: "",
     // SSH fields
     sshHost: "",
     sshUser: "",
@@ -172,6 +173,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         vertexProvider: config.vertexEnabled ? config.vertexProvider : undefined,
         googleCloudProject: config.vertexEnabled ? config.googleCloudProject : undefined,
         googleCloudLocation: config.vertexEnabled ? config.googleCloudLocation : undefined,
+        gcpServiceAccountJson: config.vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
         namespace: config.namespace || undefined,
         sshHost: config.sshHost || undefined,
         sshUser: config.sshUser || undefined,
@@ -335,12 +337,13 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Container Image</label>
           <input
             type="text"
-            placeholder="quay.io/aicatalyst/openclaw:latest"
+            placeholder="quay.io/sallyom/openclaw:latest"
             value={config.image}
             onChange={(e) => update("image", e.target.value)}
           />
           <div className="hint">
-            Leave blank for the default image
+            Leave blank for the default image (quay.io/sallyom/openclaw:latest).
+            This image includes Anthropic Vertex AI support not yet available upstream.
           </div>
         </div>
 
@@ -349,6 +352,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
             <label>Namespace</label>
             <input
               type="text"
+              autoComplete="off"
               placeholder={`${config.prefix || "prefix"}-${config.agentName || "agent"}-openclaw`}
               value={config.namespace || ""}
               onChange={(e) => setConfig((prev) => ({ ...prev, namespace: e.target.value }))}
@@ -417,6 +421,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Anthropic API Key</label>
           <input
             type="password"
+            autoComplete="new-password"
             placeholder={defaults?.hasAnthropicKey ? "(using key from environment)" : "sk-ant-..."}
             value={config.anthropicApiKey}
             onChange={(e) => update("anthropicApiKey", e.target.value)}
@@ -535,6 +540,90 @@ export default function DeployForm({ onDeployStarted }: Props) {
                   value={config.googleCloudLocation}
                   onChange={(e) => update("googleCloudLocation", e.target.value)}
                 />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>GCP Service Account JSON</label>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                {config.gcpServiceAccountJson ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      padding: "0.5rem 0.75rem",
+                      background: "var(--bg-primary)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "6px",
+                      fontFamily: "monospace",
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    {(() => {
+                      try {
+                        const parsed = JSON.parse(config.gcpServiceAccountJson);
+                        return `${parsed.client_email || "service account"} (${parsed.project_id || "unknown project"})`;
+                      } catch {
+                        return "credentials loaded";
+                      }
+                    })()}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      flex: 1,
+                      padding: "0.5rem 0.75rem",
+                      border: "1px dashed var(--border)",
+                      borderRadius: "6px",
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    No credentials file selected
+                  </div>
+                )}
+                <label
+                  className="btn btn-ghost"
+                  style={{ cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  {config.gcpServiceAccountJson ? "Change" : "Browse"}
+                  <input
+                    type="file"
+                    accept=".json"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const text = reader.result as string;
+                        update("gcpServiceAccountJson", text);
+                        // Auto-fill project ID if empty
+                        if (!config.googleCloudProject) {
+                          try {
+                            const parsed = JSON.parse(text);
+                            if (parsed.project_id) {
+                              update("googleCloudProject", parsed.project_id);
+                            }
+                          } catch { /* ignore */ }
+                        }
+                      };
+                      reader.readAsText(file);
+                    }}
+                  />
+                </label>
+                {config.gcpServiceAccountJson && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => update("gcpServiceAccountJson", "")}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="hint">
+                Service account key file for Vertex AI authentication.
+                Project ID is auto-extracted if not set above.
               </div>
             </div>
           </>

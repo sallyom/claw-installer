@@ -141,8 +141,17 @@ export default function InstanceList() {
       return;
     setActing(id);
     await fetch(`/api/instances/${id}`, { method: "DELETE" });
-    await fetchInstances();
+    // Clean up UI state for the deleted instance
+    setExpanded((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    // Remove immediately from the list so it doesn't linger
+    setInstances((prev) => prev.filter((i) => i.id !== id));
     setActing(null);
+    // Still refresh to pick up any remaining state
+    await fetchInstances();
   };
 
   const togglePanel = async (id: string, panel: ExpandedPanel) => {
@@ -196,8 +205,11 @@ export default function InstanceList() {
         const isStopped = inst.status === "stopped";
         const isDeploying = inst.status === "deploying";
         const isError = inst.status === "error";
+        const isK8s = inst.mode === "kubernetes";
         const canStop = isRunning || isDeploying || isError;
-        const canDelete = !isRunning && !isDeploying;
+        // K8s: allow delete anytime (it deletes the whole namespace)
+        // Local: must stop first
+        const canDelete = isK8s || (!isRunning && !isDeploying);
 
         return (
           <div key={inst.id} style={{ borderBottom: "1px solid var(--border)" }}>
@@ -234,7 +246,7 @@ export default function InstanceList() {
                       deployment error — check pod status
                     </span>
                   ) : (
-                    "stopped — data volume preserved"
+                    isK8s ? "stopped — scaled to 0, PVC preserved" : "stopped — data volume preserved"
                   )}
                 </div>
               </div>
@@ -266,6 +278,7 @@ export default function InstanceList() {
                     className="btn btn-primary"
                     disabled={isActing}
                     onClick={() => handleStart(inst.id)}
+                    title={isK8s ? "Scale deployment to 1 replica" : "Start container"}
                   >
                     Start
                   </button>
@@ -275,6 +288,7 @@ export default function InstanceList() {
                     className="btn btn-ghost"
                     disabled={isActing}
                     onClick={() => handleStop(inst.id)}
+                    title={isK8s ? "Scale deployment to 0 replicas (PVC preserved)" : "Stop container"}
                   >
                     Stop
                   </button>
@@ -286,7 +300,7 @@ export default function InstanceList() {
                   title={
                     !canDelete
                       ? "Stop the instance first"
-                      : inst.mode === "kubernetes"
+                      : isK8s
                         ? "Delete namespace and all data"
                         : "Delete data volume (config, sessions, workspaces)"
                   }

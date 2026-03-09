@@ -12,7 +12,16 @@ import type {
   LogCallback,
 } from "./types.js";
 
-const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
+const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
+
+function tryParseProjectId(saJson: string): string {
+  try {
+    const parsed = JSON.parse(saJson);
+    return typeof parsed.project_id === "string" ? parsed.project_id : "";
+  } catch {
+    return "";
+  }
+}
 
 function namespaceName(config: DeployConfig): string {
   const ns = config.namespace || `${config.prefix}-${config.agentName}-openclaw`;
@@ -355,6 +364,19 @@ function agentConfigMapManifest(ns: string, config: DeployConfig, workspaceFiles
   };
 }
 
+function gcpSaSecretManifest(ns: string, saJson: string): k8s.V1Secret {
+  return {
+    apiVersion: "v1",
+    kind: "Secret",
+    metadata: {
+      name: "gcp-sa",
+      namespace: ns,
+      labels: { app: "openclaw" },
+    },
+    stringData: { "sa.json": saJson },
+  };
+}
+
 function secretManifest(ns: string, config: DeployConfig, gatewayToken: string): k8s.V1Secret {
   const data: Record<string, string> = {
     OPENCLAW_GATEWAY_TOKEN: gatewayToken,
@@ -363,7 +385,11 @@ function secretManifest(ns: string, config: DeployConfig, gatewayToken: string):
   if (config.openaiApiKey) data.OPENAI_API_KEY = config.openaiApiKey;
   if (config.modelEndpoint) data.MODEL_ENDPOINT = config.modelEndpoint;
   if (config.telegramBotToken) data.TELEGRAM_BOT_TOKEN = config.telegramBotToken;
-  if (config.googleCloudProject) data.GOOGLE_CLOUD_PROJECT = config.googleCloudProject;
+
+  // Resolve project ID from config or from the SA JSON
+  const projectId = config.googleCloudProject
+    || (config.gcpServiceAccountJson ? tryParseProjectId(config.gcpServiceAccountJson) : "");
+  if (projectId) data.GOOGLE_CLOUD_PROJECT = projectId;
   if (config.googleCloudLocation) data.GOOGLE_CLOUD_LOCATION = config.googleCloudLocation;
 
   return {
@@ -430,6 +456,9 @@ function deploymentManifest(ns: string, config: DeployConfig): k8s.V1Deployment 
   if (config.vertexEnabled) {
     envVars.push({ name: "VERTEX_ENABLED", value: "true" });
     envVars.push({ name: "VERTEX_PROVIDER", value: config.vertexProvider || "google" });
+    if (config.gcpServiceAccountJson) {
+      envVars.push({ name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/home/node/gcp/sa.json" });
+    }
   }
 
   const agentFiles = ["AGENTS.md", "agent.json", "SOUL.md", "IDENTITY.md", "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md"];
@@ -531,6 +560,9 @@ echo "Config initialized"
               volumeMounts: [
                 { name: "openclaw-home", mountPath: "/home/node/.openclaw" },
                 { name: "tmp-volume", mountPath: "/tmp" },
+                ...(config.gcpServiceAccountJson
+                  ? [{ name: "gcp-sa", mountPath: "/home/node/gcp", readOnly: true }]
+                  : []),
               ],
               securityContext: {
                 allowPrivilegeEscalation: false,
@@ -544,6 +576,9 @@ echo "Config initialized"
             { name: "config-template", configMap: { name: "openclaw-config" } },
             { name: "agent-config", configMap: { name: "openclaw-agent" } },
             { name: "tmp-volume", emptyDir: {} },
+            ...(config.gcpServiceAccountJson
+              ? [{ name: "gcp-sa", secret: { secretName: "gcp-sa" } }]
+              : []),
           ],
         },
       },
@@ -651,6 +686,18 @@ export class KubernetesDeployer implements Deployer {
       log,
     );
 
+    // 5b. GCP service account secret (for Vertex AI)
+    if (config.gcpServiceAccountJson) {
+      const gcpSecret = gcpSaSecretManifest(ns, config.gcpServiceAccountJson);
+      await applyResource(
+        () => core.readNamespacedSecret({ name: "gcp-sa", namespace: ns }),
+        () => core.createNamespacedSecret({ namespace: ns, body: gcpSecret }),
+        () => core.replaceNamespacedSecret({ name: "gcp-sa", namespace: ns, body: gcpSecret }),
+        "Secret gcp-sa",
+        log,
+      );
+    }
+
     // 6. Service
     const svc = serviceManifest(ns);
     await applyResource(
@@ -746,7 +793,30 @@ export class KubernetesDeployer implements Deployer {
   async teardown(result: DeployResult, log: LogCallback): Promise<void> {
     const ns = result.config.namespace || result.containerId || "";
     const core = coreApi();
-    log(`Deleting namespace ${ns} and all resources...`);
+    const apps = appsApi();
+    log(`Deleting resources in namespace ${ns}...`);
+
+    // Delete resources explicitly before namespace to avoid stuck Terminating state.
+    const deletes: Array<{ name: string; fn: () => Promise<unknown> }> = [
+      { name: "Deployment", fn: () => apps.deleteNamespacedDeployment({ name: "openclaw", namespace: ns }) },
+      { name: "Service", fn: () => core.deleteNamespacedService({ name: "openclaw", namespace: ns }) },
+      { name: "Secret openclaw-secrets", fn: () => core.deleteNamespacedSecret({ name: "openclaw-secrets", namespace: ns }) },
+      { name: "Secret gcp-sa", fn: () => core.deleteNamespacedSecret({ name: "gcp-sa", namespace: ns }) },
+      { name: "ConfigMap openclaw-config", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-config", namespace: ns }) },
+      { name: "ConfigMap openclaw-agent", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }) },
+      { name: "PVC", fn: () => core.deleteNamespacedPersistentVolumeClaim({ name: "openclaw-home-pvc", namespace: ns }) },
+    ];
+
+    for (const { name, fn } of deletes) {
+      try {
+        await fn();
+        log(`Deleted ${name}`);
+      } catch {
+        // Resource may not exist — that's fine
+      }
+    }
+
+    log(`Deleting namespace ${ns}...`);
     try {
       await core.deleteNamespace({ name: ns });
       log(`Namespace ${ns} deleted`);
@@ -946,6 +1016,8 @@ export async function discoverK8sInstances(): Promise<K8sInstance[]> {
 
     for (const ns of nsList.items) {
       const nsName = ns.metadata?.name || "";
+      // Skip namespaces being deleted
+      if (ns.status?.phase === "Terminating") continue;
       try {
         const dep = await apps.readNamespacedDeployment({ name: "openclaw", namespace: nsName });
         const labels = dep.metadata?.labels || {};
