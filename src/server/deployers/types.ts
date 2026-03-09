@@ -37,12 +37,22 @@ export interface DeployConfig {
 export interface DeployResult {
   id: string;
   mode: DeployMode;
-  status: "running" | "stopped" | "failed" | "unknown";
+  status: "running" | "stopped" | "failed" | "deploying" | "error" | "unknown";
   config: DeployConfig;
   startedAt: string;
   url?: string;
   containerId?: string;
   error?: string;
+  // K8s-specific
+  statusDetail?: string;
+  pods?: Array<{
+    name: string;
+    phase: string;
+    ready: boolean;
+    restarts: number;
+    containerStatus: string;
+    message: string;
+  }>;
 }
 
 export type LogCallback = (line: string) => void;

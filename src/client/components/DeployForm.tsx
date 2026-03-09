@@ -14,6 +14,9 @@ interface ServerDefaults {
   modelEndpoint: string;
   prefix: string;
   image: string;
+  k8sAvailable?: boolean;
+  k8sContext?: string;
+  isOpenShift?: boolean;
 }
 
 interface SavedConfig {
@@ -31,9 +34,8 @@ const MODES: Array<{ id: Mode; icon: string; title: string; desc: string; disabl
   {
     id: "kubernetes" as const,
     icon: "☸️",
-    title: "🚧 Kubernetes / OpenShift",
-    desc: "Deploy to a cluster (coming soon)",
-    disabled: true,
+    title: "Kubernetes / OpenShift",
+    desc: "Deploy to a K8s or OpenShift cluster",
   },
   {
     id: "ssh" as const,
@@ -73,24 +75,30 @@ export default function DeployForm({ onDeployStarted }: Props) {
     telegramEnabled: false,
     telegramBotToken: "",
     telegramAllowFrom: "",
+    // Kubernetes
+    namespace: "",
   });
 
-  // Fetch server defaults (detected env vars)
+  // Fetch server defaults (detected env vars + K8s availability)
   useEffect(() => {
     fetch("/api/health")
       .then((r) => r.json())
       .then((data) => {
-        if (data.defaults) {
-          setDefaults(data.defaults);
-          if (data.defaults.prefix) {
-            setConfig((prev) => ({ ...prev, prefix: data.defaults.prefix }));
-          }
-          if (data.defaults.modelEndpoint) {
-            setConfig((prev) => ({ ...prev, modelEndpoint: data.defaults.modelEndpoint }));
-          }
-          if (data.defaults.image) {
-            setConfig((prev) => ({ ...prev, image: data.defaults.image }));
-          }
+        const d = {
+          ...(data.defaults || {}),
+          k8sAvailable: data.k8sAvailable,
+          k8sContext: data.k8sContext,
+          isOpenShift: data.isOpenShift,
+        };
+        setDefaults(d);
+        if (d.prefix) {
+          setConfig((prev) => ({ ...prev, prefix: d.prefix }));
+        }
+        if (d.modelEndpoint) {
+          setConfig((prev) => ({ ...prev, modelEndpoint: d.modelEndpoint }));
+        }
+        if (d.image) {
+          setConfig((prev) => ({ ...prev, image: d.image }));
         }
       })
       .catch(() => {});
@@ -164,6 +172,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         vertexProvider: config.vertexEnabled ? config.vertexProvider : undefined,
         googleCloudProject: config.vertexEnabled ? config.googleCloudProject : undefined,
         googleCloudLocation: config.vertexEnabled ? config.googleCloudLocation : undefined,
+        namespace: config.namespace || undefined,
         sshHost: config.sshHost || undefined,
         sshUser: config.sshUser || undefined,
         agentSourceDir: config.agentSourceDir || undefined,
@@ -210,7 +219,8 @@ export default function DeployForm({ onDeployStarted }: Props) {
     e.target.value = "";
   };
 
-  const isValid = config.prefix && config.agentName;
+  const isValid = config.prefix && config.agentName
+    && (mode !== "kubernetes" || defaults?.k8sAvailable);
 
   return (
     <div>
@@ -229,6 +239,21 @@ export default function DeployForm({ onDeployStarted }: Props) {
           </div>
         ))}
       </div>
+
+      {mode === "kubernetes" && (
+        <div className="card" style={{ marginBottom: "1rem", padding: "0.75rem 1rem" }}>
+          {defaults?.k8sAvailable ? (
+            <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
+              Connected to cluster: <strong>{defaults.k8sContext}</strong>
+              {defaults.isOpenShift && <span style={{ marginLeft: "0.5rem", color: "var(--accent)" }}>(OpenShift — Route will be created)</span>}
+            </div>
+          ) : (
+            <div style={{ color: "#e74c3c", fontSize: "0.85rem" }}>
+              No Kubernetes cluster detected. Configure kubectl/oc and ensure you are logged in.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
@@ -303,7 +328,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Container Image</label>
           <input
             type="text"
-            placeholder="quay.io/sallyom/openclaw:latest"
+            placeholder="quay.io/aicatalyst/openclaw:latest"
             value={config.image}
             onChange={(e) => update("image", e.target.value)}
           />
@@ -311,6 +336,21 @@ export default function DeployForm({ onDeployStarted }: Props) {
             Leave blank for the default image
           </div>
         </div>
+
+        {mode === "kubernetes" && (
+          <div className="form-group">
+            <label>Namespace</label>
+            <input
+              type="text"
+              placeholder={`${config.prefix || "prefix"}-${config.agentName || "agent"}-openclaw`}
+              value={config.namespace || ""}
+              onChange={(e) => setConfig((prev) => ({ ...prev, namespace: e.target.value }))}
+            />
+            <div className="hint">
+              Leave blank to auto-generate (e.g., <code>{config.prefix || "prefix"}-{config.agentName || "agent"}-openclaw</code>)
+            </div>
+          </div>
+        )}
 
         {mode === "local" && (
           <div className="form-group">

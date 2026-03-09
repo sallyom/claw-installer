@@ -7,6 +7,7 @@ import deployRoutes from "./routes/deploy.js";
 import statusRoutes from "./routes/status.js";
 import agentsRoutes from "./routes/agents.js";
 import { detectRuntime } from "./services/container.js";
+import { isClusterReachable, isOpenShift, currentContext } from "./services/k8s.js";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
@@ -24,9 +25,15 @@ app.use("/api/agents", agentsRoutes);
 // Health check + environment defaults for the frontend
 app.get("/api/health", async (_req, res) => {
   const runtime = await detectRuntime();
+  const k8sReachable = await isClusterReachable();
+  const openShift = k8sReachable ? await isOpenShift() : false;
+
   res.json({
     status: "ok",
     containerRuntime: runtime,
+    k8sAvailable: k8sReachable,
+    k8sContext: k8sReachable ? currentContext() : "",
+    isOpenShift: openShift,
     version: "0.1.0",
     defaults: {
       hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,

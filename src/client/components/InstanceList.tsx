@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from "react";
 
+interface PodInfo {
+  name: string;
+  phase: string;
+  ready: boolean;
+  restarts: number;
+  containerStatus: string;
+  message: string;
+}
+
 interface Instance {
   id: string;
   mode: string;
@@ -13,9 +22,69 @@ interface Instance {
   url?: string;
   containerId?: string;
   error?: string;
+  statusDetail?: string;
+  pods?: PodInfo[];
 }
 
 type ExpandedPanel = "token" | "command" | "logs" | null;
+
+function StatusBadge({ inst, isActing }: { inst: Instance; isActing: boolean }) {
+  const badgeColor: Record<string, string> = {
+    running: "",
+    stopped: "",
+    deploying: "#f39c12",
+    error: "#e74c3c",
+    unknown: "",
+  };
+  const style = badgeColor[inst.status]
+    ? { marginLeft: "0.5rem", background: badgeColor[inst.status], color: "#fff" }
+    : { marginLeft: "0.5rem" };
+
+  let label = inst.status;
+  if (isActing) label = "...";
+  else if (inst.status === "deploying") label = "deploying";
+  else if (inst.status === "error") label = "error";
+
+  return (
+    <span className={`badge badge-${inst.status}`} style={style}>
+      {label}
+    </span>
+  );
+}
+
+function K8sProgress({ inst }: { inst: Instance }) {
+  if (inst.mode !== "kubernetes") return null;
+  if (!inst.statusDetail && (!inst.pods || inst.pods.length === 0)) return null;
+  if (inst.status === "running") return null;
+
+  const pod = inst.pods?.[0];
+
+  return (
+    <div
+      style={{
+        padding: "0.5rem 1rem",
+        fontSize: "0.8rem",
+        color: inst.status === "error" ? "#e74c3c" : "var(--text-secondary)",
+        borderTop: "1px solid var(--border)",
+        fontFamily: "var(--font-mono)",
+      }}
+    >
+      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+        {inst.statusDetail && <span>{inst.statusDetail}</span>}
+        {pod && pod.restarts > 0 && (
+          <span style={{ color: "#e74c3c" }}>
+            Restarts: {pod.restarts}
+          </span>
+        )}
+      </div>
+      {pod?.message && (
+        <div style={{ marginTop: "0.25rem", opacity: 0.8, wordBreak: "break-word" }}>
+          {pod.message}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function InstanceList() {
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -61,10 +130,12 @@ export default function InstanceList() {
     setActing(null);
   };
 
-  const handleDeleteData = async (id: string) => {
+  const handleDeleteData = async (id: string, mode?: string) => {
     if (
       !confirm(
-        "Delete all data? This removes the data volume (config, sessions, workspaces). Cannot be undone.",
+        mode === "kubernetes"
+          ? "Delete namespace and all data? This removes the PVC, secrets, deployment, and namespace. Cannot be undone."
+          : "Delete all data? This removes the data volume (config, sessions, workspaces). Cannot be undone.",
       )
     )
       return;
@@ -121,23 +192,33 @@ export default function InstanceList() {
         const isActing = acting === inst.id;
         const activePanel = expanded[inst.id];
         const panelContent = panelData[`${inst.id}-${activePanel}`];
+        const isRunning = inst.status === "running";
+        const isStopped = inst.status === "stopped";
+        const isDeploying = inst.status === "deploying";
+        const isError = inst.status === "error";
+        const canStop = isRunning || isDeploying || isError;
+        const canDelete = !isRunning && !isDeploying;
+
         return (
           <div key={inst.id} style={{ borderBottom: "1px solid var(--border)" }}>
             <div className="instance-row">
               <div className="instance-info">
                 <div className="instance-name">
                   {inst.containerId || inst.id}
-                  <span
-                    className={`badge badge-${inst.status}`}
-                    style={{ marginLeft: "0.5rem" }}
-                  >
-                    {isActing ? "..." : inst.status}
-                  </span>
+                  <StatusBadge inst={inst} isActing={isActing} />
+                  {inst.mode === "kubernetes" && (
+                    <span
+                      className="badge"
+                      style={{ marginLeft: "0.25rem", background: "var(--accent)", color: "#fff", fontSize: "0.65rem" }}
+                    >
+                      K8s
+                    </span>
+                  )}
                 </div>
                 <div className="instance-meta">
                   {inst.config.prefix && `${inst.config.prefix} · `}
                   {inst.config.agentName && `${inst.config.agentName} · `}
-                  {inst.status === "running" && inst.url ? (
+                  {isRunning && inst.url ? (
                     <a
                       href={inst.url}
                       target="_blank"
@@ -146,13 +227,19 @@ export default function InstanceList() {
                     >
                       {inst.url}
                     </a>
+                  ) : isDeploying ? (
+                    "deploying..."
+                  ) : isError ? (
+                    <span style={{ color: "#e74c3c" }}>
+                      deployment error — check pod status
+                    </span>
                   ) : (
                     "stopped — data volume preserved"
                   )}
                 </div>
               </div>
               <div className="instance-actions">
-                {inst.status === "running" && (
+                {isRunning && (
                   <>
                     <button
                       className="btn btn-ghost"
@@ -174,7 +261,7 @@ export default function InstanceList() {
                     </button>
                   </>
                 )}
-                {inst.status === "stopped" && (
+                {isStopped && (
                   <button
                     className="btn btn-primary"
                     disabled={isActing}
@@ -183,7 +270,7 @@ export default function InstanceList() {
                     Start
                   </button>
                 )}
-                {inst.status === "running" && (
+                {canStop && (
                   <button
                     className="btn btn-ghost"
                     disabled={isActing}
@@ -194,18 +281,21 @@ export default function InstanceList() {
                 )}
                 <button
                   className="btn btn-danger"
-                  disabled={isActing || inst.status === "running"}
-                  onClick={() => handleDeleteData(inst.id)}
+                  disabled={isActing || !canDelete}
+                  onClick={() => handleDeleteData(inst.id, inst.mode)}
                   title={
-                    inst.status === "running"
+                    !canDelete
                       ? "Stop the instance first"
-                      : "Delete data volume (config, sessions, workspaces)"
+                      : inst.mode === "kubernetes"
+                        ? "Delete namespace and all data"
+                        : "Delete data volume (config, sessions, workspaces)"
                   }
                 >
                   Delete Data
                 </button>
               </div>
             </div>
+            <K8sProgress inst={inst} />
             {activePanel && panelContent && (
               <div
                 style={{

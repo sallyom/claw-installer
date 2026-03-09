@@ -332,6 +332,21 @@ body {
   color: var(--danger);
 }
 
+.badge-deploying {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.badge-error {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--danger);
+}
+
+.badge-unknown {
+  background: rgba(139, 148, 158, 0.15);
+  color: var(--text-muted);
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;

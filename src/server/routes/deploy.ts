@@ -2,16 +2,19 @@ import { Router } from "express";
 import { v4 as uuid } from "uuid";
 import type { DeployConfig } from "../deployers/types.js";
 import { LocalDeployer } from "../deployers/local.js";
+import { KubernetesDeployer } from "../deployers/kubernetes.js";
 import { createLogCallback, sendStatus } from "../ws.js";
 
 const router = Router();
 const localDeployer = new LocalDeployer();
+const k8sDeployer = new KubernetesDeployer();
 
 function getDeployer(mode: string) {
   switch (mode) {
     case "local":
       return localDeployer;
-    // TODO: kubernetes, ssh, fleet deployers
+    case "kubernetes":
+      return k8sDeployer;
     default:
       return null;
   }
