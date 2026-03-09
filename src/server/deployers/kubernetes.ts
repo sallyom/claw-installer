@@ -1,5 +1,8 @@
 import * as k8s from "@kubernetes/client-node";
 import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { v4 as uuid } from "uuid";
 import { coreApi, appsApi, loadKubeConfig, isOpenShift } from "../services/k8s.js";
 import type {
@@ -12,7 +15,8 @@ import type {
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
 
 function namespaceName(config: DeployConfig): string {
-  return config.namespace || `${config.prefix}-${config.agentName}-openclaw`;
+  const ns = config.namespace || `${config.prefix}-${config.agentName}-openclaw`;
+  return ns.toLowerCase();
 }
 
 function agentId(config: DeployConfig): string {
@@ -128,6 +132,175 @@ function buildAgentJson(config: DeployConfig): string {
   }, null, 2);
 }
 
+function buildSoulMd(config: DeployConfig): string {
+  const displayName = config.agentDisplayName || config.agentName;
+  return `# SOUL.md - Who You Are
+
+You are ${displayName}. You're not a chatbot. You're a capable,
+opinionated assistant who earns trust through competence.
+
+## Core Truths
+- Just answer. Lead with the point.
+- Have opinions. Commit when the evidence supports it.
+- Call it like you see it. Direct beats polite.
+- Be resourceful before asking. Try, then ask.
+- Earn trust through competence. External actions need approval. Internal
+  work (reading, organizing, learning) is fine.
+
+## Boundaries
+- Private things stay private.
+- When in doubt, ask before acting externally.
+- Send complete replies. Do not leave work half-finished.
+
+## Style
+- Keep information tight. Let personality take up the space.
+- Humor: dry wit and understatement, not silliness.
+- Punctuation: commas, periods, colons, semicolons. No em dashes.
+- Be friendly and welcoming but never obsequious.
+
+## Continuity
+These files are memory. If you change this file, tell the user.
+`;
+}
+
+function buildIdentityMd(config: DeployConfig): string {
+  const id = agentId(config);
+  const displayName = config.agentDisplayName || config.agentName;
+  return `# IDENTITY.md - Who Am I?
+
+- **Name:** ${displayName}
+- **ID:** ${id}
+- **Description:** AI assistant on the ${config.prefix} OpenClaw instance
+`;
+}
+
+function buildToolsMd(config: DeployConfig): string {
+  const id = agentId(config);
+  return `# TOOLS.md - Environment & Tools
+
+Environment-specific values. Skills define how tools work; this file
+holds lookup values and security notes.
+
+## Secrets and Config
+- Workspace .env: ~/.openclaw/workspace-${id}/.env
+- NEVER cat, echo, or display .env contents
+- Source .env silently, then use variables in commands
+
+## Skills
+Check the skills directory for installed skills:
+\`ls ~/.openclaw/skills/\`
+
+Each skill has a SKILL.md with usage instructions. Use skills when
+they match the user's request.
+`;
+}
+
+function buildUserMd(config: DeployConfig): string {
+  const ns = namespaceName(config);
+  return `# USER.md - Instance Owner
+
+- **Namespace:** ${ns}
+- **Owner prefix:** ${config.prefix}
+- **Instance:** OpenClaw on Kubernetes
+
+This is a personal OpenClaw instance. The namespace owner controls
+what agents and skills are deployed here.
+`;
+}
+
+function buildHeartbeatMd(): string {
+  return `# HEARTBEAT.md - Health Checks
+
+## Every Heartbeat
+- Verify workspace files are present and readable
+- Check that skills directory exists and skills are installed
+- Confirm .env is loadable (source it silently)
+
+## Reporting
+Heartbeat turns should usually end with NO_REPLY unless there is
+something that requires the user's attention.
+
+Only send a direct heartbeat message when something is broken and
+the user needs to intervene.
+`;
+}
+
+function buildMemoryMd(): string {
+  return `# MEMORY.md - Learned Preferences
+
+This file builds over time as the agent learns user preferences
+and operational patterns.
+
+## User Preferences
+*(populated through conversation)*
+
+## Operational Lessons
+*(populated through experience)*
+`;
+}
+
+// Files that make up an agent workspace (beyond AGENTS.md and agent.json)
+const WORKSPACE_FILES: Record<string, (config: DeployConfig) => string> = {
+  "SOUL.md": buildSoulMd,
+  "IDENTITY.md": buildIdentityMd,
+  "TOOLS.md": buildToolsMd,
+  "USER.md": buildUserMd,
+  "HEARTBEAT.md": buildHeartbeatMd as (config: DeployConfig) => string,
+  "MEMORY.md": buildMemoryMd as (config: DeployConfig) => string,
+};
+
+/**
+ * Load agent workspace files, preferring user-customized files from
+ * ~/.openclaw-installer/agents/workspace-<agentId>/ over generated defaults.
+ * Saves generated defaults to the host dir if they don't already exist.
+ */
+function loadWorkspaceFiles(config: DeployConfig, log: LogCallback): { files: Record<string, string>; fromHost: boolean } {
+  const id = agentId(config);
+  const hostDir = join(homedir(), ".openclaw-installer", "agents", `workspace-${id}`);
+  const files: Record<string, string> = {};
+  const allNames = ["AGENTS.md", "agent.json", ...Object.keys(WORKSPACE_FILES)];
+  const builders: Record<string, (c: DeployConfig) => string> = {
+    "AGENTS.md": buildAgentsMd,
+    "agent.json": buildAgentJson,
+    ...WORKSPACE_FILES,
+  };
+
+  let fromHost = false;
+  for (const name of allNames) {
+    const hostPath = join(hostDir, name);
+    if (existsSync(hostPath)) {
+      files[name] = readFileSync(hostPath, "utf-8");
+      fromHost = true;
+    } else {
+      files[name] = builders[name](config);
+    }
+  }
+
+  if (fromHost) {
+    log(`Using agent files from ~/.openclaw-installer/agents/workspace-${id}/`);
+  }
+
+  // Save generated defaults to host so user can customize
+  try {
+    mkdirSync(hostDir, { recursive: true });
+    let saved = false;
+    for (const [name, content] of Object.entries(files)) {
+      const hostPath = join(hostDir, name);
+      if (!existsSync(hostPath)) {
+        writeFileSync(hostPath, content);
+        saved = true;
+      }
+    }
+    if (saved) {
+      log(`Agent files saved to ${hostDir} (edit and re-deploy to customize)`);
+    }
+  } catch {
+    // Host dir may not be writable (e.g. running containerized)
+  }
+
+  return { files, fromHost };
+}
+
 // ── K8s manifest builders ──────────────────────────────────────────
 
 function namespaceManifest(ns: string): k8s.V1Namespace {
@@ -169,7 +342,7 @@ function configMapManifest(ns: string, config: DeployConfig, gatewayToken: strin
   };
 }
 
-function agentConfigMapManifest(ns: string, config: DeployConfig): k8s.V1ConfigMap {
+function agentConfigMapManifest(ns: string, config: DeployConfig, workspaceFiles: Record<string, string>): k8s.V1ConfigMap {
   return {
     apiVersion: "v1",
     kind: "ConfigMap",
@@ -178,10 +351,7 @@ function agentConfigMapManifest(ns: string, config: DeployConfig): k8s.V1ConfigM
       namespace: ns,
       labels: { app: "openclaw" },
     },
-    data: {
-      "AGENTS.md": buildAgentsMd(config),
-      "agent.json": buildAgentJson(config),
-    },
+    data: workspaceFiles,
   };
 }
 
@@ -262,6 +432,11 @@ function deploymentManifest(ns: string, config: DeployConfig): k8s.V1Deployment 
     envVars.push({ name: "VERTEX_PROVIDER", value: config.vertexProvider || "google" });
   }
 
+  const agentFiles = ["AGENTS.md", "agent.json", "SOUL.md", "IDENTITY.md", "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md"];
+  const copyLines = agentFiles
+    .map((f) => `  cp /agents/${f} /home/node/.openclaw/workspace-${id}/${f} 2>/dev/null || true`)
+    .join("\n");
+
   const initScript = `
 cp /config/openclaw.json /home/node/.openclaw/openclaw.json
 chmod 644 /home/node/.openclaw/openclaw.json
@@ -270,8 +445,7 @@ mkdir -p /home/node/.openclaw/skills
 mkdir -p /home/node/.openclaw/cron
 mkdir -p /home/node/.openclaw/workspace-${id}
 if [ ! -f /home/node/.openclaw/workspace-${id}/AGENTS.md ]; then
-  cp /agents/AGENTS.md /home/node/.openclaw/workspace-${id}/AGENTS.md 2>/dev/null || true
-  cp /agents/agent.json /home/node/.openclaw/workspace-${id}/agent.json 2>/dev/null || true
+${copyLines}
 fi
 chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
 chmod -R g=u /home/node/.openclaw 2>/dev/null || true
@@ -287,8 +461,8 @@ echo "Config initialized"
       labels: {
         app: "openclaw",
         "app.kubernetes.io/managed-by": "openclaw-installer",
-        "openclaw.prefix": config.prefix,
-        "openclaw.agent": config.agentName,
+        "openclaw.prefix": config.prefix.toLowerCase(),
+        "openclaw.agent": config.agentName.toLowerCase(),
       },
     },
     spec: {
@@ -432,6 +606,9 @@ export class KubernetesDeployer implements Deployer {
 
     log(`Deploying OpenClaw to namespace: ${ns}`);
 
+    // Load workspace files (prefers user-customized from ~/.openclaw-installer/agents/)
+    const { files: workspaceFiles } = loadWorkspaceFiles(config, log);
+
     // 1. Namespace
     await applyNamespace(core, ns, log);
 
@@ -454,8 +631,8 @@ export class KubernetesDeployer implements Deployer {
       log,
     );
 
-    // 4. ConfigMap (agent)
-    const agentCm = agentConfigMapManifest(ns, config);
+    // 4. ConfigMap (agent workspace files)
+    const agentCm = agentConfigMapManifest(ns, config, workspaceFiles);
     await applyResource(
       () => core.readNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }),
       () => core.createNamespacedConfigMap({ namespace: ns, body: agentCm }),

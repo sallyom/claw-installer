@@ -329,18 +329,95 @@ export class LocalDeployer implements Deployer {
     // Escape single quotes for shell embedding
     const esc = (s: string) => s.replace(/'/g, "'\\''");
 
+    const displayName = config.agentDisplayName || config.agentName;
+
+    const soulMd = `# SOUL.md - Who You Are
+
+You are ${displayName}. You're not a chatbot. You're a capable,
+opinionated assistant who earns trust through competence.
+
+## Core Truths
+- Just answer. Lead with the point.
+- Have opinions. Commit when the evidence supports it.
+- Call it like you see it. Direct beats polite.
+- Be resourceful before asking. Try, then ask.
+
+## Boundaries
+- Private things stay private.
+- When in doubt, ask before acting externally.
+- Send complete replies. Do not leave work half-finished.
+
+## Style
+- Keep information tight. Let personality take up the space.
+- Humor: dry wit and understatement, not silliness.
+- Be friendly and welcoming but never obsequious.
+
+## Continuity
+These files are memory. If you change this file, tell the user.`;
+
+    const identityMd = `# IDENTITY.md - Who Am I?
+
+- **Name:** ${displayName}
+- **ID:** ${agentId}
+- **Description:** AI assistant on the ${config.prefix} OpenClaw instance`;
+
+    const toolsMd = `# TOOLS.md - Environment & Tools
+
+## Secrets and Config
+- Workspace .env: ~/.openclaw/workspace-${agentId}/.env
+- NEVER cat, echo, or display .env contents
+- Source .env silently, then use variables in commands
+
+## Skills
+Check the skills directory for installed skills:
+\\\`ls ~/.openclaw/skills/\\\`
+
+Each skill has a SKILL.md with usage instructions.`;
+
+    const userMd = `# USER.md - Instance Owner
+
+- **Owner prefix:** ${config.prefix}
+- **Instance:** OpenClaw (local)
+
+This is a personal OpenClaw instance.`;
+
+    const heartbeatMd = `# HEARTBEAT.md - Health Checks
+
+## Every Heartbeat
+- Verify workspace files are present and readable
+- Check that skills directory exists
+
+## Reporting
+Heartbeat turns should usually end with NO_REPLY unless there is
+something that requires the user's attention.`;
+
+    const memoryMd = `# MEMORY.md - Learned Preferences
+
+## User Preferences
+*(populated through conversation)*
+
+## Operational Lessons
+*(populated through experience)*`;
+
     const initScript = [
       // Write openclaw.json only if missing (don't overwrite live config)
       `test -f /home/node/.openclaw/openclaw.json || echo '${esc(ocConfig)}' > /home/node/.openclaw/openclaw.json`,
       // Create workspace directory
       `mkdir -p '${workspaceDir}'`,
+      // Create skills directory
+      `mkdir -p /home/node/.openclaw/skills`,
       // Write AGENTS.md (always update — lets user change agent name/display on re-deploy)
       `cat > '${workspaceDir}/AGENTS.md' << 'AGENTSEOF'\n${agentsMd}\nAGENTSEOF`,
       // Write agent.json
       `cat > '${workspaceDir}/agent.json' << 'JSONEOF'\n${agentJson}\nJSONEOF`,
-      // Create skills directory
-      `mkdir -p /home/node/.openclaw/skills`,
-      // If user provided agent source files via mount, copy them in
+      // Write workspace files only on first deploy (don't overwrite user edits)
+      `test -f '${workspaceDir}/SOUL.md' || cat > '${workspaceDir}/SOUL.md' << 'SOULEOF'\n${soulMd}\nSOULEOF`,
+      `test -f '${workspaceDir}/IDENTITY.md' || cat > '${workspaceDir}/IDENTITY.md' << 'IDEOF'\n${identityMd}\nIDEOF`,
+      `test -f '${workspaceDir}/TOOLS.md' || cat > '${workspaceDir}/TOOLS.md' << 'TOOLSEOF'\n${toolsMd}\nTOOLSEOF`,
+      `test -f '${workspaceDir}/USER.md' || cat > '${workspaceDir}/USER.md' << 'USEREOF'\n${userMd}\nUSEREOF`,
+      `test -f '${workspaceDir}/HEARTBEAT.md' || cat > '${workspaceDir}/HEARTBEAT.md' << 'HBEOF'\n${heartbeatMd}\nHBEOF`,
+      `test -f '${workspaceDir}/MEMORY.md' || cat > '${workspaceDir}/MEMORY.md' << 'MEMEOF'\n${memoryMd}\nMEMEOF`,
+      // If user provided agent source files via mount, copy them in (overrides defaults)
       `if [ -d /tmp/agent-source/agents ]; then cp -r /tmp/agent-source/agents/* /home/node/.openclaw/ 2>/dev/null || true; fi`,
       `if [ -d /tmp/agent-source/skills ]; then cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
     ].join(" && ");
@@ -376,12 +453,25 @@ export class LocalDeployer implements Deployer {
     try {
       const hostAgentsDir = join(homedir(), ".openclaw-installer", "agents", `workspace-${agentId}`);
       await mkdir(hostAgentsDir, { recursive: true });
-      const hostAgentsMd = join(hostAgentsDir, "AGENTS.md");
-      const hostAgentJson = join(hostAgentsDir, "agent.json");
-      // Only write if not already customized by the user
-      if (!existsSync(hostAgentsMd)) {
-        await writeFile(hostAgentsMd, agentsMd);
-        await writeFile(hostAgentJson, agentJson);
+      const filesToSave: Record<string, string> = {
+        "AGENTS.md": agentsMd,
+        "agent.json": agentJson,
+        "SOUL.md": soulMd,
+        "IDENTITY.md": identityMd,
+        "TOOLS.md": toolsMd,
+        "USER.md": userMd,
+        "HEARTBEAT.md": heartbeatMd,
+        "MEMORY.md": memoryMd,
+      };
+      let saved = false;
+      for (const [name, content] of Object.entries(filesToSave)) {
+        const hostPath = join(hostAgentsDir, name);
+        if (!existsSync(hostPath)) {
+          await writeFile(hostPath, content);
+          saved = true;
+        }
+      }
+      if (saved) {
         log(`Agent files saved to ${hostAgentsDir} (edit and re-deploy to customize)`);
       }
     } catch {
