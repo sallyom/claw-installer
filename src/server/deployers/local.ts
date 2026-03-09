@@ -21,7 +21,7 @@ import {
   type ContainerRuntime,
 } from "../services/container.js";
 
-const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
+const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
 const DEFAULT_PORT = 18789;
 
 /**

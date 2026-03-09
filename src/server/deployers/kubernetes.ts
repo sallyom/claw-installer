@@ -9,7 +9,7 @@ import type {
   LogCallback,
 } from "./types.js";
 
-const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
+const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
 
 function namespaceName(config: DeployConfig): string {
   return config.namespace || `${config.prefix}-${config.agentName}-openclaw`;
