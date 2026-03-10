@@ -226,18 +226,25 @@ export default function DeployForm({ onDeployStarted }: Props) {
     <div>
       {/* Mode selector */}
       <div className="mode-grid">
-        {MODES.map((m) => (
-          <div
-            key={m.id}
-            className={`mode-card ${mode === m.id ? "selected" : ""} ${m.disabled ? "disabled" : ""}`}
-            onClick={() => !m.disabled && setMode(m.id)}
-            style={m.disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
-          >
-            <div className="mode-icon">{m.icon}</div>
-            <div className="mode-title">{m.title}</div>
-            <div className="mode-desc">{m.desc}</div>
-          </div>
-        ))}
+        {MODES.map((m) => {
+          const isSelected = mode === m.id;
+          return (
+            <div
+              key={m.id}
+              className={`mode-card ${isSelected ? "selected" : ""} ${m.disabled ? "disabled" : ""}`}
+              onClick={() => !m.disabled && setMode(m.id)}
+              style={m.disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+            >
+              <div className="mode-radio">
+                <span className={`radio-dot ${isSelected ? "checked" : ""}`} />
+              </div>
+              <div className="mode-icon">{m.icon}</div>
+              <div className="mode-title">{m.title}</div>
+              <div className="mode-desc">{m.desc}</div>
+              {isSelected && <div className="mode-selected-badge">Selected</div>}
+            </div>
+          );
+        })}
       </div>
 
       {mode === "kubernetes" && (

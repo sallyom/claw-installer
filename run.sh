@@ -86,13 +86,15 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
   # Extract app from container image (or use local source if available)
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   if [ -f "$SCRIPT_DIR/package.json" ] && [ -d "$SCRIPT_DIR/node_modules" ]; then
-    # Running from cloned repo with deps installed
+    # Running from cloned repo with deps installed — rebuild to pick up source changes
     APP_DIR="$SCRIPT_DIR"
+    info "Building from source..."
+    (cd "$APP_DIR" && npm run build)
   elif [ -f "$SCRIPT_DIR/package.json" ] && [ ! -d "$SCRIPT_DIR/node_modules" ]; then
     # Running from cloned repo, need to install deps
     APP_DIR="$SCRIPT_DIR"
     info "Installing dependencies..."
-    (cd "$APP_DIR" && npm install)
+    (cd "$APP_DIR" && npm install && npm run build)
   else
     # Standalone run.sh — extract from container image
     if [ ! -f "$APP_DIR/dist/server/index.js" ]; then
