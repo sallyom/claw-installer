@@ -16,6 +16,7 @@ export interface DeployConfig {
   vertexProvider?: "google" | "anthropic"; // google = Gemini, anthropic = Claude via Vertex
   googleCloudProject?: string;
   googleCloudLocation?: string;
+  gcpServiceAccountJson?: string; // raw JSON content of GCP service account key file
   // Telegram channel
   telegramEnabled?: boolean;
   telegramBotToken?: string;

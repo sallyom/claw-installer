@@ -21,8 +21,19 @@ import {
   type ContainerRuntime,
 } from "../services/container.js";
 
-const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
+const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 const DEFAULT_PORT = 18789;
+const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
+
+function tryParseProjectId(saJson: string): string {
+  try {
+    const parsed = JSON.parse(saJson);
+    return typeof parsed.project_id === "string" ? parsed.project_id : "";
+  } catch {
+    return "";
+  }
+}
+
 
 /**
  * Derive the model ID based on configured provider.
@@ -259,11 +270,16 @@ function buildRunArgs(config: DeployConfig, name: string, port: number): string[
   if (config.vertexEnabled) {
     env.VERTEX_ENABLED = "true";
     env.VERTEX_PROVIDER = config.vertexProvider || "google";
-    if (config.googleCloudProject) {
-      env.GOOGLE_CLOUD_PROJECT = config.googleCloudProject;
+    const projectId = config.googleCloudProject
+      || (config.gcpServiceAccountJson ? tryParseProjectId(config.gcpServiceAccountJson) : "");
+    if (projectId) {
+      env.GOOGLE_CLOUD_PROJECT = projectId;
     }
     if (config.googleCloudLocation) {
       env.GOOGLE_CLOUD_LOCATION = config.googleCloudLocation;
+    }
+    if (config.gcpServiceAccountJson) {
+      env.GOOGLE_APPLICATION_CREDENTIALS = GCP_SA_CONTAINER_PATH;
     }
   }
   if (config.telegramBotToken) {
@@ -449,6 +465,22 @@ something that requires the user's attention.`;
     }
     log(`Default agent provisioned: ${config.agentDisplayName || config.agentName} (${agentId})`);
 
+    // Write GCP SA JSON into volume as a separate step (avoids heredoc/shell escaping issues)
+    if (config.gcpServiceAccountJson) {
+      const b64 = Buffer.from(config.gcpServiceAccountJson).toString("base64");
+      const saScript = `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH}`;
+      const saResult = await runCommand(runtime, [
+        "run", "--rm",
+        "-v", `${vol}:/home/node/.openclaw`,
+        image, "sh", "-c", saScript,
+      ], log);
+      if (saResult.code !== 0) {
+        log("WARNING: Failed to write GCP SA JSON to volume");
+      } else {
+        log("GCP service account key written to volume");
+      }
+    }
+
     // Save agent files to host so user can edit and re-deploy
     try {
       const hostAgentsDir = join(homedir(), ".openclaw-installer", "agents", `workspace-${agentId}`);
@@ -613,11 +645,16 @@ something that requires the user's attention.`;
       if (config.vertexEnabled) {
         lines.push(`VERTEX_ENABLED=true`);
         lines.push(`VERTEX_PROVIDER=${config.vertexProvider || "google"}`);
-        if (config.googleCloudProject) {
-          lines.push(`GOOGLE_CLOUD_PROJECT=${config.googleCloudProject}`);
+        const projectId = config.googleCloudProject
+          || (config.gcpServiceAccountJson ? tryParseProjectId(config.gcpServiceAccountJson) : "");
+        if (projectId) {
+          lines.push(`GOOGLE_CLOUD_PROJECT=${projectId}`);
         }
         if (config.googleCloudLocation) {
           lines.push(`GOOGLE_CLOUD_LOCATION=${config.googleCloudLocation}`);
+        }
+        if (config.gcpServiceAccountJson) {
+          lines.push(`GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`);
         }
       }
       if (config.agentSourceDir) {
