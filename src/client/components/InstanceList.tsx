@@ -130,6 +130,13 @@ export default function InstanceList() {
     setActing(null);
   };
 
+  const handleRedeploy = async (id: string) => {
+    setActing(id);
+    await fetch(`/api/instances/${id}/redeploy`, { method: "POST" });
+    await fetchInstances();
+    setActing(null);
+  };
+
   const handleDeleteData = async (id: string, mode?: string) => {
     if (
       !confirm(
@@ -272,6 +279,16 @@ export default function InstanceList() {
                       {activePanel === "logs" ? "Hide" : "Logs"}
                     </button>
                   </>
+                )}
+                {isK8s && (isRunning || isDeploying || isError) && (
+                  <button
+                    className="btn btn-ghost"
+                    disabled={isActing}
+                    onClick={() => handleRedeploy(inst.id)}
+                    title="Update agent files from ~/.openclaw-installer/agents/ and restart pod"
+                  >
+                    Re-deploy
+                  </button>
                 )}
                 {isStopped && (
                   <button

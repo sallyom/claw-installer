@@ -23,8 +23,16 @@ function containerToInstance(c: DiscoveredContainer): DeployResult {
   const agent = c.labels["openclaw.agent"] || "";
 
   let port = 18789;
-  const portMatch = String(c.ports).match(/(\d+)->18789/);
-  if (portMatch) port = parseInt(portMatch[1], 10);
+  const portsStr = String(c.ports);
+  // Docker format: "8080->18789/tcp"
+  const portMatch = portsStr.match(/(\d+)->18789/);
+  if (portMatch) {
+    port = parseInt(portMatch[1], 10);
+  } else {
+    // Podman JSON format: [{"host_port":8080,"container_port":18789,...}]
+    const hostPortMatch = portsStr.match(/"host_port"\s*:\s*(\d+)/);
+    if (hostPortMatch) port = parseInt(hostPortMatch[1], 10);
+  }
 
   return {
     id: c.name,
@@ -175,6 +183,31 @@ router.post("/:id/stop", async (req, res) => {
   await deployer.stop(instance, log);
   sendStatus(instance.id, "stopped");
   res.json({ status: "stopped" });
+});
+
+// Re-deploy: update agent files and restart (K8s: update ConfigMap + restart pod, Local: copy files + restart container)
+router.post("/:id/redeploy", async (req, res) => {
+  const instance = await findInstance(req.params.id);
+  if (!instance) {
+    res.status(404).json({ error: "Instance not found" });
+    return;
+  }
+
+  if (instance.mode !== "kubernetes") {
+    res.status(400).json({ error: "Use Stop/Start for local instances — agent files are synced automatically on Start" });
+    return;
+  }
+
+  const log = createLogCallback(instance.id);
+  try {
+    await k8sDeployer.redeploy(instance, log);
+    sendStatus(instance.id, "running");
+    res.json({ status: "redeploying" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log(`ERROR: ${message}`);
+    res.status(500).json({ error: message });
+  }
 });
 
 // Get gateway token from running container or K8s secret
@@ -438,13 +471,13 @@ router.delete("/:id", async (req, res) => {
 });
 
 /**
- * Read saved .env file from ~/.openclaw-installer/<dir>/.env
+ * Read saved .env file from ~/.openclaw-installer/local/<dir>/.env
  * to reconstruct deploy config for stopped instances.
  */
 async function readSavedConfig(containerName: string): Promise<Record<string, string>> {
   const vars: Record<string, string> = {};
   try {
-    const envPath = join(homedir(), ".openclaw-installer", containerName, ".env");
+    const envPath = join(homedir(), ".openclaw-installer", "local", containerName, ".env");
     const content = await readFile(envPath, "utf8");
     for (const line of content.split("\n")) {
       if (line.startsWith("#") || !line.includes("=")) continue;
@@ -490,6 +523,12 @@ async function findInstance(name: string): Promise<DeployResult | null> {
           openaiApiKey: savedVars.OPENAI_API_KEY || undefined,
           agentModel: savedVars.AGENT_MODEL || undefined,
           modelEndpoint: savedVars.MODEL_ENDPOINT || undefined,
+          vertexEnabled: savedVars.VERTEX_ENABLED === "true" || undefined,
+          vertexProvider: (savedVars.VERTEX_PROVIDER as "google" | "anthropic") || undefined,
+          googleCloudProject: savedVars.GOOGLE_CLOUD_PROJECT || undefined,
+          googleCloudLocation: savedVars.GOOGLE_CLOUD_LOCATION || undefined,
+          // SA JSON is on the volume — set a sentinel so buildRunArgs sets GOOGLE_APPLICATION_CREDENTIALS
+          gcpServiceAccountJson: savedVars.GOOGLE_APPLICATION_CREDENTIALS ? "(on-volume)" : undefined,
           telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
           telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
         },

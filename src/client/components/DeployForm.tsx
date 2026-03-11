@@ -223,7 +223,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
     e.target.value = "";
   };
 
-  const isValid = config.prefix && config.agentName
+  const isValid = config.agentName
     && (mode !== "kubernetes" || defaults?.k8sAvailable);
 
   return (
@@ -300,20 +300,6 @@ export default function DeployForm({ onDeployStarted }: Props) {
 
         <div className="form-row">
           <div className="form-group">
-            <label>{mode === "local" ? "Name Prefix" : "Namespace Prefix"}</label>
-            <input
-              type="text"
-              placeholder="e.g., sally"
-              value={config.prefix}
-              onChange={(e) => update("prefix", e.target.value)}
-            />
-            <div className="hint">
-              {mode === "local"
-                ? "Used for container and volume naming (e.g., openclaw-sally-lynx)"
-                : "Creates <prefix>-openclaw namespace in the cluster"}
-            </div>
-          </div>
-          <div className="form-group">
             <label>Agent Name</label>
             <input
               type="text"
@@ -322,6 +308,21 @@ export default function DeployForm({ onDeployStarted }: Props) {
               onChange={(e) => update("agentName", e.target.value)}
             />
             <div className="hint">Your agent's identity</div>
+          </div>
+          <div className="form-group">
+            <label>Owner Prefix <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>(optional)</span></label>
+            <input
+              type="text"
+              placeholder={defaults?.prefix || "username"}
+              value={config.prefix}
+              onChange={(e) => update("prefix", e.target.value)}
+            />
+            <div className="hint">
+              Defaults to your OS username ({defaults?.prefix || "..."}).
+              Used in naming: {mode === "local"
+                ? `openclaw-${config.prefix || defaults?.prefix || "user"}-${config.agentName || "agent"}`
+                : `${config.prefix || defaults?.prefix || "user"}-${config.agentName || "agent"}-openclaw`}
+            </div>
           </div>
         </div>
 
@@ -355,12 +356,12 @@ export default function DeployForm({ onDeployStarted }: Props) {
             <input
               type="text"
               autoComplete="off"
-              placeholder={`${config.prefix || "prefix"}-${config.agentName || "agent"}-openclaw`}
+              placeholder={`${config.prefix || defaults?.prefix || "user"}-${config.agentName || "agent"}-openclaw`}
               value={config.namespace || ""}
               onChange={(e) => setConfig((prev) => ({ ...prev, namespace: e.target.value }))}
             />
             <div className="hint">
-              Leave blank to auto-generate (e.g., <code>{config.prefix || "prefix"}-{config.agentName || "agent"}-openclaw</code>)
+              Leave blank to auto-generate (e.g., <code>{config.prefix || defaults?.prefix || "user"}-{config.agentName || "agent"}-openclaw</code>)
             </div>
           </div>
         )}

@@ -51,7 +51,7 @@ async function oauthConfigSecret(ns: string): Promise<k8s.V1Secret> {
     const tokenRequest: k8s.AuthenticationV1TokenRequest = {
       apiVersion: "authentication.k8s.io/v1",
       kind: "TokenRequest",
-      spec: { expirationSeconds: 365 * 24 * 3600 }, // 1 year
+      spec: { audiences: [], expirationSeconds: 365 * 24 * 3600 }, // 1 year
     };
     const result = await core.createNamespacedServiceAccountToken({
       name: "openclaw-oauth-proxy",
@@ -89,12 +89,14 @@ function tryParseProjectId(saJson: string): string {
 }
 
 function namespaceName(config: DeployConfig): string {
-  const ns = config.namespace || `${config.prefix}-${config.agentName}-openclaw`;
+  const prefix = config.prefix || "openclaw";
+  const ns = config.namespace || `${prefix}-${config.agentName}-openclaw`;
   return ns.toLowerCase();
 }
 
 function agentId(config: DeployConfig): string {
-  return `${config.prefix}_${config.agentName}`;
+  const prefix = config.prefix || "openclaw";
+  return `${prefix}_${config.agentName}`;
 }
 
 function generateToken(): string {
@@ -249,7 +251,7 @@ function buildIdentityMd(config: DeployConfig): string {
 
 - **Name:** ${displayName}
 - **ID:** ${id}
-- **Description:** AI assistant on the ${config.prefix} OpenClaw instance
+- **Description:** AI assistant on this OpenClaw instance
 `;
 }
 
@@ -279,7 +281,7 @@ function buildUserMd(config: DeployConfig): string {
   return `# USER.md - Instance Owner
 
 - **Namespace:** ${ns}
-- **Owner prefix:** ${config.prefix}
+- **Owner:** ${config.prefix || "owner"}
 - **Instance:** OpenClaw on Kubernetes
 
 This is a personal OpenClaw instance. The namespace owner controls
@@ -552,9 +554,7 @@ mkdir -p /home/node/.openclaw/workspace
 mkdir -p /home/node/.openclaw/skills
 mkdir -p /home/node/.openclaw/cron
 mkdir -p /home/node/.openclaw/workspace-${id}
-if [ ! -f /home/node/.openclaw/workspace-${id}/AGENTS.md ]; then
 ${copyLines}
-fi
 chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
 chmod -R g=u /home/node/.openclaw 2>/dev/null || true
 echo "Config initialized"
@@ -569,7 +569,7 @@ echo "Config initialized"
       labels: {
         app: "openclaw",
         "app.kubernetes.io/managed-by": "openclaw-installer",
-        "openclaw.prefix": config.prefix.toLowerCase(),
+        "openclaw.prefix": (config.prefix || "openclaw").toLowerCase(),
         "openclaw.agent": config.agentName.toLowerCase(),
       },
     },
@@ -861,7 +861,7 @@ export class KubernetesDeployer implements Deployer {
 
     // Save deploy config for re-deploy (strip secrets, keep references)
     try {
-      const configDir = join(homedir(), ".openclaw-installer", ns);
+      const configDir = join(homedir(), ".openclaw-installer", "k8s", ns);
       mkdirSync(configDir, { recursive: true });
       const savedConfig = {
         ...config,
@@ -935,6 +935,75 @@ export class KubernetesDeployer implements Deployer {
     );
 
     log("Deployment scaled to 0. PVC preserved.");
+  }
+
+  /**
+   * Lightweight re-deploy: update agent ConfigMap from local files and
+   * restart the pod. Secrets and other resources are left untouched.
+   */
+  async redeploy(result: DeployResult, log: LogCallback): Promise<void> {
+    const ns = result.config.namespace || result.containerId || "";
+    const core = coreApi();
+    const apps = appsApi();
+
+    log(`Re-deploying agent files to ${ns}...`);
+
+    // Load workspace files from ~/.openclaw-installer/agents/
+    const { files: workspaceFiles, fromHost } = loadWorkspaceFiles(result.config, log);
+    if (!fromHost) {
+      log("No custom agent files found — using generated defaults");
+    }
+
+    // Update the agent ConfigMap
+    const agentCm = agentConfigMapManifest(ns, result.config, workspaceFiles);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: agentCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-agent", namespace: ns, body: agentCm }),
+      "ConfigMap openclaw-agent",
+      log,
+    );
+
+    // Update the init container script to always copy agent files (removes
+    // the "if not exists" guard from older deploys) and restart the pod
+    const id = agentId(result.config);
+    const agentFiles = ["AGENTS.md", "agent.json", "SOUL.md", "IDENTITY.md", "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md"];
+    const copyLines = agentFiles
+      .map((f) => `cp /agents/${f} /home/node/.openclaw/workspace-${id}/${f} 2>/dev/null || true`)
+      .join("\n");
+
+    const initScript = `
+cp /config/openclaw.json /home/node/.openclaw/openclaw.json
+chmod 644 /home/node/.openclaw/openclaw.json
+mkdir -p /home/node/.openclaw/workspace
+mkdir -p /home/node/.openclaw/skills
+mkdir -p /home/node/.openclaw/cron
+mkdir -p /home/node/.openclaw/workspace-${id}
+${copyLines}
+chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
+chmod -R g=u /home/node/.openclaw 2>/dev/null || true
+echo "Config initialized"
+`.trim();
+
+    // Use JSON Patch to update the init container command and restart annotation
+    const patches = [
+      {
+        op: "replace",
+        path: "/spec/template/spec/initContainers/0/command",
+        value: ["sh", "-c", initScript],
+      },
+      {
+        op: "replace",
+        path: "/spec/template/metadata/annotations/openclaw.io~1restart-at",
+        value: new Date().toISOString(),
+      },
+    ];
+    await apps.patchNamespacedDeployment(
+      { name: "openclaw", namespace: ns, body: patches },
+      k8s.setHeaderOptions("Content-Type", k8s.PatchStrategy.JsonPatch),
+    );
+
+    log("Agent files updated and pod restarting");
   }
 
   async teardown(result: DeployResult, log: LogCallback): Promise<void> {

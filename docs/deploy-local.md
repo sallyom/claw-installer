@@ -134,6 +134,16 @@ ssh -L 3000:localhost:3000 user@remote-host
 # Open http://localhost:3000
 ```
 
+## Updating Your Agent
+
+After the initial deploy, your agent files live in `~/.openclaw-installer/agents/workspace-<prefix>_<name>/` on the host. To update a running agent:
+
+1. Edit the files locally (e.g., change `AGENTS.md` to update instructions, `SOUL.md` to change personality)
+2. Go to the **Instances** tab and **Stop** the container
+3. **Start** it again — the installer copies your updated files into the data volume before starting the container
+
+Every Start syncs agent files from the host, so Stop/Start is all you need. No separate re-deploy step is required for local instances.
+
 ## Instance Management
 
 The **Instances** tab discovers all OpenClaw containers via labels and image name. For each instance you can:
@@ -142,14 +152,14 @@ The **Instances** tab discovers all OpenClaw containers via labels and image nam
 - **View run command** — the exact `podman run` command used
 - **Open UI** — link to `http://localhost:<port>`
 - **Stop** — stops and removes the container (volume preserved)
-- **Start** — restarts the container
+- **Start** — syncs agent files from host, then restarts the container
 - **Delete data** — removes the podman volume
 
 ## Host Filesystem
 
 ```
 ~/.openclaw-installer/
-├── agents/                                  # Agent source files (mounted on deploy)
+├── agents/                                  # Shared — agent workspace files
 │   ├── workspace-<prefix>_<name>/
 │   │   ├── AGENTS.md
 │   │   ├── agent.json
@@ -162,12 +172,13 @@ The **Instances** tab discovers all OpenClaw containers via labels and image nam
 │   └── skills/
 │       └── <skill-name>/
 │           └── SKILL.md
-└── openclaw-<prefix>-<name>/                # Per-instance config (auto-saved)
-    ├── .env                                 # Instance variables
-    └── gateway-token                        # Gateway auth token
+└── local/                                   # Local instance configs
+    └── openclaw-<prefix>-<name>/
+        ├── .env                             # Instance variables
+        └── gateway-token                    # Gateway auth token
 ```
 
-Edit files in `agents/workspace-<id>/` and re-deploy to customize your agent. The installer uses your local files when they exist, falling back to generated defaults for anything missing.
+Edit files in `agents/workspace-<id>/`, then Stop and Start the container to push changes. The installer copies your local files into the volume on every Start, falling back to generated defaults for anything missing.
 
 ## Environment Variables
 

@@ -9,7 +9,7 @@ import agentsRoutes from "./routes/agents.js";
 import { detectRuntime } from "./services/container.js";
 import { isClusterReachable, isOpenShift, currentContext } from "./services/k8s.js";
 import { readdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 
 const app = express();
 const server = createServer(app);
@@ -41,22 +41,26 @@ app.get("/api/health", async (_req, res) => {
       hasTelegramToken: !!process.env.TELEGRAM_BOT_TOKEN,
       telegramAllowFrom: process.env.TELEGRAM_ALLOW_FROM || "",
       modelEndpoint: process.env.MODEL_ENDPOINT || "",
-      prefix: process.env.OPENCLAW_PREFIX || "",
+      prefix: process.env.OPENCLAW_PREFIX || userInfo().username,
       image: process.env.OPENCLAW_IMAGE || "",
     },
   });
 });
 
-// List saved instance configs from ~/.openclaw-installer/*/. env
+// List saved instance configs from ~/.openclaw-installer/local/*/.env
+// and ~/.openclaw-installer/k8s/*/deploy-config.json
 app.get("/api/configs", async (_req, res) => {
   const baseDir = join(homedir(), ".openclaw-installer");
+  const configs: Array<{ name: string; type: string; vars: Record<string, string> }> = [];
+
+  // Local instances (.env files)
   try {
-    const entries = await readdir(baseDir, { withFileTypes: true });
-    const configs: Array<{ name: string; vars: Record<string, string> }> = [];
+    const localDir = join(baseDir, "local");
+    const entries = await readdir(localDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       try {
-        const envContent = await readFile(join(baseDir, entry.name, ".env"), "utf8");
+        const envContent = await readFile(join(localDir, entry.name, ".env"), "utf8");
         const vars: Record<string, string> = {};
         for (const line of envContent.split("\n")) {
           const trimmed = line.trim();
@@ -65,15 +69,34 @@ app.get("/api/configs", async (_req, res) => {
           if (eqIdx < 0) continue;
           vars[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
         }
-        configs.push({ name: entry.name, vars });
+        configs.push({ name: entry.name, type: "local", vars });
       } catch {
         // No .env in this directory, skip
       }
     }
-    res.json(configs);
   } catch {
-    res.json([]);
+    // local/ dir may not exist yet
   }
+
+  // K8s instances (deploy-config.json files)
+  try {
+    const k8sDir = join(baseDir, "k8s");
+    const entries = await readdir(k8sDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const configContent = await readFile(join(k8sDir, entry.name, "deploy-config.json"), "utf8");
+        const vars = JSON.parse(configContent);
+        configs.push({ name: entry.name, type: "k8s", vars });
+      } catch {
+        // No deploy-config.json in this directory, skip
+      }
+    }
+  } catch {
+    // k8s/ dir may not exist yet
+  }
+
+  res.json(configs);
 });
 
 // Serve frontend — check both dev (vite build output) and production (Dockerfile) paths

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { v4 as uuid } from "uuid";
 import { readFileSync, existsSync } from "node:fs";
+import { userInfo } from "node:os";
 import type { DeployConfig } from "../deployers/types.js";
 import { LocalDeployer } from "../deployers/local.js";
 import { KubernetesDeployer } from "../deployers/kubernetes.js";
@@ -24,11 +25,16 @@ function getDeployer(mode: string) {
 router.post("/", async (req, res) => {
   const config = req.body as DeployConfig;
 
-  if (!config.mode || !config.agentName || !config.prefix) {
+  if (!config.mode || !config.agentName) {
     res.status(400).json({
-      error: "Missing required fields: mode, agentName, prefix",
+      error: "Missing required fields: mode, agentName",
     });
     return;
+  }
+
+  // Default prefix to OS username
+  if (!config.prefix) {
+    config.prefix = process.env.OPENCLAW_PREFIX || userInfo().username;
   }
 
   // Fall back to server environment for image and API keys

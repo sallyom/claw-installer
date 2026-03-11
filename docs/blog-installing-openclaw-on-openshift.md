@@ -160,7 +160,7 @@ After deployment, open the Route URL printed in the installer logs:
 https://openclaw-alice-myagent-openclaw.apps.your-cluster.example.com
 ```
 
-You'll be redirected to the OpenShift login page. After authenticating, the Control UI asks for your **Gateway Token** — this was printed in the deploy log and saved to `~/.openclaw-installer/<namespace>/gateway-token` on the machine running the installer.
+You'll be redirected to the OpenShift login page. After authenticating, the Control UI asks for your **Gateway Token** — this was printed in the deploy log and saved to `~/.openclaw-installer/k8s/<namespace>/gateway-token` on the machine running the installer.
 
 ## Model providers
 
@@ -176,19 +176,29 @@ The installer supports multiple model providers. Select your provider in the dep
 
 For Vertex AI providers, upload or specify the path to your GCP service account JSON. The installer creates a Kubernetes Secret (`gcp-sa`) and mounts it into the gateway container at `/home/node/gcp/sa.json`.
 
-## Re-deploying
+## Updating your agent
 
-The installer saves your deploy configuration (with secrets redacted) to `~/.openclaw-installer/<namespace>/deploy-config.json`. The gateway token is saved alongside.
+Agent workspace files are saved to `~/.openclaw-installer/agents/workspace-<agentId>/` on the host after the first deploy. To change your agent's personality, instructions, or behavior:
 
-To update your deployment — new image, different model, updated API key — simply fill in the form and deploy to the same namespace. The installer uses create-or-replace logic on every resource, and the Deployment's `openclaw.io/restart-at` annotation forces a pod rollout on every deploy.
+1. Edit the files locally — `AGENTS.md` (instructions and security rules), `SOUL.md` (personality), `IDENTITY.md` (who the agent is), etc.
+2. Go to the **Instances** tab and click **Re-deploy**
 
-Agent workspace files (SOUL.md, IDENTITY.md, etc.) are saved to `~/.openclaw-installer/agents/workspace-<agentId>/` on the host. Edit these files and re-deploy to customize your agent's personality and behavior.
+Re-deploy reads your local files, updates the `openclaw-agent` ConfigMap, and restarts the pod. The init container copies the updated files from the ConfigMap into the PVC on startup.
+
+**Stop/Start vs Re-deploy:** Stop and Start only scale replicas (0 and 1). They do *not* sync agent files from the host. Use Re-deploy when you've changed agent files locally.
+
+## Re-deploying the full configuration
+
+To change deploy-level settings — new image, different model provider, updated API key — fill in the deploy form and deploy to the same namespace. The installer uses create-or-replace logic on every resource, and the Deployment's `openclaw.io/restart-at` annotation forces a pod rollout.
+
+The deploy config (with secrets redacted) is saved to `~/.openclaw-installer/k8s/<namespace>/deploy-config.json`. The gateway token is saved alongside.
 
 ## Managing instances
 
 The installer's **Instances** tab shows all OpenClaw namespaces on your cluster (discovered via the `app.kubernetes.io/managed-by=openclaw-installer` label). For each instance you can:
 
 - **View status** — pod phase, container state, ready/not-ready, restart count
+- **Re-deploy** — updates agent files from host to ConfigMap and restarts the pod
 - **Stop** — scales the deployment to 0 (PVC preserved)
 - **Start** — scales back to 1
 - **Delete** — tears down all resources and deletes the namespace
@@ -208,7 +218,7 @@ From the Instances tab, click Delete on the instance. The installer explicitly d
 
 | What | How |
 |------|-----|
-| Customize your agent | Edit files in `~/.openclaw-installer/agents/workspace-<id>/` and re-deploy |
+| Customize your agent | Edit files in `~/.openclaw-installer/agents/workspace-<id>/` and click Re-deploy |
 | Use Vertex AI with Claude | Upload GCP SA JSON, select Anthropic as the Vertex provider |
 | Run locally first | The installer also supports local podman deployment — select "Local" mode |
 | View example YAMLs | See [`docs/examples/`](examples/) for annotated templates of every resource |

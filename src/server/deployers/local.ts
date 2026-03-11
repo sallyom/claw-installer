@@ -60,7 +60,7 @@ function deriveModel(config: DeployConfig): string {
  * Build the openclaw.json config for a fresh volume.
  */
 function buildOpenClawConfig(config: DeployConfig): string {
-  const agentId = `${config.prefix}_${config.agentName}`;
+  const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
   const model = deriveModel(config);
   const ocConfig: Record<string, unknown> = {
     gateway: {
@@ -118,7 +118,7 @@ function buildOpenClawConfig(config: DeployConfig): string {
  * Build a default AGENTS.md for the agent workspace.
  */
 function buildDefaultAgentsMd(config: DeployConfig): string {
-  const agentId = `${config.prefix}_${config.agentName}`;
+  const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
   const displayName = config.agentDisplayName || config.agentName;
   return `---
 name: ${agentId}
@@ -184,7 +184,7 @@ Do not narrate your investigation step by step.
  * Build agent.json metadata.
  */
 function buildAgentJson(config: DeployConfig): string {
-  const agentId = `${config.prefix}_${config.agentName}`;
+  const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
   const displayName = config.agentDisplayName || config.agentName;
   return JSON.stringify({
     name: agentId,
@@ -199,11 +199,13 @@ function buildAgentJson(config: DeployConfig): string {
 }
 
 function containerName(config: DeployConfig): string {
-  return `openclaw-${config.prefix}-${config.agentName}`.toLowerCase();
+  const prefix = config.prefix || "openclaw";
+  return `openclaw-${prefix}-${config.agentName}`.toLowerCase();
 }
 
 function volumeName(config: DeployConfig): string {
-  return `openclaw-${config.prefix}-${config.agentName}-data`.toLowerCase();
+  const prefix = config.prefix || "openclaw";
+  return `openclaw-${prefix}-${config.agentName}-data`.toLowerCase();
 }
 
 function runCommand(
@@ -249,7 +251,7 @@ function buildRunArgs(config: DeployConfig, name: string, port: number): string[
     name,
     "-p", `${port}:18789`,
     "--label", OPENCLAW_LABELS.managed,
-    "--label", OPENCLAW_LABELS.prefix(config.prefix),
+    "--label", OPENCLAW_LABELS.prefix(config.prefix || "openclaw"),
     "--label", OPENCLAW_LABELS.agent(config.agentName),
   ];
 
@@ -334,7 +336,7 @@ export class LocalDeployer implements Deployer {
     const vol = volumeName(config);
     log("Initializing config volume...");
 
-    const agentId = `${config.prefix}_${config.agentName}`;
+    const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
     const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
 
     // Build init script: write config + workspace files on first deploy
@@ -375,7 +377,7 @@ These files are memory. If you change this file, tell the user.`;
 
 - **Name:** ${displayName}
 - **ID:** ${agentId}
-- **Description:** AI assistant on the ${config.prefix} OpenClaw instance`;
+- **Description:** AI assistant on this OpenClaw instance`;
 
     const toolsMd = `# TOOLS.md - Environment & Tools
 
@@ -392,7 +394,7 @@ Each skill has a SKILL.md with usage instructions.`;
 
     const userMd = `# USER.md - Instance Owner
 
-- **Owner prefix:** ${config.prefix}
+- **Owner:** ${config.prefix || "owner"}
 - **Instance:** OpenClaw (local)
 
 This is a personal OpenClaw instance.`;
@@ -436,7 +438,7 @@ something that requires the user's attention.`;
       // If user provided agent source files via mount, copy them in (overrides defaults)
       `if [ -d /tmp/agent-source/agents ]; then cp -r /tmp/agent-source/agents/* /home/node/.openclaw/ 2>/dev/null || true; fi`,
       `if [ -d /tmp/agent-source/skills ]; then cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
-    ].join(" && ");
+    ].join("\n");
 
     const initArgs = [
       "run", "--rm",
@@ -535,9 +537,36 @@ something that requires the user's attention.`;
   }
 
   async start(result: DeployResult, log: LogCallback): Promise<DeployResult> {
-    const runtime = result.config.containerRuntime ?? "podman";
+    const runtime = result.config.containerRuntime ?? (await detectRuntime());
+    if (!runtime) throw new Error("No container runtime found");
     const name = result.containerId ?? containerName(result.config);
     const port = result.config.port ?? DEFAULT_PORT;
+    const vol = volumeName(result.config);
+    const image = result.config.image || DEFAULT_IMAGE;
+
+    // Copy updated agent files from host into volume before starting
+    const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
+    const agentId = `${result.config.prefix || "openclaw"}_${result.config.agentName}`;
+    const agentSourceDir = result.config.agentSourceDir
+      || (!isContainerized && existsSync(join(homedir(), ".openclaw-installer", "agents"))
+        ? join(homedir(), ".openclaw-installer", "agents")
+        : null);
+
+    if (agentSourceDir && existsSync(join(agentSourceDir, `workspace-${agentId}`))) {
+      log("Updating agent files from host...");
+      const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
+      const copyScript = [
+        `cp /tmp/agent-source/workspace-${agentId}/* '${workspaceDir}/' 2>/dev/null || true`,
+        `if [ -d /tmp/agent-source/skills ]; then mkdir -p /home/node/.openclaw/skills && cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
+      ].join("\n");
+
+      await runCommand(runtime, [
+        "run", "--rm",
+        "-v", `${vol}:/home/node/.openclaw`,
+        "-v", `${agentSourceDir}:/tmp/agent-source:ro`,
+        image, "sh", "-c", copyScript,
+      ], log);
+    }
 
     // Remove old container if it exists (stop may not have fully cleaned up)
     await removeContainer(runtime, name);
@@ -575,7 +604,7 @@ something that requires the user's attention.`;
 
   /**
    * Extract instance info from running container and save to
-   * ~/.openclaw-installer/<name>/ on the host:
+   * ~/.openclaw-installer/local/<name>/ on the host:
    *   - gateway-token (auth token)
    *   - .env (all env vars for the instance, secrets redacted with comment)
    */
@@ -585,7 +614,7 @@ something that requires the user's attention.`;
     config: DeployConfig,
     log: LogCallback,
   ): Promise<void> {
-    const instanceDir = join(homedir(), ".openclaw-installer", name);
+    const instanceDir = join(homedir(), ".openclaw-installer", "local", name);
     try {
       await mkdir(instanceDir, { recursive: true });
     } catch {
@@ -620,7 +649,7 @@ something that requires the user's attention.`;
       const lines = [
         `# OpenClaw instance: ${name}`,
         `# Generated by openclaw-installer`,
-        `OPENCLAW_PREFIX=${config.prefix}`,
+        `OPENCLAW_PREFIX=${config.prefix || ""}`,
         `OPENCLAW_AGENT_NAME=${config.agentName}`,
         `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName || config.agentName}`,
         `OPENCLAW_IMAGE=${config.image || DEFAULT_IMAGE}`,
@@ -673,6 +702,74 @@ something that requires the user's attention.`;
     } catch {
       log("Could not save .env file");
     }
+  }
+
+  /**
+   * Lightweight re-deploy: copy updated agent files from the host into
+   * the data volume and restart the container.
+   */
+  async redeploy(result: DeployResult, log: LogCallback): Promise<void> {
+    const runtime = result.config.containerRuntime ?? (await detectRuntime());
+    if (!runtime) throw new Error("No container runtime found");
+
+    const name = result.containerId ?? containerName(result.config);
+    const vol = volumeName(result.config);
+    const image = result.config.image || DEFAULT_IMAGE;
+    const agentId = `${result.config.prefix || "openclaw"}_${result.config.agentName}`;
+    const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
+
+    const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
+    const agentSourceDir = result.config.agentSourceDir
+      || (!isContainerized && existsSync(join(homedir(), ".openclaw-installer", "agents"))
+        ? join(homedir(), ".openclaw-installer", "agents")
+        : null);
+
+    if (!agentSourceDir) {
+      log("No agent source directory found at ~/.openclaw-installer/agents/");
+      return;
+    }
+
+    log(`Re-deploying agent files from ${agentSourceDir}...`);
+
+    // Copy updated agent files into the volume
+    const copyScript = [
+      `if [ -d /tmp/agent-source/workspace-${agentId} ]; then`,
+      `  cp -v /tmp/agent-source/workspace-${agentId}/* '${workspaceDir}/' 2>/dev/null || true`,
+      `fi`,
+      `if [ -d /tmp/agent-source/skills ]; then`,
+      `  mkdir -p /home/node/.openclaw/skills`,
+      `  cp -rv /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true`,
+      `fi`,
+    ].join("\n");
+
+    const copyResult = await runCommand(runtime, [
+      "run", "--rm",
+      "-v", `${vol}:/home/node/.openclaw`,
+      "-v", `${agentSourceDir}:/tmp/agent-source:ro`,
+      image, "sh", "-c", copyScript,
+    ], log);
+
+    if (copyResult.code !== 0) {
+      throw new Error("Failed to copy agent files to volume");
+    }
+
+    // Restart the container: stop (--rm removes it), then start fresh
+    log("Restarting container...");
+    try {
+      await runCommand(runtime, ["stop", name], log);
+    } catch {
+      // Container may already be stopped
+    }
+    await removeContainer(runtime, name);
+
+    const port = result.config.port ?? DEFAULT_PORT;
+    const runArgs = buildRunArgs(result.config, name, port);
+    const run = await runCommand(runtime, runArgs, log);
+    if (run.code !== 0) {
+      throw new Error("Failed to restart container");
+    }
+
+    log(`Agent files updated and container restarted at http://localhost:${port}`);
   }
 
   async stop(result: DeployResult, log: LogCallback): Promise<void> {

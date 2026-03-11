@@ -5,7 +5,7 @@ export interface DeployConfig {
   // Common
   agentName: string;
   agentDisplayName: string;
-  prefix: string;
+  prefix?: string;
   // Model provider (all optional — without them, agents use in-cluster model)
   anthropicApiKey?: string;
   openaiApiKey?: string;

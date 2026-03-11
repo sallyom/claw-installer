@@ -72,7 +72,14 @@ HEARTBEAT.md    # Health check behavior
 MEMORY.md       # Learned preferences (populated over time)
 ```
 
-Edit these files and re-deploy to customize your agent's behavior. The installer uses your local files when they exist, falling back to generated defaults for anything missing.
+Edit these files locally, then push the changes to your running instance:
+
+| Deploy target | How to update agent files |
+|---------------|--------------------------|
+| **Local (podman/docker)** | Edit files in `~/.openclaw-installer/agents/workspace-<id>/`, then **Stop** and **Start** the container from the Instances tab. The installer copies your local files into the volume on every Start. |
+| **Kubernetes / OpenShift** | Edit files in `~/.openclaw-installer/agents/workspace-<id>/`, then click **Re-deploy** from the Instances tab. This updates the ConfigMap from your local files and restarts the pod. A plain Stop/Start only scales replicas — it does *not* sync files from the host. |
+
+The installer uses your local files when they exist, falling back to generated defaults for anything missing.
 
 ## Architecture
 
@@ -147,6 +154,7 @@ claw-installer/
 | `/api/instances` | GET | List all discovered instances |
 | `/api/instances/:name/start` | POST | Start a stopped instance |
 | `/api/instances/:name/stop` | POST | Stop and remove container (volume preserved) |
+| `/api/instances/:name/redeploy` | POST | Update agent ConfigMap and restart pod (K8s only) |
 | `/api/instances/:name/token` | GET | Get the gateway auth token |
 | `/api/instances/:name/command` | GET | Get the run command |
 | `/api/instances/:name/data` | DELETE | Delete the data volume |
