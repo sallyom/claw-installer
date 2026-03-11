@@ -26,7 +26,7 @@ OpenClaw is a single-container deployment (plus an oauth-proxy sidecar on OpenSh
 | `pvc.yaml` | 10Gi volume for all persistent state |
 | `configmap-openclaw.yaml` | Main `openclaw.json` configuration |
 | `configmap-agent.yaml` | Agent workspace files (AGENTS.md, SOUL.md, etc.) |
-| `secrets.yaml` | Gateway token, API keys, and GCP SA JSON |
+| `secrets.yaml` | Gateway token, API keys, and GCP credentials JSON |
 | `deployment.yaml` | Full pod spec: init container, oauth-proxy sidecar, gateway |
 
 Resources marked "OpenShift only" are skipped on plain Kubernetes clusters. The installer detects OpenShift at deploy time and adjusts accordingly.

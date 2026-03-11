@@ -17,7 +17,7 @@ This includes:
 
 - **GCP Project ID** field
 - **GCP Region** field
-- **GCP Service Account Key** (file upload or typed path)
+- **Google Cloud Credentials (JSON)** (file upload or typed path)
 
 ### Layer 2: Saved instance config
 

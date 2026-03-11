@@ -98,7 +98,7 @@ The installer UI presents a deploy form with these fields:
 | **Owner prefix** | *(optional)* | Defaults to your OS username. Combined with agent name for the namespace: `alice-myagent-openclaw` |
 | **Image** | `quay.io/sallyom/openclaw:latest` | Container image to deploy |
 | **API key** | *(your provider key)* | For Anthropic, OpenAI, or other providers |
-| **GCP SA JSON** | *(file upload or path)* | For Vertex AI — project ID is auto-extracted |
+| **Google Cloud Credentials (JSON)** | *(file upload or path)* | For Vertex AI — project ID is auto-extracted |
 
 For Vertex AI with Anthropic models, upload your GCP service account JSON file. The installer extracts the `project_id` automatically and sets the right environment variables.
 
@@ -170,7 +170,7 @@ The installer supports multiple model providers. Select your provider in the dep
 |----------|---------------|---------------|
 | Anthropic | `anthropic/claude-sonnet-4-6` | API key |
 | OpenAI | `openai/gpt-5` | API key |
-| Google Vertex AI | `google-vertex/gemini-3.1-pro` | GCP service account JSON |
+| Google Vertex AI | `google-vertex/gemini-2.5-pro` | GCP service account JSON |
 | Claude via Vertex AI | `anthropic-vertex/claude-sonnet-4-6` | GCP service account JSON |
 | Custom endpoint (vLLM, etc.) | Any OpenAI-compatible model | Endpoint URL |
 
@@ -219,7 +219,7 @@ From the Instances tab, click Delete on the instance. The installer explicitly d
 | What | How |
 |------|-----|
 | Customize your agent | Edit files in `~/.openclaw-installer/agents/workspace-<id>/` and click Re-deploy |
-| Use Vertex AI with Claude | Upload GCP SA JSON, select Anthropic as the Vertex provider |
+| Use Vertex AI with Claude | Upload credentials JSON, select Anthropic as the Vertex provider |
 | Run locally first | The installer also supports local podman deployment — select "Local" mode |
 | View example YAMLs | See [`docs/examples/`](examples/) for annotated templates of every resource |
 

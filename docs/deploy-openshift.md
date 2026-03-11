@@ -45,7 +45,7 @@ Open `http://localhost:3000`, pick **Kubernetes**, fill in the form, and hit Dep
 | **Display name** | `My Agent` | Shown in the UI |
 | **Image** | `quay.io/sallyom/openclaw:latest` | Container image |
 | **API key** | *(your key)* | For Anthropic, OpenAI, or other providers |
-| **GCP SA JSON** | *(file upload or path)* | For Vertex AI — project ID auto-extracted |
+| **Google Cloud Credentials (JSON)** | *(file upload or path)* | For Vertex AI — project ID auto-extracted |
 
 ## What Gets Created
 
