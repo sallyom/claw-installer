@@ -568,7 +568,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
                   color: "#e74c3c",
                 }}>
                   Your environment credentials are Application Default Credentials (from <code>gcloud auth</code>),
-                  which are not supported by Gemini on Vertex. Either upload a Service Account key file below,
+                  which are not supported by Gemini on Vertex. Either upload a Service Account JSON below,
                   or switch to Anthropic (Claude via Vertex) which works with Application Default Credentials.
                 </div>
               )}
@@ -583,8 +583,10 @@ export default function DeployForm({ onDeployStarted }: Props) {
                   value={config.googleCloudProject}
                   onChange={(e) => update("googleCloudProject", e.target.value)}
                 />
-                {gcpDefaults?.sources.projectId && config.googleCloudProject === gcpDefaults.projectId && (
+                {gcpDefaults?.sources.projectId && config.googleCloudProject === gcpDefaults.projectId ? (
                   <div className="hint">from {gcpDefaults.sources.projectId}</div>
+                ) : !config.googleCloudProject && (
+                  <div className="hint">Auto-extracted from credentials JSON if not set</div>
                 )}
               </div>
               <div className="form-group">
@@ -606,7 +608,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
             </div>
 
             <div className="form-group">
-              <label>GCP Service Account Key</label>
+              <label>Google Cloud Credentials (JSON)</label>
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 {config.gcpServiceAccountJson ? (
                   <div
@@ -684,10 +686,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
                 )}
               </div>
               <div className="hint">
-                Type a path to a service account key file, or use Browse to upload one.
+                Type a path to a credentials JSON file, or use Browse to upload one.
                 {gcpDefaults?.hasServiceAccountJson && !config.gcpServiceAccountJson && !config.gcpServiceAccountPath
                   && " Leave blank to use credentials detected from environment."}
-                {" "}Project ID is auto-extracted if not set above.
               </div>
             </div>
           </>

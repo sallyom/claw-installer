@@ -51,7 +51,7 @@ See [`docs/examples/`](docs/examples/) for annotated YAMLs showing every resourc
 |----------|---------------|---------------|
 | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-5` | `OPENAI_API_KEY` |
-| Vertex AI (Gemini) | `google-vertex/gemini-3.1-pro` | GCP service account JSON |
+| Vertex AI (Gemini) | `google-vertex/gemini-2.5-pro` | GCP service account JSON |
 | Vertex AI (Claude) | `anthropic-vertex/claude-sonnet-4-6` | GCP service account JSON |
 | Self-hosted (vLLM, etc.) | `openai/default` | `MODEL_ENDPOINT` URL |
 
