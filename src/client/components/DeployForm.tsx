@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 type Mode = "local" | "kubernetes" | "ssh";
+type InferenceProvider = "anthropic" | "openai" | "vertex-anthropic" | "vertex-google" | "custom-endpoint";
 
 interface Props {
   onDeployStarted: (deployId: string) => void;
@@ -58,11 +59,36 @@ const MODES: Array<{ id: Mode; icon: string; title: string; desc: string; disabl
   },
 ];
 
+const PROVIDER_OPTIONS: Array<{ id: InferenceProvider; label: string; desc: string }> = [
+  { id: "anthropic", label: "Anthropic (Direct API)", desc: "Claude models via Anthropic API" },
+  { id: "openai", label: "OpenAI", desc: "GPT models via OpenAI API" },
+  { id: "vertex-anthropic", label: "Google Vertex AI (Claude)", desc: "Claude models via Google Cloud" },
+  { id: "vertex-google", label: "Google Vertex AI (Gemini)", desc: "Gemini models via Google Cloud" },
+  { id: "custom-endpoint", label: "Custom Endpoint", desc: "OpenAI-compatible self-hosted model server" },
+];
+
+const MODEL_DEFAULTS: Record<InferenceProvider, string> = {
+  "anthropic": "claude-sonnet-4-6",
+  "openai": "openai/gpt-5",
+  "vertex-anthropic": "anthropic-vertex/claude-sonnet-4-6",
+  "vertex-google": "google-vertex/gemini-2.5-pro",
+  "custom-endpoint": "",
+};
+
+const MODEL_HINTS: Record<InferenceProvider, string> = {
+  "anthropic": "Examples: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5",
+  "openai": "Examples: openai/gpt-5, openai/gpt-5.3",
+  "vertex-anthropic": "Examples: anthropic-vertex/claude-sonnet-4-6, anthropic-vertex/claude-opus-4-6",
+  "vertex-google": "Examples: google-vertex/gemini-2.5-pro, google-vertex/gemini-2.5-flash",
+  "custom-endpoint": "Specify the model ID served by your endpoint",
+};
+
 export default function DeployForm({ onDeployStarted }: Props) {
   const [mode, setMode] = useState<Mode>("local");
   const [deploying, setDeploying] = useState(false);
   const [defaults, setDefaults] = useState<ServerDefaults | null>(null);
   const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([]);
+  const [inferenceProvider, setInferenceProvider] = useState<InferenceProvider>("anthropic");
   const [config, setConfig] = useState({
     prefix: "",
     agentName: "",
@@ -73,9 +99,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
     agentModel: "",
     modelEndpoint: "",
     port: "18789",
-    // Vertex AI
-    vertexEnabled: false,
-    vertexProvider: "anthropic" as "google" | "anthropic",
+    // Vertex AI / GCP
     googleCloudProject: "",
     googleCloudLocation: "",
     gcpServiceAccountJson: "",
@@ -96,9 +120,11 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const [gcpDefaults, setGcpDefaults] = useState<GcpDefaults | null>(null);
   const [gcpDefaultsFetched, setGcpDefaultsFetched] = useState(false);
 
-  // Fetch GCP defaults when Vertex is first enabled
+  const isVertex = inferenceProvider === "vertex-anthropic" || inferenceProvider === "vertex-google";
+
+  // Fetch GCP defaults when a Vertex provider is first selected
   useEffect(() => {
-    if (!config.vertexEnabled || gcpDefaultsFetched) return;
+    if (!isVertex || gcpDefaultsFetched) return;
     setGcpDefaultsFetched(true);
     fetch("/api/configs/gcp-defaults")
       .then((r) => r.json())
@@ -111,7 +137,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         }));
       })
       .catch(() => {});
-  }, [config.vertexEnabled, gcpDefaultsFetched]);
+  }, [isVertex, gcpDefaultsFetched]);
 
   // Fetch server defaults (detected env vars + K8s availability)
   useEffect(() => {
@@ -130,6 +156,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
         }
         if (d.modelEndpoint) {
           setConfig((prev) => ({ ...prev, modelEndpoint: d.modelEndpoint }));
+          setInferenceProvider("custom-endpoint");
+        } else if (d.hasOpenaiKey && !d.hasAnthropicKey) {
+          setInferenceProvider("openai");
         }
         if (d.image) {
           setConfig((prev) => ({ ...prev, image: d.image }));
@@ -150,6 +179,14 @@ export default function DeployForm({ onDeployStarted }: Props) {
   }, []);
 
   const applyVars = (vars: Record<string, string>) => {
+    // Map legacy VERTEX_ENABLED / VERTEX_PROVIDER to inferenceProvider
+    if (vars.VERTEX_ENABLED === "true") {
+      const vp = vars.VERTEX_PROVIDER || "anthropic";
+      setInferenceProvider(vp === "google" ? "vertex-google" : "vertex-anthropic");
+    } else if (vars.MODEL_ENDPOINT) {
+      setInferenceProvider("custom-endpoint");
+    }
+
     setConfig((prev) => ({
       ...prev,
       prefix: vars.OPENCLAW_PREFIX || prev.prefix,
@@ -159,8 +196,6 @@ export default function DeployForm({ onDeployStarted }: Props) {
       port: vars.OPENCLAW_PORT || prev.port,
       agentModel: vars.AGENT_MODEL || prev.agentModel,
       modelEndpoint: vars.MODEL_ENDPOINT || prev.modelEndpoint,
-      vertexEnabled: vars.VERTEX_ENABLED === "true" || prev.vertexEnabled,
-      vertexProvider: (vars.VERTEX_PROVIDER as "google" | "anthropic") || prev.vertexProvider,
       googleCloudProject: vars.GOOGLE_CLOUD_PROJECT || prev.googleCloudProject,
       googleCloudLocation: vars.GOOGLE_CLOUD_LOCATION || prev.googleCloudLocation,
       agentSourceDir: vars.AGENT_SOURCE_DIR || prev.agentSourceDir,
@@ -191,23 +226,26 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const handleDeploy = async () => {
     setDeploying(true);
     try {
+      const vertexEnabled = isVertex;
+      const vertexProvider = inferenceProvider === "vertex-google" ? "google" : "anthropic";
+
       const body = {
         mode,
         prefix: config.prefix,
         agentName: config.agentName,
         agentDisplayName: config.agentDisplayName || config.agentName,
         image: config.image || undefined,
-        anthropicApiKey: config.anthropicApiKey || undefined,
-        openaiApiKey: config.openaiApiKey || undefined,
+        anthropicApiKey: inferenceProvider === "anthropic" ? config.anthropicApiKey || undefined : undefined,
+        openaiApiKey: inferenceProvider === "openai" ? config.openaiApiKey || undefined : undefined,
         agentModel: config.agentModel || undefined,
-        modelEndpoint: config.modelEndpoint || undefined,
+        modelEndpoint: inferenceProvider === "custom-endpoint" ? config.modelEndpoint || undefined : undefined,
         port: parseInt(config.port, 10) || 18789,
-        vertexEnabled: config.vertexEnabled || undefined,
-        vertexProvider: config.vertexEnabled ? config.vertexProvider : undefined,
-        googleCloudProject: config.vertexEnabled ? config.googleCloudProject : undefined,
-        googleCloudLocation: config.vertexEnabled ? config.googleCloudLocation : undefined,
-        gcpServiceAccountJson: config.vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
-        gcpServiceAccountPath: config.vertexEnabled ? config.gcpServiceAccountPath || undefined : undefined,
+        vertexEnabled: vertexEnabled || undefined,
+        vertexProvider: vertexEnabled ? vertexProvider : undefined,
+        googleCloudProject: vertexEnabled ? config.googleCloudProject : undefined,
+        googleCloudLocation: vertexEnabled ? config.googleCloudLocation : undefined,
+        gcpServiceAccountJson: vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
+        gcpServiceAccountPath: vertexEnabled ? config.gcpServiceAccountPath || undefined : undefined,
         namespace: config.namespace || undefined,
         sshHost: config.sshHost || undefined,
         sshUser: config.sshUser || undefined,
@@ -450,129 +488,78 @@ export default function DeployForm({ onDeployStarted }: Props) {
           </div>
         )}
 
-        <h3 style={{ marginTop: "1.5rem" }}>Model Provider</h3>
+        <h3 style={{ marginTop: "1.5rem" }}>Inference Provider</h3>
 
         <div className="form-group">
-          <label>Anthropic API Key</label>
-          <input
-            type="password"
-            autoComplete="new-password"
-            placeholder={defaults?.hasAnthropicKey ? "(using key from environment)" : "sk-ant-..."}
-            value={config.anthropicApiKey}
-            onChange={(e) => update("anthropicApiKey", e.target.value)}
-          />
+          <label>Provider</label>
+          <select
+            value={inferenceProvider}
+            onChange={(e) => setInferenceProvider(e.target.value as InferenceProvider)}
+          >
+            {PROVIDER_OPTIONS.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
           <div className="hint">
-            {defaults?.hasAnthropicKey
-              ? "Detected ANTHROPIC_API_KEY from server environment — leave blank to use it"
-              : "Optional — without it, agents use Vertex AI or the model endpoint"}
+            {PROVIDER_OPTIONS.find((p) => p.id === inferenceProvider)?.desc}
           </div>
         </div>
 
-        <div className="form-group">
-          <label>OpenAI API Key</label>
-          <input
-            type="password"
-            placeholder={defaults?.hasOpenaiKey ? "(using key from environment)" : "sk-..."}
-            value={config.openaiApiKey}
-            onChange={(e) => update("openaiApiKey", e.target.value)}
-          />
-          <div className="hint">
-            {defaults?.hasOpenaiKey
-              ? "Detected OPENAI_API_KEY from server environment — leave blank to use it"
-              : "Optional — for GPT-5, and other OpenAI models"}
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label>Model</label>
-          <input
-            type="text"
-            placeholder={
-              config.vertexEnabled
-                ? config.vertexProvider === "anthropic"
-                  ? "anthropic-vertex/claude-sonnet-4-6"
-                  : "google-vertex/gemini-2.5-pro"
-                : config.openaiApiKey
-                  ? "openai/gpt-5"
-                  : "claude-sonnet-4-6"
-            }
-            value={config.agentModel}
-            onChange={(e) => update("agentModel", e.target.value)}
-          />
-          <div className="hint">
-            Model ID for the agent (leave blank for auto-detect). Examples: claude-sonnet-4-6, claude-opus-4-6, openai/gpt-5, openai/gpt-5.3
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label>Model Endpoint</label>
-          <input
-            type="text"
-            placeholder="http://vllm.openclaw-llms.svc.cluster.local/v1"
-            value={config.modelEndpoint}
-            onChange={(e) => update("modelEndpoint", e.target.value)}
-          />
-          <div className="hint">
-            OpenAI-compatible endpoint for self-hosted models (leave blank for Anthropic/OpenAI/Vertex)
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        {inferenceProvider === "anthropic" && (
+          <div className="form-group">
+            <label>Anthropic API Key</label>
             <input
-              type="checkbox"
-              checked={config.vertexEnabled}
-              onChange={(e) =>
-                setConfig((prev) => ({ ...prev, vertexEnabled: e.target.checked }))
-              }
-              style={{ width: "auto" }}
+              type="password"
+              autoComplete="new-password"
+              placeholder={defaults?.hasAnthropicKey ? "(using key from environment)" : "sk-ant-..."}
+              value={config.anthropicApiKey}
+              onChange={(e) => update("anthropicApiKey", e.target.value)}
             />
-            Enable Google Vertex AI
-          </label>
-          <div className="hint">
-            Use Claude or Gemini via Google Cloud Vertex AI
-          </div>
-        </div>
-
-        {config.vertexEnabled && (
-          <>
-            <div className="form-group">
-              <label>Vertex Provider</label>
-              <select
-                value={config.vertexProvider}
-                onChange={(e) =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    vertexProvider: e.target.value as "google" | "anthropic",
-                  }))
-                }
-              >
-                <option value="anthropic">Anthropic (Claude via Vertex)</option>
-                <option value="google">Google (Gemini)</option>
-              </select>
-              <div className="hint">
-                {config.vertexProvider === "google"
-                  ? "Agents use google-vertex/gemini-2.5-pro"
-                  : "Agents use anthropic-vertex/claude-sonnet-4-6"}
-              </div>
-              {config.vertexProvider === "google"
-                && gcpDefaults?.credentialType === "authorized_user"
-                && !config.gcpServiceAccountJson && (
-                <div style={{
-                  marginTop: "0.5rem",
-                  padding: "0.5rem 0.75rem",
-                  background: "rgba(231, 76, 60, 0.1)",
-                  border: "1px solid rgba(231, 76, 60, 0.3)",
-                  borderRadius: "6px",
-                  fontSize: "0.85rem",
-                  color: "#e74c3c",
-                }}>
-                  Your environment credentials are Application Default Credentials (from <code>gcloud auth</code>),
-                  which are not supported by Gemini on Vertex. Either upload a Service Account JSON below,
-                  or switch to Anthropic (Claude via Vertex) which works with Application Default Credentials.
-                </div>
-              )}
+            <div className="hint">
+              {defaults?.hasAnthropicKey
+                ? "Detected ANTHROPIC_API_KEY from server environment — leave blank to use it"
+                : "Your Anthropic API key"}
             </div>
+          </div>
+        )}
+
+        {inferenceProvider === "openai" && (
+          <div className="form-group">
+            <label>OpenAI API Key</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder={defaults?.hasOpenaiKey ? "(using key from environment)" : "sk-..."}
+              value={config.openaiApiKey}
+              onChange={(e) => update("openaiApiKey", e.target.value)}
+            />
+            <div className="hint">
+              {defaults?.hasOpenaiKey
+                ? "Detected OPENAI_API_KEY from server environment — leave blank to use it"
+                : "Your OpenAI API key"}
+            </div>
+          </div>
+        )}
+
+        {isVertex && (
+          <>
+            {inferenceProvider === "vertex-google"
+              && gcpDefaults?.credentialType === "authorized_user"
+              && !config.gcpServiceAccountJson && (
+              <div style={{
+                marginBottom: "1rem",
+                padding: "0.5rem 0.75rem",
+                background: "rgba(231, 76, 60, 0.1)",
+                border: "1px solid rgba(231, 76, 60, 0.3)",
+                borderRadius: "6px",
+                fontSize: "0.85rem",
+                color: "#e74c3c",
+              }}>
+                Your environment credentials are Application Default Credentials (from <code>gcloud auth</code>),
+                which are not supported by Gemini on Vertex. Either upload a Service Account JSON below,
+                or switch to Google Vertex AI (Claude) which works with Application Default Credentials.
+              </div>
+            )}
 
             <div className="form-row">
               <div className="form-group">
@@ -593,7 +580,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
                 <label>GCP Region</label>
                 <input
                   type="text"
-                  placeholder={config.vertexProvider === "anthropic" ? "us-east5 (default)" : "us-central1 (default)"}
+                  placeholder={inferenceProvider === "vertex-anthropic" ? "us-east5 (default)" : "us-central1 (default)"}
                   value={config.googleCloudLocation}
                   onChange={(e) => update("googleCloudLocation", e.target.value)}
                 />
@@ -601,7 +588,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
                   <div className="hint">from {gcpDefaults.sources.location}</div>
                 ) : !config.googleCloudLocation && (
                   <div className="hint">
-                    Defaults to {config.vertexProvider === "anthropic" ? "us-east5" : "us-central1"} if not set
+                    Defaults to {inferenceProvider === "vertex-anthropic" ? "us-east5" : "us-central1"} if not set
                   </div>
                 )}
               </div>
@@ -693,6 +680,36 @@ export default function DeployForm({ onDeployStarted }: Props) {
             </div>
           </>
         )}
+
+        {inferenceProvider === "custom-endpoint" && (
+          <div className="form-group">
+            <label>Model Endpoint</label>
+            <input
+              type="text"
+              placeholder="http://vllm.openclaw-llms.svc.cluster.local/v1"
+              value={config.modelEndpoint}
+              onChange={(e) => update("modelEndpoint", e.target.value)}
+            />
+            <div className="hint">
+              OpenAI-compatible endpoint URL for your self-hosted model server
+            </div>
+          </div>
+        )}
+
+        <div className="form-group">
+          <label>Model</label>
+          <input
+            type="text"
+            placeholder={MODEL_DEFAULTS[inferenceProvider] || "model-id"}
+            value={config.agentModel}
+            onChange={(e) => update("agentModel", e.target.value)}
+          />
+          <div className="hint">
+            {config.agentModel
+              ? "Custom model override"
+              : `Leave blank for default${MODEL_DEFAULTS[inferenceProvider] ? ` (${MODEL_DEFAULTS[inferenceProvider]})` : ""}. ${MODEL_HINTS[inferenceProvider]}`}
+          </div>
+        </div>
 
         <h3 style={{ marginTop: "1.5rem" }}>Channels</h3>
 
