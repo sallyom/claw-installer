@@ -1,0 +1,57 @@
+name: Build and Push OpenClaw Image
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Nightly at 3:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile.openclaw'
+  pull_request:
+    paths:
+      - 'Dockerfile.openclaw'
+  workflow_dispatch:
+
+env:
+  IMAGE: quay.io/aicatalyst/openclaw
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set image tags
+        id: tags
+        run: |
+          DATE_TAG="$(date -u +%Y%m%d)"
+          SHA_TAG="${GITHUB_SHA::7}"
+          TAGS="${IMAGE}:latest,${IMAGE}:${DATE_TAG}-${SHA_TAG}"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAGS="${TAGS},${IMAGE}:${GITHUB_REF_NAME}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Quay.io
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.openclaw
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
