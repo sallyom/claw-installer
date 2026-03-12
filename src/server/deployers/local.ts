@@ -252,10 +252,13 @@ function runCommand(
  * stop removes the container — start must re-create it.
  */
 function buildRunArgs(config: DeployConfig, name: string, port: number): string[] {
+  const image = config.image || DEFAULT_IMAGE;
   const runArgs = [
     "run",
     "-d",
     "--rm",  // comment out to keep containers after stop (for debugging)
+    // For mutable tags (:latest/untagged), check for newer image at startup (Fix for #28)
+    ...(shouldAlwaysPull(image) ? ["--pull=newer"] : []),
     "--name",
     name,
     "-p", `${port}:18789`,
@@ -329,24 +332,17 @@ export class LocalDeployer implements Deployer {
 
     const image = config.image || DEFAULT_IMAGE;
 
-    // Always pull mutable tags (:latest or untagged) to avoid stale images (Fix for #28)
-    if (shouldAlwaysPull(image)) {
-      log(`Pulling ${image} (mutable tag — always refreshed)...`);
+    // Pull the image if it doesn't exist locally.
+    // For mutable tags (:latest/untagged), --pull=newer on `podman run` handles
+    // checking for updates efficiently via digest comparison (Fix for #28).
+    try {
+      await execFileAsync(runtime, ["image", "exists", image]);
+      log(`Using local image: ${image}`);
+    } catch {
+      log(`Pulling ${image}...`);
       const pull = await runCommand(runtime, ["pull", image], log);
       if (pull.code !== 0) {
         throw new Error("Failed to pull image");
-      }
-    } else {
-      // For version-pinned tags, use cached image if available
-      try {
-        await execFileAsync(runtime, ["image", "exists", image]);
-        log(`Using local image: ${image}`);
-      } catch {
-        log(`Pulling ${image}...`);
-        const pull = await runCommand(runtime, ["pull", image], log);
-        if (pull.code !== 0) {
-          throw new Error("Failed to pull image");
-        }
       }
     }
 
