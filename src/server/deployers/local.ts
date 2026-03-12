@@ -785,12 +785,20 @@ something that requires the user's attention.`;
     const runtime = (result.config.containerRuntime ?? "podman") as ContainerRuntime;
     const name = result.containerId ?? containerName(result.config);
 
+    console.log(`[teardown] runtime=${runtime}, containerId=${name}, prefix=${result.config.prefix}, agentName=${result.config.agentName}`);
+
     // Stop container if running (--rm removes it)
     await removeContainer(runtime, name);
 
     const vol = volumeName(result.config);
+    console.log(`[teardown] Deleting data volume: ${vol}`);
     log(`Deleting data volume: ${vol}`);
-    await removeVolume(runtime, vol);
+    try {
+      await execFileAsync(runtime, ["volume", "rm", vol]);
+      console.log(`[teardown] Volume removed successfully`);
+    } catch (err) {
+      console.error(`[teardown] Volume removal FAILED:`, err);
+    }
     log("All data deleted.");
   }
 }

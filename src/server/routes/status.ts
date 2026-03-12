@@ -478,16 +478,25 @@ router.get("/:id/logs", async (req, res) => {
 
 // Delete data (remove volume or namespace — the nuclear option)
 router.delete("/:id", async (req, res) => {
+  console.log(`[delete] Request to delete instance: ${req.params.id}`);
   const instance = await findInstance(req.params.id);
   if (!instance) {
+    console.log(`[delete] Instance not found: ${req.params.id}`);
     res.status(404).json({ error: "Instance not found" });
     return;
   }
 
+  console.log(`[delete] Found instance: mode=${instance.mode}, status=${instance.status}, containerId=${instance.containerId}`);
   const deployer = instance.mode === "kubernetes" ? k8sDeployer : localDeployer;
   const log = createLogCallback(instance.id);
-  await deployer.teardown(instance, log);
-  res.json({ status: "deleted" });
+  try {
+    await deployer.teardown(instance, log);
+    console.log(`[delete] Teardown completed for ${req.params.id}`);
+    res.json({ status: "deleted" });
+  } catch (err) {
+    console.error(`[delete] Teardown FAILED for ${req.params.id}:`, err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 /**
