@@ -2,6 +2,7 @@ import * as k8s from "@kubernetes/client-node";
 import { randomBytes } from "node:crypto";
 import { loadKubeConfig } from "../services/k8s.js";
 import type { DeployConfig, LogCallback } from "./types.js";
+import { shouldUseLitellmProxy, litellmModelName, LITELLM_PORT } from "./litellm.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 
@@ -31,6 +32,9 @@ export function generateToken(): string {
 
 export function deriveModel(config: DeployConfig): string {
   if (config.agentModel) return config.agentModel;
+  if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
+    return `litellm/${litellmModelName(config)}`;
+  }
   if (config.vertexEnabled) {
     return config.vertexProvider === "anthropic"
       ? "anthropic-vertex/claude-sonnet-4-6"
@@ -45,17 +49,25 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
   const id = agentId(config);
   const model = deriveModel(config);
   const controlUi: Record<string, unknown> = {
-    dangerouslyAllowHostHeaderOriginFallback: true,
-    dangerouslyDisableDeviceAuth: true,
+    enabled: true,
   };
   if (opts?.routeUrl) {
     controlUi.allowedOrigins = [opts.routeUrl];
+    // Safe: the OAuth proxy already authenticates users via OpenShift login
+    // before requests reach the gateway. Device pairing is redundant here and
+    // actually breaks the flow — the proxy forwards X-Forwarded-For headers
+    // that make the gateway think requests are non-local, triggering an
+    // interactive pairing prompt that can't complete through the proxy.
+    controlUi.dangerouslyDisableDeviceAuth = true;
+  } else {
+    // Plain K8s: accessed via port-forward on localhost
+    controlUi.allowedOrigins = ["http://localhost:18789"];
   }
   const ocConfig: Record<string, unknown> = {
     gateway: {
       mode: "local",
       bind: opts?.routeUrl ? "loopback" : undefined,
-      auth: { token: gatewayToken },
+      auth: { mode: "token", token: gatewayToken },
       controlUi,
     },
     agents: {
@@ -73,6 +85,19 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
         },
       ],
     },
+    ...(shouldUseLitellmProxy(config) ? {
+      models: {
+        providers: {
+          litellm: {
+            baseUrl: `http://localhost:${LITELLM_PORT}/v1`,
+            api: "openai-completions",
+            models: [
+              { id: litellmModelName(config), name: litellmModelName(config) },
+            ],
+          },
+        },
+      },
+    } : {}),
     skills: {
       load: { extraDirs: ["~/.openclaw/skills"], watch: true, watchDebounceMs: 1000 },
     },

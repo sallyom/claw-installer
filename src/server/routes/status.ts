@@ -276,6 +276,16 @@ router.get("/:id/command", async (req, res) => {
   // K8s instance — return useful kubectl commands
   if (instance?.mode === "kubernetes") {
     const ns = instance.config.namespace || instance.containerId || "";
+
+    // Detect if LiteLLM sidecar is running
+    let hasLitellm = false;
+    try {
+      const core = (await import("../services/k8s.js")).coreApi();
+      const podList = await core.listNamespacedPod({ namespace: ns, labelSelector: "app=openclaw" });
+      const pod = podList.items[0];
+      hasLitellm = pod?.spec?.containers?.some((c) => c.name === "litellm") ?? false;
+    } catch { /* ignore */ }
+
     const lines = [
       `# Port-forward to access the gateway locally`,
       `kubectl port-forward svc/openclaw 18789:18789 -n ${ns}`,
@@ -286,6 +296,11 @@ router.get("/:id/command", async (req, res) => {
       `# View gateway logs`,
       `kubectl logs deployment/openclaw -n ${ns} -c gateway -f`,
       ``,
+      ...(hasLitellm ? [
+        `# View LiteLLM proxy logs`,
+        `kubectl logs deployment/openclaw -n ${ns} -c litellm -f`,
+        ``,
+      ] : []),
       `# View init container logs`,
       `kubectl logs deployment/openclaw -n ${ns} -c init-config`,
       ``,
@@ -321,22 +336,62 @@ router.get("/:id/command", async (req, res) => {
     const { promisify: p } = await import("node:util");
     const exec = p(ef);
 
-    const { stdout } = await exec(runtime, ["inspect", "--format", "json", req.params.id]);
+    const containerName = req.params.id;
+    const litellmName = `${containerName}-litellm`;
+    const pod = `${containerName}-pod`;
+
+    // Detect if LiteLLM sidecar is running
+    let hasLitellm = false;
+    let hasPod = false;
+    try {
+      await exec(runtime, ["inspect", litellmName]);
+      hasLitellm = true;
+    } catch { /* no sidecar */ }
+    if (runtime === "podman") {
+      try {
+        await exec(runtime, ["pod", "inspect", pod]);
+        hasPod = true;
+      } catch { /* no pod */ }
+    }
+
+    // Build useful commands section
+    const lines: string[] = [];
+    lines.push(`# Container info`);
+    if (hasPod) {
+      lines.push(`${runtime} pod ps              # list pods`);
+      lines.push(`${runtime} pod inspect ${pod}   # pod details`);
+      lines.push(``);
+    }
+    lines.push(`# Gateway logs`);
+    lines.push(`${runtime} logs -f ${containerName}`);
+    lines.push(``);
+    if (hasLitellm) {
+      lines.push(`# LiteLLM proxy logs`);
+      lines.push(`${runtime} logs -f ${litellmName}`);
+      lines.push(``);
+    }
+    lines.push(`# Stop`);
+    lines.push(`${runtime} stop ${containerName}`);
+    if (hasLitellm) {
+      lines.push(`${runtime} stop ${litellmName}`);
+    }
+    if (hasPod) {
+      lines.push(`${runtime} pod rm -f ${pod}`);
+    }
+    lines.push(``);
+
+    // Also include the reconstructed run command
+    const { stdout } = await exec(runtime, ["inspect", "--format", "json", containerName]);
     const info = JSON.parse(stdout)[0] || JSON.parse(stdout);
     const config = info.Config || {};
     const hostConfig = info.HostConfig || {};
 
-    // Build the command string
     const parts = [runtime, "run", "-d", "--rm"];
+    parts.push("--name", containerName);
 
-    // Name
-    parts.push("--name", req.params.id);
-
-    // Network
     if (hostConfig.NetworkMode === "host") {
       parts.push("--network", "host");
     } else {
-      // Port mappings
       const portBindings = hostConfig.PortBindings || {};
       for (const [containerPort, bindings] of Object.entries(portBindings)) {
         if (Array.isArray(bindings)) {
@@ -349,12 +404,9 @@ router.get("/:id/command", async (req, res) => {
       }
     }
 
-    // Environment (filter out sensitive keys)
     const envList: string[] = config.Env || [];
     for (const e of envList) {
-      // Skip default system env vars
       if (e.startsWith("PATH=") || e.startsWith("HOSTNAME=") || e.startsWith("container=")) continue;
-      // Mask API keys
       if (e.includes("API_KEY=") || e.includes("TOKEN=")) {
         const [key] = e.split("=");
         parts.push("-e", `${key}=***`);
@@ -363,7 +415,6 @@ router.get("/:id/command", async (req, res) => {
       }
     }
 
-    // Volumes
     const mounts = info.Mounts || [];
     for (const m of mounts) {
       if (m.Type === "volume") {
@@ -373,7 +424,6 @@ router.get("/:id/command", async (req, res) => {
       }
     }
 
-    // Labels (openclaw ones only)
     const labels: Record<string, string> = config.Labels || {};
     for (const [k, v] of Object.entries(labels)) {
       if (k.startsWith("openclaw.")) {
@@ -381,16 +431,16 @@ router.get("/:id/command", async (req, res) => {
       }
     }
 
-    // Image
     parts.push(config.Image || c.image);
-
-    // Command (if not default)
     const cmd: string[] = config.Cmd || [];
     if (cmd.length > 0) {
       parts.push(...cmd);
     }
 
-    res.json({ command: parts.join(" \\\n  ") });
+    lines.push(`# Full run command (gateway)`);
+    lines.push(parts.join(" \\\n  "));
+
+    res.json({ command: lines.join("\n") });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
@@ -529,6 +579,7 @@ async function findInstance(name: string): Promise<DeployResult | null> {
           googleCloudLocation: savedVars.GOOGLE_CLOUD_LOCATION || undefined,
           // SA JSON is on the volume — set a sentinel so buildRunArgs sets GOOGLE_APPLICATION_CREDENTIALS
           gcpServiceAccountJson: savedVars.GOOGLE_APPLICATION_CREDENTIALS ? "(on-volume)" : undefined,
+          litellmProxy: savedVars.LITELLM_PROXY === "true" || undefined,
           telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
           telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
         },

@@ -19,10 +19,12 @@ import {
   configMapManifest,
   agentConfigMapManifest,
   gcpSaSecretManifest,
+  litellmConfigMapManifest,
   secretManifest,
   serviceManifest,
   deploymentManifest,
 } from "./k8s-manifests.js";
+import { shouldUseLitellmProxy, generateLitellmMasterKey, generateLitellmConfig } from "./litellm.js";
 
 // Re-export discovery for consumers
 export type { K8sPodInfo, K8sInstance } from "./k8s-discovery.js";
@@ -159,8 +161,25 @@ export class KubernetesDeployer implements Deployer {
       log,
     );
 
+    // 5b. LiteLLM proxy config (when using Vertex via proxy)
+    const useProxy = shouldUseLitellmProxy(config);
+    const litellmMasterKey = useProxy ? generateLitellmMasterKey() : undefined;
+
+    if (useProxy && litellmMasterKey) {
+      log("LiteLLM proxy enabled — GCP credentials will stay in the proxy sidecar");
+      const litellmYaml = generateLitellmConfig(config, litellmMasterKey);
+      const litellmCm = litellmConfigMapManifest(ns, litellmYaml);
+      await applyResource(
+        () => core.readNamespacedConfigMap({ name: "litellm-config", namespace: ns }),
+        () => core.createNamespacedConfigMap({ namespace: ns, body: litellmCm }),
+        () => core.replaceNamespacedConfigMap({ name: "litellm-config", namespace: ns, body: litellmCm }),
+        "ConfigMap litellm-config",
+        log,
+      );
+    }
+
     // 6. Secret
-    const secret = secretManifest(ns, config, gatewayToken);
+    const secret = secretManifest(ns, config, gatewayToken, litellmMasterKey);
     await applyResource(
       () => core.readNamespacedSecret({ name: "openclaw-secrets", namespace: ns }),
       () => core.createNamespacedSecret({ namespace: ns, body: secret }),
@@ -378,6 +397,7 @@ echo "Config initialized"
       { name: "ServiceAccount openclaw-oauth-proxy", fn: () => core.deleteNamespacedServiceAccount({ name: "openclaw-oauth-proxy", namespace: ns }) },
       { name: "ConfigMap openclaw-config", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-config", namespace: ns }) },
       { name: "ConfigMap openclaw-agent", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }) },
+      { name: "ConfigMap litellm-config", fn: () => core.deleteNamespacedConfigMap({ name: "litellm-config", namespace: ns }) },
       { name: "PVC", fn: () => core.deleteNamespacedPersistentVolumeClaim({ name: "openclaw-home-pvc", namespace: ns }) },
     ];
 

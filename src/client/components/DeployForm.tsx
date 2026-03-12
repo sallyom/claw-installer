@@ -116,6 +116,8 @@ export default function DeployForm({ onDeployStarted }: Props) {
     telegramAllowFrom: "",
     // Kubernetes
     namespace: "",
+    // LiteLLM proxy
+    litellmProxy: true,
   });
 
   const [gcpDefaults, setGcpDefaults] = useState<GcpDefaults | null>(null);
@@ -210,6 +212,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
       agentSourceDir: v("AGENT_SOURCE_DIR", "agentSourceDir") || prev.agentSourceDir,
       telegramBotToken: v("TELEGRAM_BOT_TOKEN", "telegramBotToken") || prev.telegramBotToken,
       telegramAllowFrom: v("TELEGRAM_ALLOW_FROM", "telegramAllowFrom") || prev.telegramAllowFrom,
+      litellmProxy: vars.litellmProxy === "false" ? false : prev.litellmProxy,
     }));
   };
 
@@ -255,6 +258,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         googleCloudLocation: vertexEnabled ? config.googleCloudLocation : undefined,
         gcpServiceAccountJson: vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
         gcpServiceAccountPath: vertexEnabled ? config.gcpServiceAccountPath || undefined : undefined,
+        litellmProxy: vertexEnabled ? config.litellmProxy : undefined,
         namespace: config.namespace || undefined,
         sshHost: config.sshHost || undefined,
         sshUser: config.sshUser || undefined,
@@ -690,6 +694,45 @@ export default function DeployForm({ onDeployStarted }: Props) {
                   && " Leave blank to use credentials detected from environment."}
               </div>
             </div>
+
+            <div className="form-group">
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={config.litellmProxy}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, litellmProxy: e.target.checked }))
+                  }
+                  style={{ width: "auto" }}
+                />
+                Use LiteLLM proxy (recommended)
+              </label>
+              <div className="hint">
+                Runs a LiteLLM sidecar that handles Vertex AI authentication.
+                GCP credentials stay in the proxy container and are never exposed to the agent.
+                {!config.litellmProxy && (
+                  <span style={{ color: "#e67e22" }}>
+                    {" "}Disabled: credentials will be passed directly to the agent container.
+                  </span>
+                )}
+              </div>
+              {config.litellmProxy && (
+                <div style={{
+                  marginTop: "0.5rem",
+                  padding: "0.5rem 0.75rem",
+                  background: "rgba(52, 152, 219, 0.1)",
+                  border: "1px solid rgba(52, 152, 219, 0.3)",
+                  borderRadius: "6px",
+                  fontSize: "0.85rem",
+                  color: "var(--text-secondary)",
+                }}>
+                  The first deployment will pull both the OpenClaw image and the LiteLLM proxy
+                  image (<code>ghcr.io/berriai/litellm:main-latest</code>, ~1.5 GB).
+                  This may take several minutes. You can pre-pull
+                  with: <code>{mode === "kubernetes" ? "crictl pull" : "podman pull"} ghcr.io/berriai/litellm:main-latest</code>
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -729,14 +772,20 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Model</label>
           <input
             type="text"
-            placeholder={MODEL_DEFAULTS[inferenceProvider] || "model-id"}
+            placeholder={
+              isVertex && config.litellmProxy
+                ? (inferenceProvider === "vertex-anthropic" ? "claude-sonnet-4-6" : "gemini-2.5-pro")
+                : (MODEL_DEFAULTS[inferenceProvider] || "model-id")
+            }
             value={config.agentModel}
             onChange={(e) => update("agentModel", e.target.value)}
           />
           <div className="hint">
             {config.agentModel
               ? "Custom model override"
-              : `Leave blank for default${MODEL_DEFAULTS[inferenceProvider] ? ` (${MODEL_DEFAULTS[inferenceProvider]})` : ""}. ${MODEL_HINTS[inferenceProvider]}`}
+              : isVertex && config.litellmProxy
+                ? `Leave blank for default (routed through LiteLLM proxy). ${MODEL_HINTS[inferenceProvider]}`
+                : `Leave blank for default${MODEL_DEFAULTS[inferenceProvider] ? ` (${MODEL_DEFAULTS[inferenceProvider]})` : ""}. ${MODEL_HINTS[inferenceProvider]}`}
           </div>
         </div>
 

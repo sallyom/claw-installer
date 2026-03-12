@@ -8,6 +8,7 @@ import {
 } from "./k8s-helpers.js";
 import { oauthProxyContainer } from "./k8s-oauth.js";
 import type { DeployConfig } from "./types.js";
+import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
   return {
@@ -74,7 +75,20 @@ export function gcpSaSecretManifest(ns: string, saJson: string): k8s.V1Secret {
   };
 }
 
-export function secretManifest(ns: string, config: DeployConfig, gatewayToken: string): k8s.V1Secret {
+export function litellmConfigMapManifest(ns: string, configYaml: string): k8s.V1ConfigMap {
+  return {
+    apiVersion: "v1",
+    kind: "ConfigMap",
+    metadata: {
+      name: "litellm-config",
+      namespace: ns,
+      labels: { app: "openclaw" },
+    },
+    data: { "config.yaml": configYaml },
+  };
+}
+
+export function secretManifest(ns: string, config: DeployConfig, gatewayToken: string, litellmMasterKey?: string): k8s.V1Secret {
   const data: Record<string, string> = {
     OPENCLAW_GATEWAY_TOKEN: gatewayToken,
   };
@@ -88,6 +102,7 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
     || (config.gcpServiceAccountJson ? tryParseProjectId(config.gcpServiceAccountJson) : "");
   if (projectId) data.GOOGLE_CLOUD_PROJECT = projectId;
   if (config.googleCloudLocation) data.GOOGLE_CLOUD_LOCATION = config.googleCloudLocation;
+  if (litellmMasterKey) data.LITELLM_MASTER_KEY = litellmMasterKey;
 
   return {
     apiVersion: "v1",
@@ -159,7 +174,17 @@ export function deploymentManifest(ns: string, config: DeployConfig, onOpenShift
     });
   }
 
-  if (config.vertexEnabled) {
+  const useProxy = shouldUseLitellmProxy(config);
+
+  if (config.vertexEnabled && useProxy) {
+    // LiteLLM proxy mode: provider config in openclaw.json points to the sidecar,
+    // just need the API key for authentication
+    envVars.push({
+      name: "LITELLM_API_KEY",
+      valueFrom: { secretKeyRef: { name: "openclaw-secrets", key: "LITELLM_MASTER_KEY", optional: true } },
+    });
+  } else if (config.vertexEnabled) {
+    // Direct Vertex mode (legacy): gateway gets GCP creds directly
     envVars.push({ name: "VERTEX_ENABLED", value: "true" });
     envVars.push({ name: "VERTEX_PROVIDER", value: config.vertexProvider || "anthropic" });
     if (config.gcpServiceAccountJson) {
@@ -270,7 +295,8 @@ echo "Config initialized"
               volumeMounts: [
                 { name: "openclaw-home", mountPath: "/home/node/.openclaw" },
                 { name: "tmp-volume", mountPath: "/tmp" },
-                ...(config.gcpServiceAccountJson
+                // Only mount GCP creds on gateway in direct (non-proxy) mode
+                ...(!useProxy && config.gcpServiceAccountJson
                   ? [{ name: "gcp-sa", mountPath: "/home/node/gcp", readOnly: true }]
                   : []),
               ],
@@ -280,6 +306,39 @@ echo "Config initialized"
                 capabilities: { drop: ["ALL"] },
               },
             },
+            // LiteLLM proxy sidecar: holds GCP creds, exposes OpenAI-compatible API
+            ...(useProxy ? [{
+              name: "litellm",
+              image: config.litellmImage || LITELLM_IMAGE,
+              args: ["--config", "/etc/litellm/config.yaml", "--port", String(LITELLM_PORT)],
+              ports: [{ name: "litellm", containerPort: LITELLM_PORT, protocol: "TCP" as const }],
+              env: [
+                ...(config.gcpServiceAccountJson
+                  ? [{ name: "GOOGLE_APPLICATION_CREDENTIALS", value: "/home/node/gcp/sa.json" }]
+                  : []),
+              ],
+              volumeMounts: [
+                { name: "litellm-config", mountPath: "/etc/litellm", readOnly: true },
+                { name: "litellm-tmp", mountPath: "/tmp" },
+                ...(config.gcpServiceAccountJson
+                  ? [{ name: "gcp-sa", mountPath: "/home/node/gcp", readOnly: true }]
+                  : []),
+              ],
+              resources: {
+                requests: { memory: "512Mi", cpu: "100m" },
+                limits: { memory: "1Gi", cpu: "500m" },
+              },
+              readinessProbe: {
+                httpGet: { path: "/health/readiness", port: LITELLM_PORT as unknown as k8s.IntOrString },
+                initialDelaySeconds: 10,
+                periodSeconds: 10,
+                timeoutSeconds: 5,
+              },
+              securityContext: {
+                allowPrivilegeEscalation: false,
+                capabilities: { drop: ["ALL"] },
+              },
+            }] : []),
           ],
           volumes: [
             { name: "openclaw-home", persistentVolumeClaim: { claimName: "openclaw-home-pvc" } },
@@ -288,6 +347,12 @@ echo "Config initialized"
             { name: "tmp-volume", emptyDir: {} },
             ...(config.gcpServiceAccountJson
               ? [{ name: "gcp-sa", secret: { secretName: "gcp-sa" } }]
+              : []),
+            ...(useProxy
+              ? [
+                  { name: "litellm-config", configMap: { name: "litellm-config" } },
+                  { name: "litellm-tmp", emptyDir: {} },
+                ]
               : []),
             ...(onOpenShift ? [
               { name: "oauth-config", secret: { secretName: "openclaw-oauth-config" } },

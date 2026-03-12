@@ -21,9 +21,20 @@ import {
   type ContainerRuntime,
 } from "../services/container.js";
 
+import {
+  shouldUseLitellmProxy,
+  litellmModelName,
+  generateLitellmMasterKey,
+  generateLitellmConfig,
+  LITELLM_IMAGE,
+  LITELLM_PORT,
+} from "./litellm.js";
+
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 const DEFAULT_PORT = 18789;
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
+const LITELLM_CONFIG_PATH = "/home/node/.openclaw/litellm/config.yaml";
+const LITELLM_KEY_PATH = "/home/node/.openclaw/litellm/master-key";
 
 function tryParseProjectId(saJson: string): string {
   try {
@@ -41,6 +52,9 @@ function tryParseProjectId(saJson: string): string {
 function deriveModel(config: DeployConfig): string {
   if (config.agentModel) {
     return config.agentModel;
+  }
+  if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
+    return `litellm/${litellmModelName(config)}`;
   }
   if (config.vertexEnabled) {
     return config.vertexProvider === "anthropic"
@@ -62,13 +76,18 @@ function deriveModel(config: DeployConfig): string {
 function buildOpenClawConfig(config: DeployConfig): string {
   const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
   const model = deriveModel(config);
+  const port = config.port ?? 18789;
   const ocConfig: Record<string, unknown> = {
     gateway: {
       mode: "local",
+      auth: {
+        mode: "token",
+      },
       controlUi: {
-        // safe: non-root container on localhost, lets control UI trust Host header
-        dangerouslyAllowHostHeaderOriginFallback: true,
-        // safe: local container, no public exposure — skips device pairing
+        enabled: true,
+        allowedOrigins: [`http://localhost:${port}`],
+        // Required for non-loopback bind; safe because the container is only
+        // exposed on localhost via port mapping.
         dangerouslyDisableDeviceAuth: true,
       },
     },
@@ -87,6 +106,19 @@ function buildOpenClawConfig(config: DeployConfig): string {
         },
       ],
     },
+    ...(shouldUseLitellmProxy(config) ? {
+      models: {
+        providers: {
+          litellm: {
+            baseUrl: `http://localhost:${LITELLM_PORT}/v1`,
+            api: "openai-completions",
+            models: [
+              { id: litellmModelName(config), name: litellmModelName(config) },
+            ],
+          },
+        },
+      },
+    } : {}),
     skills: {
       load: {
         extraDirs: ["~/.openclaw/skills"],
@@ -203,6 +235,14 @@ function containerName(config: DeployConfig): string {
   return `openclaw-${prefix}-${config.agentName}`.toLowerCase();
 }
 
+function litellmContainerName(config: DeployConfig): string {
+  return `${containerName(config)}-litellm`;
+}
+
+function podName(config: DeployConfig): string {
+  return `${containerName(config)}-pod`;
+}
+
 function volumeName(config: DeployConfig): string {
   const prefix = config.prefix || "openclaw";
   return `openclaw-${prefix}-${config.agentName}-data`.toLowerCase();
@@ -242,18 +282,39 @@ function runCommand(
  * Used by both deploy() and start() since --rm means
  * stop removes the container — start must re-create it.
  */
-function buildRunArgs(config: DeployConfig, name: string, port: number): string[] {
+function buildRunArgs(
+  config: DeployConfig,
+  runtime: string,
+  name: string,
+  port: number,
+  litellmMasterKey?: string,
+): string[] {
+  const useProxy = shouldUseLitellmProxy(config) && !!litellmMasterKey;
+  const isPodman = runtime === "podman";
+
   const runArgs = [
     "run",
     "-d",
-    "--rm",  // comment out to keep containers after stop (for debugging)
+    "--rm",
     "--name",
     name,
-    "-p", `${port}:18789`,
+  ];
+
+  if (useProxy && isPodman) {
+    // Podman: gateway runs in the same pod as LiteLLM (port is on the pod)
+    runArgs.push("--pod", podName(config));
+  } else if (useProxy) {
+    // Docker: share LiteLLM container's network namespace
+    runArgs.push("--network", `container:${litellmContainerName(config)}`);
+  } else {
+    runArgs.push("-p", `${port}:18789`);
+  }
+
+  runArgs.push(
     "--label", OPENCLAW_LABELS.managed,
     "--label", OPENCLAW_LABELS.prefix(config.prefix || "openclaw"),
     "--label", OPENCLAW_LABELS.agent(config.agentName),
-  ];
+  );
 
   const env: Record<string, string> = {
     HOME: "/home/node",
@@ -269,7 +330,12 @@ function buildRunArgs(config: DeployConfig, name: string, port: number): string[
   if (config.modelEndpoint) {
     env.MODEL_ENDPOINT = config.modelEndpoint;
   }
-  if (config.vertexEnabled) {
+
+  if (config.vertexEnabled && useProxy) {
+    // Proxy mode: gateway talks to LiteLLM via the litellm provider config in openclaw.json
+    env.LITELLM_API_KEY = litellmMasterKey;
+  } else if (config.vertexEnabled) {
+    // Direct Vertex mode (legacy)
     env.VERTEX_ENABLED = "true";
     env.VERTEX_PROVIDER = config.vertexProvider || "anthropic";
     const projectId = config.googleCloudProject
@@ -284,6 +350,7 @@ function buildRunArgs(config: DeployConfig, name: string, port: number): string[
       env.GOOGLE_APPLICATION_CREDENTIALS = GCP_SA_CONTAINER_PATH;
     }
   }
+
   if (config.telegramBotToken) {
     env.TELEGRAM_BOT_TOKEN = config.telegramBotToken;
   }
@@ -295,7 +362,7 @@ function buildRunArgs(config: DeployConfig, name: string, port: number): string[
   runArgs.push("-v", `${volumeName(config)}:/home/node/.openclaw`);
   runArgs.push(config.image || DEFAULT_IMAGE);
 
-  // Pass --bind lan so gateway listens on 0.0.0.0 (required for -p port mapping)
+  // Bind to lan (0.0.0.0) so port mapping works from host into pod/container
   runArgs.push("node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789");
 
   return runArgs;
@@ -483,6 +550,118 @@ something that requires the user's attention.`;
       }
     }
 
+    // Start LiteLLM proxy sidecar if enabled
+    const useProxy = shouldUseLitellmProxy(config);
+    let litellmMasterKey: string | undefined;
+
+    if (useProxy) {
+      log("LiteLLM proxy enabled — GCP credentials will stay in the proxy sidecar");
+      litellmMasterKey = generateLitellmMasterKey();
+      const litellmYaml = generateLitellmConfig(config, litellmMasterKey);
+
+      // Write LiteLLM config + master key into volume
+      const litellmB64 = Buffer.from(litellmYaml).toString("base64");
+      const keyB64 = Buffer.from(litellmMasterKey).toString("base64");
+      const litellmScript = [
+        "mkdir -p /home/node/.openclaw/litellm",
+        `echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH}`,
+        `echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH}`,
+        `chmod 600 ${LITELLM_KEY_PATH}`,
+      ].join(" && ");
+
+      const litellmInitResult = await runCommand(runtime, [
+        "run", "--rm",
+        "-v", `${vol}:/home/node/.openclaw`,
+        image, "sh", "-c", litellmScript,
+      ], log);
+      if (litellmInitResult.code !== 0) {
+        log("WARNING: Failed to write LiteLLM config to volume");
+      }
+
+      // Pull LiteLLM image
+      const litellmImage = config.litellmImage || LITELLM_IMAGE;
+      try {
+        await execFileAsync(runtime, ["image", "exists", litellmImage]);
+        log(`Using local LiteLLM image: ${litellmImage}`);
+      } catch {
+        log(`Pulling LiteLLM image ${litellmImage}...`);
+        const pull = await runCommand(runtime, ["pull", litellmImage], log);
+        if (pull.code !== 0) {
+          throw new Error("Failed to pull LiteLLM image");
+        }
+      }
+
+      // Create pod (podman) or start LiteLLM container first (docker)
+      const litellmName = litellmContainerName(config);
+      const isPodman = runtime === "podman";
+
+      if (isPodman) {
+        // Create a pod with the published port
+        const pod = podName(config);
+        await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+        const podResult = await runCommand(runtime, [
+          "pod", "create",
+          "--name", pod,
+          "-p", `${port}:18789`,
+          "-p", `${port + 1}:${LITELLM_PORT}`,
+        ], log);
+        if (podResult.code !== 0) {
+          throw new Error("Failed to create pod for LiteLLM sidecar");
+        }
+
+        // Start LiteLLM in the pod
+        const litellmRunResult = await runCommand(runtime, [
+          "run", "-d", "--rm",
+          "--name", litellmName,
+          "--pod", pod,
+          "-v", `${vol}:/home/node/.openclaw`,
+          "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          litellmImage,
+          "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
+        ], log);
+        if (litellmRunResult.code !== 0) {
+          throw new Error("Failed to start LiteLLM sidecar");
+        }
+      } else {
+        // Docker: start LiteLLM container, gateway will use --network=container:
+        await removeContainer(runtime as ContainerRuntime, litellmName);
+        const litellmRunResult = await runCommand(runtime, [
+          "run", "-d", "--rm",
+          "--name", litellmName,
+          "-p", `${port}:18789`,
+          "-p", `${port + 1}:${LITELLM_PORT}`,
+          "-v", `${vol}:/home/node/.openclaw`,
+          "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          litellmImage,
+          "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
+        ], log);
+        if (litellmRunResult.code !== 0) {
+          throw new Error("Failed to start LiteLLM sidecar");
+        }
+      }
+
+      // Wait for LiteLLM to be ready
+      log("Waiting for LiteLLM proxy to be ready...");
+      const maxWait = 30;
+      for (let i = 0; i < maxWait; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const { stdout } = await execFileAsync(runtime, [
+            "exec", litellmName, "python", "-c",
+            `import urllib.request; r=urllib.request.urlopen("http://localhost:${LITELLM_PORT}/health/readiness"); print(r.read().decode())`,
+          ]);
+          if (stdout.includes("connected") || stdout.includes("healthy")) {
+            log("LiteLLM proxy is ready");
+            break;
+          }
+        } catch {
+          if (i === maxWait - 1) {
+            log("WARNING: LiteLLM readiness check timed out — proceeding anyway");
+          }
+        }
+      }
+    }
+
     // Save agent files to host so user can edit and re-deploy
     try {
       const hostAgentsDir = join(homedir(), ".openclaw-installer", "agents", `workspace-${agentId}`);
@@ -512,12 +691,35 @@ something that requires the user's attention.`;
       log("Could not save agent files to host (directory may not be writable)");
     }
 
-    const runArgs = buildRunArgs(config, name, port);
+    const runArgs = buildRunArgs(config, runtime, name, port, litellmMasterKey);
 
     log(`Starting OpenClaw container: ${name}`);
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to start container");
+    }
+
+    log("");
+    log("=== Container Info ===");
+    if (useProxy) {
+      const isPodman = runtime === "podman";
+      if (isPodman) {
+        log(`Pod:              ${podName(config)}`);
+      }
+      log(`Gateway container: ${name}`);
+      log(`LiteLLM container: ${litellmContainerName(config)}`);
+      log("");
+      log("Useful commands:");
+      if (isPodman) {
+        log(`  ${runtime} pod ps                          # list pods`);
+      }
+      log(`  ${runtime} logs ${name}          # gateway logs`);
+      log(`  ${runtime} logs ${litellmContainerName(config)}  # LiteLLM proxy logs`);
+    } else {
+      log(`Container: ${name}`);
+      log("");
+      log("Useful commands:");
+      log(`  ${runtime} logs ${name}  # gateway logs`);
     }
 
     // Extract and save gateway token to host filesystem
@@ -577,8 +779,89 @@ something that requires the user's attention.`;
     // Remove old container if it exists (stop may not have fully cleaned up)
     await removeContainer(runtime, name);
 
+    // Recover LiteLLM master key from the volume if proxy was used
+    const useProxy = shouldUseLitellmProxy(result.config);
+    let litellmMasterKey: string | undefined;
+
+    if (useProxy) {
+      try {
+        const { stdout } = await execFileAsync(runtime, [
+          "run", "--rm",
+          "-v", `${vol}:/home/node/.openclaw`,
+          image, "cat", LITELLM_KEY_PATH,
+        ]);
+        litellmMasterKey = stdout.trim();
+      } catch {
+        // Key not found — generate a new one and rewrite config
+        log("LiteLLM master key not found in volume — regenerating");
+        litellmMasterKey = generateLitellmMasterKey();
+        const litellmYaml = generateLitellmConfig(result.config, litellmMasterKey);
+        const litellmB64 = Buffer.from(litellmYaml).toString("base64");
+        const keyB64 = Buffer.from(litellmMasterKey).toString("base64");
+        await runCommand(runtime, [
+          "run", "--rm",
+          "-v", `${vol}:/home/node/.openclaw`,
+          image, "sh", "-c",
+          `mkdir -p /home/node/.openclaw/litellm && echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH} && echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH} && chmod 600 ${LITELLM_KEY_PATH}`,
+        ], log);
+      }
+
+      // Start LiteLLM sidecar
+      const litellmName = litellmContainerName(result.config);
+      const litellmImage = result.config.litellmImage || LITELLM_IMAGE;
+      const isPodman = runtime === "podman";
+
+      if (isPodman) {
+        const pod = podName(result.config);
+        await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+        await runCommand(runtime, [
+          "pod", "create", "--name", pod,
+          "-p", `${port}:18789`,
+          "-p", `${port + 1}:${LITELLM_PORT}`,
+        ], log);
+
+        await runCommand(runtime, [
+          "run", "-d", "--rm",
+          "--name", litellmName,
+          "--pod", pod,
+          "-v", `${vol}:/home/node/.openclaw`,
+          "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          litellmImage,
+          "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
+        ], log);
+      } else {
+        await removeContainer(runtime as ContainerRuntime, litellmName);
+        await runCommand(runtime, [
+          "run", "-d", "--rm",
+          "--name", litellmName,
+          "-p", `${port}:18789`,
+          "-p", `${port + 1}:${LITELLM_PORT}`,
+          "-v", `${vol}:/home/node/.openclaw`,
+          "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          litellmImage,
+          "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
+        ], log);
+      }
+
+      // Brief wait for LiteLLM readiness
+      log("Waiting for LiteLLM proxy...");
+      for (let i = 0; i < 15; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          await execFileAsync(runtime, [
+            "exec", litellmName, "python", "-c",
+            `import urllib.request; r=urllib.request.urlopen("http://localhost:${LITELLM_PORT}/health/readiness"); print(r.read().decode())`,
+          ]);
+          log("LiteLLM proxy is ready");
+          break;
+        } catch {
+          // keep waiting
+        }
+      }
+    }
+
     log(`Starting OpenClaw container: ${name}`);
-    const runArgs = buildRunArgs(result.config, name, port);
+    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey);
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to start container");
@@ -706,6 +989,9 @@ something that requires the user's attention.`;
         if (config.gcpServiceAccountJson) {
           lines.push(`GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`);
         }
+        if (shouldUseLitellmProxy(config)) {
+          lines.push(`LITELLM_PROXY=true`);
+        }
       }
       if (config.agentSourceDir) {
         lines.push(`AGENT_SOURCE_DIR=${config.agentSourceDir}`);
@@ -783,8 +1069,23 @@ something that requires the user's attention.`;
     }
     await removeContainer(runtime, name);
 
+    // Recover LiteLLM master key if proxy is active
+    let litellmMasterKey: string | undefined;
+    if (shouldUseLitellmProxy(result.config)) {
+      try {
+        const { stdout } = await execFileAsync(runtime, [
+          "run", "--rm",
+          "-v", `${vol}:/home/node/.openclaw`,
+          image, "cat", LITELLM_KEY_PATH,
+        ]);
+        litellmMasterKey = stdout.trim();
+      } catch {
+        // No key — proxy will not be used for this restart
+      }
+    }
+
     const port = result.config.port ?? DEFAULT_PORT;
-    const runArgs = buildRunArgs(result.config, name, port);
+    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey);
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to restart container");
@@ -796,18 +1097,56 @@ something that requires the user's attention.`;
   async stop(result: DeployResult, log: LogCallback): Promise<void> {
     const runtime = result.config.containerRuntime ?? "podman";
     const name = result.containerId ?? containerName(result.config);
+    const isPodman = runtime === "podman";
+
     log(`Stopping container: ${name}`);
-    // --rm will auto-remove the container
     await runCommand(runtime, ["stop", name], log);
-    log("Container stopped and removed. Data volume preserved.");
+
+    // Stop LiteLLM sidecar if it exists
+    const litellmName = litellmContainerName(result.config);
+    try {
+      await execFileAsync(runtime, ["inspect", litellmName]);
+      log(`Stopping LiteLLM sidecar: ${litellmName}`);
+      await runCommand(runtime, ["stop", litellmName], log);
+    } catch {
+      // No sidecar running
+    }
+
+    // Remove podman pod if it exists
+    if (isPodman) {
+      const pod = podName(result.config);
+      try {
+        await execFileAsync(runtime, ["pod", "inspect", pod]);
+        await runCommand(runtime, ["pod", "rm", "-f", pod], log);
+      } catch {
+        // No pod
+      }
+    }
+
+    log("Containers stopped and removed. Data volume preserved.");
   }
 
   async teardown(result: DeployResult, log: LogCallback): Promise<void> {
     const runtime = (result.config.containerRuntime ?? "podman") as ContainerRuntime;
     const name = result.containerId ?? containerName(result.config);
+    const isPodman = runtime === "podman";
 
-    // Stop container if running (--rm removes it)
+    // Stop gateway container
     await removeContainer(runtime, name);
+
+    // Stop LiteLLM sidecar
+    const litellmName = litellmContainerName(result.config);
+    await removeContainer(runtime, litellmName);
+
+    // Remove podman pod if it exists
+    if (isPodman) {
+      const pod = podName(result.config);
+      try {
+        await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+      } catch {
+        // No pod
+      }
+    }
 
     const vol = volumeName(result.config);
     log(`Deleting data volume: ${vol}`);

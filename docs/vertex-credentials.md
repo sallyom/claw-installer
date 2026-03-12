@@ -92,6 +92,84 @@ provider, the installer shows a warning. Your options are:
 2. **Provide a Service Account key** -- upload or type a path to a
    `service_account` type JSON file, which works with both providers
 
+## LiteLLM proxy (recommended)
+
+When Vertex AI is enabled with service account credentials, the installer
+deploys a LiteLLM proxy sidecar alongside the OpenClaw gateway. This is
+enabled by default and can be toggled via the "Use LiteLLM proxy" checkbox
+in the deploy form.
+
+### Security benefit
+
+When you deploy an OpenClaw agent with Vertex AI, your Google Cloud
+credentials need to be available somewhere to authenticate API calls.
+Without LiteLLM, those credentials are mounted directly into the agent
+container — meaning if the agent or its container is ever compromised,
+an attacker gets your full GCP service account key and can access any
+Google Cloud resource that key has permissions for. With the LiteLLM
+proxy, the credentials stay in a separate sidecar container that the
+agent can't access. The agent only gets a randomly generated internal
+API key that's useless outside the local pod — it can make LLM calls
+through the proxy, but it can never see or exfiltrate your Google
+credentials.
+
+```
+Agent/Gateway  -->  LiteLLM proxy (localhost:4000)  -->  Vertex AI
+     |                      |
+  only has a           holds the real
+  LiteLLM key          GCP credentials
+```
+
+### Performance
+
+There is a small amount of added latency per request — one extra HTTP
+hop through localhost. In practice this is negligible (sub-millisecond)
+since both containers share the same network namespace and the LiteLLM
+proxy is just forwarding the request. The first deployment is noticeably
+slower due to the ~1.5 GB image pull, but subsequent deploys reuse the
+cached image. You won't notice any difference in conversation speed.
+
+### How it works
+
+- **Kubernetes**: LiteLLM runs as a sidecar container in the same pod.
+  The `gcp-sa` secret is mounted only on the LiteLLM container.
+- **Local (podman)**: A pod is created with both containers sharing
+  localhost. GCP credentials are only accessible to the LiteLLM container.
+- **Local (docker)**: LiteLLM starts first; the gateway shares its
+  network namespace via `--network=container:`.
+
+The gateway connects to `http://localhost:4000/v1` using an auto-generated
+internal API key. The model is routed through LiteLLM's OpenAI-compatible
+API to Vertex AI.
+
+### LiteLLM container image
+
+The proxy uses `ghcr.io/berriai/litellm:main-latest` (~1.5 GB). The first
+deployment will take extra time while this image is pulled. You can
+pre-pull it to speed things up:
+
+```bash
+podman pull ghcr.io/berriai/litellm:main-latest
+# or
+docker pull ghcr.io/berriai/litellm:main-latest
+```
+
+### Disabling the proxy
+
+Uncheck "Use LiteLLM proxy" in the deploy form to revert to the legacy
+behavior where GCP credentials are passed directly to the agent container.
+This is not recommended but may be needed if LiteLLM introduces
+compatibility issues with your model.
+
+### Model naming with the proxy
+
+When the proxy is active, the model string changes from the Vertex format
+(e.g., `anthropic-vertex/claude-sonnet-4-6`) to an OpenAI-compatible
+format (e.g., `openai/claude-sonnet-4-6`). This is handled automatically
+when using the default model. If you override the model field, use the
+model name as registered in LiteLLM (e.g., `claude-sonnet-4-6` without
+any prefix).
+
 ## Containerized installer (run.sh)
 
 When the installer runs inside a container via `run.sh`, environment
@@ -125,3 +203,14 @@ Account key file.
 If running the installer in a container, make sure `run.sh` is forwarding
 your environment. Check that `GOOGLE_APPLICATION_CREDENTIALS` points to an
 existing file on the host, or that `~/.config/gcloud/application_default_credentials.json` exists.
+
+**LiteLLM proxy not starting?**
+Check the sidecar logs. For local mode: `podman logs <name>-litellm` or
+`docker logs <name>-litellm`. For K8s: `kubectl logs -n <namespace>
+deployment/openclaw -c litellm`. Common issues include an invalid
+credentials file or a missing project/location in the config.
+
+**First deployment is very slow?**
+The LiteLLM image (`ghcr.io/berriai/litellm:main-latest`) is ~1.5 GB.
+Pre-pull it before deploying:
+`podman pull ghcr.io/berriai/litellm:main-latest`

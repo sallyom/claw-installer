@@ -92,6 +92,11 @@ router.post("/", async (req, res) => {
     if (!config.googleCloudLocation) {
       config.googleCloudLocation = defaultVertexLocation(config.vertexProvider || "anthropic");
     }
+
+    // LiteLLM proxy: default on when SA JSON credentials are present
+    if (config.litellmProxy === undefined && config.gcpServiceAccountJson) {
+      config.litellmProxy = true;
+    }
   }
 
   const deployer = getDeployer(config.mode);

@@ -18,6 +18,9 @@ export interface DeployConfig {
   googleCloudLocation?: string;
   gcpServiceAccountJson?: string; // raw JSON content of GCP service account key file
   gcpServiceAccountPath?: string; // absolute path to SA JSON file (server reads it)
+  // LiteLLM proxy sidecar (default: true when Vertex + SA JSON)
+  litellmProxy?: boolean;
+  litellmImage?: string;
   // Telegram channel
   telegramEnabled?: boolean;
   telegramBotToken?: string;
