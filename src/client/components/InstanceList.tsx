@@ -185,6 +185,19 @@ export default function InstanceList() {
     navigator.clipboard.writeText(text);
   };
 
+  const handleOpenWithToken = async (inst: Instance) => {
+    try {
+      const res = await fetch(`/api/instances/${inst.id}/token`);
+      const data = await res.json();
+      if (data.token) {
+        window.open(`${inst.url}#token=${encodeURIComponent(data.token)}`, "_blank", "noopener");
+      }
+    } catch {
+      // Fall back to opening without token
+      window.open(inst.url, "_blank", "noopener");
+    }
+  };
+
   if (loading) {
     return <div className="card">Loading...</div>;
   }
@@ -243,6 +256,10 @@ export default function InstanceList() {
                       target="_blank"
                       rel="noopener"
                       style={{ color: "var(--accent)" }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleOpenWithToken(inst);
+                      }}
                     >
                       {inst.url}
                     </a>

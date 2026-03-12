@@ -1,6 +1,6 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
@@ -520,10 +520,16 @@ something that requires the user's attention.`;
       throw new Error("Failed to start container");
     }
 
-    log(`OpenClaw running at http://localhost:${port}`);
-
     // Extract and save gateway token to host filesystem
     await this.saveInstanceInfo(runtime, name, config, log);
+
+    const token = await this.readSavedToken(name);
+    const url = `http://localhost:${port}`;
+    if (token) {
+      log(`OpenClaw running at ${url}#token=${encodeURIComponent(token)}`);
+    } else {
+      log(`OpenClaw running at ${url}`);
+    }
 
     return {
       id,
@@ -531,7 +537,7 @@ something that requires the user's attention.`;
       status: "running",
       config: { ...config, containerRuntime: runtime },
       startedAt: new Date().toISOString(),
-      url: `http://localhost:${port}`,
+      url,
       containerId: name,
     };
   }
@@ -578,10 +584,15 @@ something that requires the user's attention.`;
       throw new Error("Failed to start container");
     }
 
-    const url = `http://localhost:${port}`;
-    log(`OpenClaw running at ${url}`);
-
     await this.saveInstanceInfo(runtime, name, result.config, log);
+
+    const token = await this.readSavedToken(name);
+    const url = `http://localhost:${port}`;
+    if (token) {
+      log(`OpenClaw running at ${url}#token=${encodeURIComponent(token)}`);
+    } else {
+      log(`OpenClaw running at ${url}`);
+    }
 
     return { ...result, status: "running", url };
   }
@@ -599,6 +610,16 @@ something that requires the user's attention.`;
       return { ...result, status: stdout.trim() === "running" ? "running" : "stopped" };
     } catch {
       return { ...result, status: "stopped" };
+    }
+  }
+
+  private async readSavedToken(name: string): Promise<string | null> {
+    try {
+      const tokenPath = join(homedir(), ".openclaw-installer", "local", name, "gateway-token");
+      const token = (await readFile(tokenPath, "utf8")).trim();
+      return token || null;
+    } catch {
+      return null;
     }
   }
 

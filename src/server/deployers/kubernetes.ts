@@ -206,9 +206,11 @@ export class KubernetesDeployer implements Deployer {
     const url = routeUrl
       || `(use: kubectl port-forward svc/openclaw 18789:18789 -n ${ns})`;
 
-    log(`Gateway token: ${gatewayToken}`);
     log(`OpenClaw deployed to ${ns}`);
-    if (!onOcp) {
+    if (routeUrl) {
+      log(`Open: ${routeUrl}#token=${encodeURIComponent(gatewayToken)}`);
+    } else {
+      log(`Gateway token: ${gatewayToken}`);
       log(`Access via port-forward: kubectl port-forward svc/openclaw 18789:18789 -n ${ns}`);
     }
 
