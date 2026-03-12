@@ -337,7 +337,11 @@ export class LocalDeployer implements Deployer {
     // checking for updates efficiently via digest comparison (Fix for #28).
     try {
       await execFileAsync(runtime, ["image", "exists", image]);
-      log(`Using local image: ${image}`);
+      if (shouldAlwaysPull(image)) {
+        log(`Image ${image} found locally; will check for updates at startup`);
+      } else {
+        log(`Using local image: ${image}`);
+      }
     } catch {
       log(`Pulling ${image}...`);
       const pull = await runCommand(runtime, ["pull", image], log);
