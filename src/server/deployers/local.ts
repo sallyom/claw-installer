@@ -23,6 +23,15 @@ import {
 
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 const DEFAULT_PORT = 18789;
+
+/** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
+export function shouldAlwaysPull(image: string): boolean {
+  // Digest references (image@sha256:...) are immutable — never need to re-pull
+  if (image.includes("@")) return false;
+  const ref = image.split("/").pop() || image;
+  const tag = ref.includes(":") ? ref.split(":").pop() : undefined;
+  return !tag || tag === "latest";
+}
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 
 function tryParseProjectId(saJson: string): string {
@@ -243,10 +252,13 @@ function runCommand(
  * stop removes the container — start must re-create it.
  */
 function buildRunArgs(config: DeployConfig, name: string, port: number): string[] {
+  const image = config.image || DEFAULT_IMAGE;
   const runArgs = [
     "run",
     "-d",
     "--rm",  // comment out to keep containers after stop (for debugging)
+    // For mutable tags (:latest/untagged), check for newer image at startup (Fix for #28)
+    ...(shouldAlwaysPull(image) ? ["--pull=newer"] : []),
     "--name",
     name,
     "-p", `${port}:18789`,
@@ -320,10 +332,16 @@ export class LocalDeployer implements Deployer {
 
     const image = config.image || DEFAULT_IMAGE;
 
-    // Check if image exists locally before pulling
+    // Pull the image if it doesn't exist locally.
+    // For mutable tags (:latest/untagged), --pull=newer on `podman run` handles
+    // checking for updates efficiently via digest comparison (Fix for #28).
     try {
       await execFileAsync(runtime, ["image", "exists", image]);
-      log(`Using local image: ${image}`);
+      if (shouldAlwaysPull(image)) {
+        log(`Image ${image} found locally; will check for updates at startup`);
+      } else {
+        log(`Using local image: ${image}`);
+      }
     } catch {
       log(`Pulling ${image}...`);
       const pull = await runCommand(runtime, ["pull", image], log);
