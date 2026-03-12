@@ -23,6 +23,15 @@ import {
 
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 const DEFAULT_PORT = 18789;
+
+/** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
+export function shouldAlwaysPull(image: string): boolean {
+  // Digest references (image@sha256:...) are immutable — never need to re-pull
+  if (image.includes("@")) return false;
+  const ref = image.split("/").pop() || image;
+  const tag = ref.includes(":") ? ref.split(":").pop() : undefined;
+  return !tag || tag === "latest";
+}
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 
 function tryParseProjectId(saJson: string): string {
@@ -320,15 +329,24 @@ export class LocalDeployer implements Deployer {
 
     const image = config.image || DEFAULT_IMAGE;
 
-    // Check if image exists locally before pulling
-    try {
-      await execFileAsync(runtime, ["image", "exists", image]);
-      log(`Using local image: ${image}`);
-    } catch {
-      log(`Pulling ${image}...`);
+    // Always pull mutable tags (:latest or untagged) to avoid stale images (Fix for #28)
+    if (shouldAlwaysPull(image)) {
+      log(`Pulling ${image} (mutable tag — always refreshed)...`);
       const pull = await runCommand(runtime, ["pull", image], log);
       if (pull.code !== 0) {
         throw new Error("Failed to pull image");
+      }
+    } else {
+      // For version-pinned tags, use cached image if available
+      try {
+        await execFileAsync(runtime, ["image", "exists", image]);
+        log(`Using local image: ${image}`);
+      } catch {
+        log(`Pulling ${image}...`);
+        const pull = await runCommand(runtime, ["pull", image], log);
+        if (pull.code !== 0) {
+          throw new Error("Failed to pull image");
+        }
       }
     }
 
