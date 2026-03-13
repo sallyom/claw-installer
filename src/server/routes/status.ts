@@ -280,13 +280,15 @@ router.get("/:id/command", async (req, res) => {
   if (instance?.mode === "kubernetes") {
     const ns = instance.config.namespace || instance.containerId || "";
 
-    // Detect if LiteLLM sidecar is running
+    // Detect sidecars
     let hasLitellm = false;
+    let hasTokenizer = false;
     try {
       const core = (await import("../services/k8s.js")).coreApi();
       const podList = await core.listNamespacedPod({ namespace: ns, labelSelector: "app=openclaw" });
       const pod = podList.items[0];
       hasLitellm = pod?.spec?.containers?.some((c) => c.name === "litellm") ?? false;
+      hasTokenizer = pod?.spec?.containers?.some((c) => c.name === "tokenizer") ?? false;
     } catch { /* ignore */ }
 
     const lines = [
@@ -302,6 +304,11 @@ router.get("/:id/command", async (req, res) => {
       ...(hasLitellm ? [
         `# View LiteLLM proxy logs`,
         `kubectl logs deployment/openclaw -n ${ns} -c litellm -f`,
+        ``,
+      ] : []),
+      ...(hasTokenizer ? [
+        `# View Tokenizer proxy logs`,
+        `kubectl logs deployment/openclaw -n ${ns} -c tokenizer -f`,
         ``,
       ] : []),
       `# View init container logs`,
@@ -341,14 +348,20 @@ router.get("/:id/command", async (req, res) => {
 
     const containerName = req.params.id;
     const litellmName = `${containerName}-litellm`;
+    const tokenizerName = `${containerName}-tokenizer`;
     const pod = `${containerName}-pod`;
 
-    // Detect if LiteLLM sidecar is running
+    // Detect sidecars
     let hasLitellm = false;
+    let hasTokenizer = false;
     let hasPod = false;
     try {
       await exec(runtime, ["inspect", litellmName]);
       hasLitellm = true;
+    } catch { /* no sidecar */ }
+    try {
+      await exec(runtime, ["inspect", tokenizerName]);
+      hasTokenizer = true;
     } catch { /* no sidecar */ }
     if (runtime === "podman") {
       try {
@@ -373,10 +386,18 @@ router.get("/:id/command", async (req, res) => {
       lines.push(`${runtime} logs -f ${litellmName}`);
       lines.push(``);
     }
+    if (hasTokenizer) {
+      lines.push(`# Tokenizer proxy logs`);
+      lines.push(`${runtime} logs -f ${tokenizerName}`);
+      lines.push(``);
+    }
     lines.push(`# Stop`);
     lines.push(`${runtime} stop ${containerName}`);
     if (hasLitellm) {
       lines.push(`${runtime} stop ${litellmName}`);
+    }
+    if (hasTokenizer) {
+      lines.push(`${runtime} stop ${tokenizerName}`);
     }
     if (hasPod) {
       lines.push(`${runtime} pod rm -f ${pod}`);

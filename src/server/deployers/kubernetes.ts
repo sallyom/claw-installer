@@ -31,6 +31,14 @@ import {
 } from "./k8s-manifests.js";
 import { shouldUseLitellmProxy, generateLitellmMasterKey, generateLitellmConfig } from "./litellm.js";
 import { shouldUseOtel, generateOtelConfig, generateOtelConfigObject } from "./otel.js";
+import {
+  shouldUseTokenizer,
+  generateTokenizerOpenKey,
+  deriveTokenizerSealKey,
+  sealCredential,
+  tokenizerAgentEnv,
+  generateTokenizerSkill,
+} from "./tokenizer.js";
 
 // Re-export discovery for consumers
 export type { K8sPodInfo, K8sInstance } from "./k8s-discovery.js";
@@ -264,8 +272,43 @@ export class KubernetesDeployer implements Deployer {
       }
     }
 
+    // 5d. Tokenizer proxy config (when enabled with credentials)
+    const useTkz = shouldUseTokenizer(config);
+    let tokenizerData: { openKey: string; agentEnv: Record<string, string> } | undefined;
+
+    if (useTkz && config.tokenizerCredentials?.length) {
+      log("Tokenizer proxy enabled — credentials will be sealed and injected by the proxy sidecar");
+      const openKey = generateTokenizerOpenKey();
+      const sealKey = deriveTokenizerSealKey(openKey);
+      const sealed = config.tokenizerCredentials.map((c) => sealCredential(c, sealKey));
+      tokenizerData = {
+        openKey,
+        agentEnv: tokenizerAgentEnv(sealed, sealKey),
+      };
+
+      // Write the Tokenizer skill into the agent ConfigMap
+      const skillMd = generateTokenizerSkill(sealed);
+      const skillCm: k8s.V1ConfigMap = {
+        apiVersion: "v1",
+        kind: "ConfigMap",
+        metadata: {
+          name: "tokenizer-skill",
+          namespace: ns,
+          labels: { app: "openclaw" },
+        },
+        data: { "SKILL.md": skillMd },
+      };
+      await applyResource(
+        () => core.readNamespacedConfigMap({ name: "tokenizer-skill", namespace: ns }),
+        () => core.createNamespacedConfigMap({ namespace: ns, body: skillCm }),
+        () => core.replaceNamespacedConfigMap({ name: "tokenizer-skill", namespace: ns, body: skillCm }),
+        "ConfigMap tokenizer-skill",
+        log,
+      );
+    }
+
     // 6. Secret
-    const secret = secretManifest(ns, config, gatewayToken, litellmMasterKey);
+    const secret = secretManifest(ns, config, gatewayToken, litellmMasterKey, tokenizerData);
     await applyResource(
       () => core.readNamespacedSecret({ name: "openclaw-secrets", namespace: ns }),
       () => core.createNamespacedSecret({ namespace: ns, body: secret }),
@@ -332,6 +375,11 @@ export class KubernetesDeployer implements Deployer {
         openaiApiKey: config.openaiApiKey ? "(set)" : undefined,
         gcpServiceAccountJson: config.gcpServiceAccountJson ? "(set)" : undefined,
         telegramBotToken: config.telegramBotToken ? "(set)" : undefined,
+        // Keep tokenizer structure but strip raw secrets
+        tokenizerCredentials: config.tokenizerCredentials?.map((c) => ({
+          ...c,
+          secret: "(set)",
+        })),
       };
       writeFileSync(
         join(configDir, "deploy-config.json"),
@@ -537,6 +585,7 @@ echo "Config initialized"
           plural: "opentelemetrycollectors", name: "openclaw-sidecar",
         });
       }},
+      { name: "ConfigMap tokenizer-skill", fn: () => core.deleteNamespacedConfigMap({ name: "tokenizer-skill", namespace: ns }) },
       { name: "PVC", fn: () => core.deleteNamespacedPersistentVolumeClaim({ name: "openclaw-home-pvc", namespace: ns }) },
     ];
 
