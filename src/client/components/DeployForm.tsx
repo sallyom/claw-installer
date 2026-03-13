@@ -118,6 +118,15 @@ export default function DeployForm({ onDeployStarted }: Props) {
     namespace: "",
     // LiteLLM proxy
     litellmProxy: true,
+    // Tokenizer proxy
+    tokenizerEnabled: false,
+    tokenizerCredentials: [] as Array<{
+      name: string;
+      secret: string;
+      allowedHosts: string;
+      headerDst: string;
+      headerFmt: string;
+    }>,
   });
 
   const [gcpDefaults, setGcpDefaults] = useState<GcpDefaults | null>(null);
@@ -266,6 +275,18 @@ export default function DeployForm({ onDeployStarted }: Props) {
         telegramEnabled: config.telegramEnabled || undefined,
         telegramBotToken: config.telegramEnabled ? config.telegramBotToken || undefined : undefined,
         telegramAllowFrom: config.telegramEnabled ? config.telegramAllowFrom || undefined : undefined,
+        tokenizerEnabled: config.tokenizerEnabled || undefined,
+        tokenizerCredentials: config.tokenizerEnabled && config.tokenizerCredentials.length > 0
+          ? config.tokenizerCredentials
+              .filter((c) => c.name && c.secret && c.allowedHosts)
+              .map((c) => ({
+                name: c.name,
+                secret: c.secret,
+                allowedHosts: c.allowedHosts.split(",").map((h) => h.trim()).filter(Boolean),
+                headerDst: c.headerDst || undefined,
+                headerFmt: c.headerFmt || undefined,
+              }))
+          : undefined,
       };
 
       const res = await fetch("/api/deploy", {
@@ -790,6 +811,129 @@ export default function DeployForm({ onDeployStarted }: Props) {
         </div>
 
         <h3 style={{ marginTop: "1.5rem" }}>Channels</h3>
+
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="checkbox"
+              checked={config.tokenizerEnabled}
+              onChange={(e) =>
+                setConfig((prev) => ({ ...prev, tokenizerEnabled: e.target.checked }))
+              }
+              style={{ width: "auto" }}
+            />
+            Enable Tokenizer proxy (credential injection)
+          </label>
+          <div className="hint">
+            Runs a <a href="https://github.com/superfly/tokenizer" target="_blank" rel="noreferrer">Tokenizer</a> sidecar
+            that injects API credentials into HTTP requests. The agent never sees the raw secrets.
+          </div>
+        </div>
+
+        {config.tokenizerEnabled && (
+          <>
+            <div style={{
+              marginBottom: "1rem",
+              padding: "0.75rem",
+              background: "rgba(52, 152, 219, 0.1)",
+              border: "1px solid rgba(52, 152, 219, 0.3)",
+              borderRadius: "6px",
+              fontSize: "0.85rem",
+              color: "var(--text-secondary)",
+            }}>
+              Add API credentials below. Each credential is encrypted and can only be used
+              against its allowed hosts. The agent receives sealed tokens and a skill
+              explaining how to make authenticated requests through the proxy.
+            </div>
+
+            {config.tokenizerCredentials.map((cred, idx) => (
+              <div key={idx} style={{
+                border: "1px solid var(--border-color)",
+                borderRadius: "6px",
+                padding: "0.75rem",
+                marginBottom: "0.5rem",
+              }}>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                  <input
+                    type="text"
+                    placeholder="Name (e.g. github)"
+                    value={cred.name}
+                    onChange={(e) => {
+                      const updated = [...config.tokenizerCredentials];
+                      updated[idx] = { ...updated[idx], name: e.target.value };
+                      setConfig((prev) => ({ ...prev, tokenizerCredentials: updated }));
+                    }}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = config.tokenizerCredentials.filter((_, i) => i !== idx);
+                      setConfig((prev) => ({ ...prev, tokenizerCredentials: updated }));
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "4px",
+                      padding: "0.25rem 0.5rem",
+                      cursor: "pointer",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  placeholder="API key or token"
+                  value={cred.secret}
+                  onChange={(e) => {
+                    const updated = [...config.tokenizerCredentials];
+                    updated[idx] = { ...updated[idx], secret: e.target.value };
+                    setConfig((prev) => ({ ...prev, tokenizerCredentials: updated }));
+                  }}
+                  style={{ width: "100%", marginBottom: "0.5rem" }}
+                />
+                <input
+                  type="text"
+                  placeholder="Allowed hosts (comma-separated, e.g. api.github.com)"
+                  value={cred.allowedHosts}
+                  onChange={(e) => {
+                    const updated = [...config.tokenizerCredentials];
+                    updated[idx] = { ...updated[idx], allowedHosts: e.target.value };
+                    setConfig((prev) => ({ ...prev, tokenizerCredentials: updated }));
+                  }}
+                  style={{ width: "100%" }}
+                />
+              </div>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => {
+                setConfig((prev) => ({
+                  ...prev,
+                  tokenizerCredentials: [
+                    ...prev.tokenizerCredentials,
+                    { name: "", secret: "", allowedHosts: "", headerDst: "", headerFmt: "" },
+                  ],
+                }));
+              }}
+              style={{
+                background: "transparent",
+                border: "1px dashed var(--border-color)",
+                borderRadius: "6px",
+                padding: "0.5rem 1rem",
+                cursor: "pointer",
+                color: "var(--text-secondary)",
+                width: "100%",
+                marginBottom: "1rem",
+              }}
+            >
+              + Add credential
+            </button>
+          </>
+        )}
 
         <div className="form-group">
           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>

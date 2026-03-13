@@ -21,6 +21,16 @@ export interface DeployConfig {
   // LiteLLM proxy sidecar (default: true when Vertex + SA JSON)
   litellmProxy?: boolean;
   litellmImage?: string;
+  // Tokenizer proxy sidecar (credential injection proxy)
+  tokenizerEnabled?: boolean;
+  tokenizerImage?: string;
+  tokenizerCredentials?: Array<{
+    name: string;
+    secret: string;
+    allowedHosts: string[];
+    headerDst?: string;
+    headerFmt?: string;
+  }>;
   // Telegram channel
   telegramEnabled?: boolean;
   telegramBotToken?: string;

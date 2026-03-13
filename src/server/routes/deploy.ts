@@ -99,6 +99,27 @@ router.post("/", async (req, res) => {
     }
   }
 
+  // Tokenizer: validate that credentials have required fields and unique env var names
+  if (config.tokenizerEnabled && config.tokenizerCredentials?.length) {
+    const envKeys = new Set<string>();
+    for (const cred of config.tokenizerCredentials) {
+      if (!cred.name || !cred.secret || !cred.allowedHosts?.length) {
+        res.status(400).json({
+          error: "Each Tokenizer credential must have a name, secret, and at least one allowed host",
+        });
+        return;
+      }
+      const key = cred.name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+      if (envKeys.has(key)) {
+        res.status(400).json({
+          error: `Tokenizer credential names "${cred.name}" collide after sanitization (both become ${key}). Use distinct names.`,
+        });
+        return;
+      }
+      envKeys.add(key);
+    }
+  }
+
   const deployer = getDeployer(config.mode);
   if (!deployer) {
     res.status(400).json({ error: `Unsupported mode: ${config.mode}` });
