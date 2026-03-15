@@ -89,6 +89,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const [deploying, setDeploying] = useState(false);
   const [defaults, setDefaults] = useState<ServerDefaults | null>(null);
   const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([]);
+  const [loadedConfigLabel, setLoadedConfigLabel] = useState<string | null>(null);
   const [inferenceProvider, setInferenceProvider] = useState<InferenceProvider>("anthropic");
   const [config, setConfig] = useState({
     prefix: "",
@@ -179,9 +180,6 @@ export default function DeployForm({ onDeployStarted }: Props) {
       .then((r) => r.json())
       .then((configs: SavedConfig[]) => {
         setSavedConfigs(configs);
-        if (configs.length > 0) {
-          applyVars(configs[0].vars);
-        }
       })
       .catch(() => {});
   }, []);
@@ -376,6 +374,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
                   if (cfg) {
                     setMode(cfg.type === "k8s" ? "kubernetes" : "local");
                     applyVars(cfg.vars);
+                    setLoadedConfigLabel(`${cfg.name} (${cfg.type === "k8s" ? "K8s" : "Local"})`);
                   }
                 }}
                 defaultValue=""
@@ -397,6 +396,22 @@ export default function DeployForm({ onDeployStarted }: Props) {
             </label>
           </div>
         </div>
+
+        {loadedConfigLabel && (
+          <div
+            style={{
+              marginBottom: "1rem",
+              padding: "0.75rem 1rem",
+              border: "1px solid var(--border)",
+              borderRadius: "0.75rem",
+              background: "var(--bg-secondary)",
+              fontSize: "0.9rem",
+              color: "var(--text-secondary)",
+            }}
+          >
+            Loaded saved config: <strong style={{ color: "var(--text-primary)" }}>{loadedConfigLabel}</strong>
+          </div>
+        )}
 
         <div className="form-row">
           <div className="form-group">
@@ -476,7 +491,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
               onChange={(e) => update("agentSourceDir", e.target.value)}
             />
             <div className="hint">
-              Host directory with <code>agents/</code> and <code>skills/</code> subdirs to provision into the workspace.
+              Host directory with <code>workspace-*</code>, <code>skills/</code>, and <code>cron/jobs.json</code> to provision into the instance.
               Defaults to <code>~/.openclaw/</code> if it exists.
             </div>
           </div>

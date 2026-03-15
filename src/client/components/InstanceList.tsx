@@ -186,15 +186,16 @@ export default function InstanceList() {
   };
 
   const handleOpenWithToken = async (inst: Instance) => {
+    const targetUrl = inst.url ? `${inst.url}?session=main` : inst.url;
     try {
       const res = await fetch(`/api/instances/${inst.id}/token`);
       const data = await res.json();
       if (data.token) {
-        window.open(`${inst.url}#token=${encodeURIComponent(data.token)}`, "_blank", "noopener");
+        window.open(`${targetUrl}#token=${encodeURIComponent(data.token)}`, "_blank", "noopener");
       }
     } catch {
       // Fall back to opening without token
-      window.open(inst.url, "_blank", "noopener");
+      window.open(targetUrl, "_blank", "noopener");
     }
   };
 

@@ -32,6 +32,7 @@ import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
 import { startOtelSidecar, stopOtelSidecar, startJaegerSidecar, otelContainerName, jaegerContainerName } from "./local-otel.js";
 import { JAEGER_UI_PORT } from "./otel.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
+import { generateToken } from "./k8s-helpers.js";
 
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 const DEFAULT_PORT = 18789;
@@ -76,7 +77,7 @@ function deriveModel(config: DeployConfig): string {
 /**
  * Build the openclaw.json config for a fresh volume.
  */
-function buildOpenClawConfig(config: DeployConfig): string {
+function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string {
   const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
   const model = deriveModel(config);
   const port = config.port ?? 18789;
@@ -103,10 +104,14 @@ function buildOpenClawConfig(config: DeployConfig): string {
       mode: "local",
       auth: {
         mode: "token",
+        token: gatewayToken,
       },
       controlUi: {
         enabled: true,
-        allowedOrigins: [`http://localhost:${port}`],
+        allowedOrigins: [
+          `http://localhost:${port}`,
+          `http://127.0.0.1:${port}`,
+        ],
         // Required for non-loopback bind; safe because the container is only
         // exposed on localhost via port mapping.
         dangerouslyDisableDeviceAuth: true,
@@ -447,7 +452,8 @@ export class LocalDeployer implements Deployer {
     const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
 
     // Build init script: write config + workspace files on first deploy
-    const ocConfig = buildOpenClawConfig(config);
+    const gatewayToken = generateToken();
+    const ocConfig = buildOpenClawConfig(config, gatewayToken);
     const agentsMd = buildDefaultAgentsMd(config);
     const agentJson = buildAgentJson(config);
 
@@ -543,9 +549,9 @@ something that requires the user's attention.`;
       `test -f '${workspaceDir}/HEARTBEAT.md' || cat > '${workspaceDir}/HEARTBEAT.md' << 'HBEOF'\n${heartbeatMd}\nHBEOF`,
       `test -f '${workspaceDir}/MEMORY.md' || cat > '${workspaceDir}/MEMORY.md' << 'MEMEOF'\n${memoryMd}\nMEMEOF`,
       // If user provided agent source files via mount, copy them in (overrides defaults)
-      `if [ -d /tmp/agent-source/agents ]; then cp -r /tmp/agent-source/agents/* /home/node/.openclaw/ 2>/dev/null || true; fi`,
-      `if compgen -G '/tmp/agent-source/workspace-*' >/dev/null; then cp -r /tmp/agent-source/workspace-* /home/node/.openclaw/ 2>/dev/null || true; fi`,
+      `if [ -d /tmp/agent-source/workspace-${agentId} ]; then cp -r /tmp/agent-source/workspace-${agentId}/* '${workspaceDir}/' 2>/dev/null || true; fi`,
       `if [ -d /tmp/agent-source/skills ]; then cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
+      `if [ -f /tmp/agent-source/cron/jobs.json ]; then mkdir -p /home/node/.openclaw/cron && cp /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true; fi`,
     ].join("\n");
 
     const initArgs = [
@@ -803,12 +809,13 @@ something that requires the user's attention.`;
     }
 
     // Extract and save gateway token to host filesystem
-    await this.saveInstanceInfo(runtime, name, config, log);
+    await this.saveInstanceInfo(runtime, name, config, log, gatewayToken);
 
     const token = await this.readSavedToken(name);
     const url = `http://localhost:${port}`;
     if (token) {
-      log(`OpenClaw running at ${url}#token=${encodeURIComponent(token)}`);
+      log(`OpenClaw running at ${url}`);
+      log("Use the Open action from the Instances page to open with the saved token");
     } else {
       log(`OpenClaw running at ${url}`);
     }
@@ -843,6 +850,7 @@ something that requires the user's attention.`;
       const copyScript = [
         `cp /tmp/agent-source/workspace-${agentId}/* '${workspaceDir}/' 2>/dev/null || true`,
         `if [ -d /tmp/agent-source/skills ]; then mkdir -p /home/node/.openclaw/skills && cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
+        `if [ -f /tmp/agent-source/cron/jobs.json ]; then mkdir -p /home/node/.openclaw/cron && cp /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true; fi`,
       ].join("\n");
 
       await runCommand(runtime, [
@@ -984,7 +992,8 @@ something that requires the user's attention.`;
     const token = await this.readSavedToken(name);
     const url = `http://localhost:${port}`;
     if (token) {
-      log(`OpenClaw running at ${url}#token=${encodeURIComponent(token)}`);
+      log(`OpenClaw running at ${url}`);
+      log("Use the Open action from the Instances page to open with the saved token");
     } else {
       log(`OpenClaw running at ${url}`);
     }
@@ -1029,6 +1038,7 @@ something that requires the user's attention.`;
     name: string,
     config: DeployConfig,
     log: LogCallback,
+    precomputedToken?: string,
   ): Promise<void> {
     const instanceDir = installerLocalInstanceDir(name);
     try {
@@ -1043,14 +1053,17 @@ something that requires the user's attention.`;
 
     // Save gateway token
     try {
-      const { stdout } = await execFileAsync(runtime, [
-        "exec",
-        name,
-        "node",
-        "-e",
-        "const c=JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8'));console.log(c.gateway?.auth?.token||'')",
-      ]);
-      const token = stdout.trim();
+      let token = precomputedToken?.trim() || "";
+      if (!token) {
+        const { stdout } = await execFileAsync(runtime, [
+          "exec",
+          name,
+          "node",
+          "-e",
+          "const c=JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8'));console.log(c.gateway?.auth?.token||'')",
+        ]);
+        token = stdout.trim();
+      }
       if (token) {
         const tokenPath = join(instanceDir, "gateway-token");
         await writeFile(tokenPath, token + "\n", { mode: 0o600 });
@@ -1170,6 +1183,10 @@ something that requires the user's attention.`;
       `if [ -d /tmp/agent-source/skills ]; then`,
       `  mkdir -p /home/node/.openclaw/skills`,
       `  cp -rv /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true`,
+      `fi`,
+      `if [ -f /tmp/agent-source/cron/jobs.json ]; then`,
+      `  mkdir -p /home/node/.openclaw/cron`,
+      `  cp -v /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true`,
       `fi`,
     ].join("\n");
 
