@@ -302,7 +302,7 @@ export default function InstanceList() {
                     className="btn btn-ghost"
                     disabled={isActing}
                     onClick={() => handleRedeploy(inst.id)}
-                    title="Update agent files from ~/.openclaw-installer/agents/ and restart pod"
+                    title="Update agent files from ~/.openclaw/ and restart pod"
                   >
                     Re-deploy
                   </button>

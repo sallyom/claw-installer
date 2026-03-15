@@ -55,6 +55,19 @@ export async function isClusterReachable(): Promise<boolean> {
   }
 }
 
+/**
+ * Check whether the OpenTelemetry Operator CRD is installed on the cluster.
+ */
+export async function hasOtelOperator(): Promise<boolean> {
+  try {
+    const client = loadKubeConfig().makeApiClient(k8s.ApiextensionsV1Api);
+    await client.readCustomResourceDefinition({ name: "opentelemetrycollectors.opentelemetry.io" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function currentContext(): string {
   try {
     const kc = loadKubeConfig();

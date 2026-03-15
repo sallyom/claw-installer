@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { loadKubeConfig } from "../services/k8s.js";
 import type { DeployConfig, LogCallback } from "./types.js";
 import { shouldUseLitellmProxy, litellmModelName, LITELLM_PORT } from "./litellm.js";
+import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 
@@ -63,7 +64,25 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
     // Plain K8s: accessed via port-forward on localhost
     controlUi.allowedOrigins = ["http://localhost:18789"];
   }
+  const useOtel = shouldUseOtel(config);
   const ocConfig: Record<string, unknown> = {
+    // Enable diagnostics-otel plugin so the gateway emits OTLP traces
+    ...(useOtel ? {
+      plugins: {
+        allow: ["diagnostics-otel"],
+        entries: { "diagnostics-otel": { enabled: true } },
+      },
+      diagnostics: {
+        enabled: true,
+        otel: {
+          enabled: true,
+          endpoint: `http://localhost:${OTEL_HTTP_PORT}`,
+          traces: true,
+          metrics: true,
+          logs: false,
+        },
+      },
+    } : {}),
     gateway: {
       mode: "local",
       bind: opts?.routeUrl ? "loopback" : undefined,

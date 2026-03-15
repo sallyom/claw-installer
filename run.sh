@@ -81,7 +81,7 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
     error "Node.js not found. Install it first: brew install node"
   fi
 
-  APP_DIR="$HOME/.openclaw-installer/.app"
+  APP_DIR="$HOME/.openclaw/installer/.app"
 
   # Extract app from container image (or use local source if available)
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -114,7 +114,7 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
     fi
   fi
 
-  mkdir -p "$HOME/.openclaw-installer"
+  mkdir -p "$HOME/.openclaw/installer"
 
   info "Starting installer (Ctrl+C to stop)..."
   info "Open http://localhost:${PORT} in your browser."
@@ -160,7 +160,7 @@ fi
 # ---- Docker (simple on all platforms) ----
 if [ "$RUNTIME" = "docker" ]; then
   info "Detected Docker"
-  mkdir -p "$HOME/.openclaw-installer"
+  mkdir -p "$HOME/.openclaw/installer"
 
   # Stop existing container
   docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -170,7 +170,8 @@ if [ "$RUNTIME" = "docker" ]; then
     --name "$CONTAINER_NAME" \
     -p "${PORT}:3000" \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$HOME/.openclaw-installer:/home/node/.openclaw-installer" \
+    -v "$HOME/.openclaw:/home/node/.openclaw:ro" \
+    -v "$HOME/.openclaw/installer:/home/node/.openclaw/installer" \
     "${ENV_FLAGS[@]}" \
     "${GCP_MOUNT_FLAGS[@]}" \
     "$IMAGE_NAME"
@@ -196,7 +197,7 @@ case "$OS" in
       fi
     fi
 
-    mkdir -p "$HOME/.openclaw-installer"
+    mkdir -p "$HOME/.openclaw/installer"
 
     # Stop existing container
     podman stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -207,7 +208,8 @@ case "$OS" in
       --security-opt label=disable \
       -p "${PORT}:3000" \
       -v "$PODMAN_SOCK:/run/podman/podman.sock" \
-      -v "$HOME/.openclaw-installer:/home/node/.openclaw-installer:Z" \
+      -v "$HOME/.openclaw:/home/node/.openclaw:ro,Z" \
+      -v "$HOME/.openclaw/installer:/home/node/.openclaw/installer:Z" \
       "${ENV_FLAGS[@]}" \
       "${GCP_MOUNT_FLAGS[@]}" \
       "$IMAGE_NAME"

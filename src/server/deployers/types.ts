@@ -21,6 +21,12 @@ export interface DeployConfig {
   // LiteLLM proxy sidecar (default: true when Vertex + SA JSON)
   litellmProxy?: boolean;
   litellmImage?: string;
+  // OTEL collector sidecar (trace export)
+  otelEnabled?: boolean;
+  otelEndpoint?: string;       // OTLP endpoint (e.g. http://jaeger:4317 or http://mlflow:5000)
+  otelExperimentId?: string;   // MLflow experiment ID (optional, for MLflow endpoints)
+  otelImage?: string;
+  otelJaeger?: boolean;        // Run Jaeger all-in-one as a sidecar (UI on port 16686)
   // Telegram channel
   telegramEnabled?: boolean;
   telegramBotToken?: string;

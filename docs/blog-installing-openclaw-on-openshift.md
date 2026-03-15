@@ -160,7 +160,7 @@ After deployment, open the Route URL printed in the installer logs:
 https://openclaw-alice-myagent-openclaw.apps.your-cluster.example.com
 ```
 
-You'll be redirected to the OpenShift login page. After authenticating, the Control UI asks for your **Gateway Token** — this was printed in the deploy log and saved to `~/.openclaw-installer/k8s/<namespace>/gateway-token` on the machine running the installer.
+You'll be redirected to the OpenShift login page. After authenticating, the Control UI asks for your **Gateway Token** — this was printed in the deploy log and saved to `~/.openclaw/installer/k8s/<namespace>/gateway-token` on the machine running the installer.
 
 ## Model providers
 
@@ -176,9 +176,11 @@ The installer supports multiple model providers. Select your provider in the dep
 
 For Vertex AI providers, upload or specify the path to your GCP service account JSON. The installer creates a Kubernetes Secret (`gcp-sa`) and mounts it into the gateway container at `/home/node/gcp/sa.json`.
 
+The installer stores local agent content in the same `~/.openclaw` home used by native OpenClaw. Workspaces live in `~/.openclaw/workspace-*`, shared skills live in `~/.openclaw/skills`, and installer-only metadata lives in `~/.openclaw/installer`.
+
 ## Updating your agent
 
-Agent workspace files are saved to `~/.openclaw-installer/agents/workspace-<agentId>/` on the host after the first deploy. To change your agent's personality, instructions, or behavior:
+Agent workspace files are saved to `~/.openclaw/workspace-<agentId>/` on the host after the first deploy. To change your agent's personality, instructions, or behavior:
 
 1. Edit the files locally — `AGENTS.md` (instructions and security rules), `SOUL.md` (personality), `IDENTITY.md` (who the agent is), etc.
 2. Go to the **Instances** tab and click **Re-deploy**
@@ -191,7 +193,7 @@ Re-deploy reads your local files, updates the `openclaw-agent` ConfigMap, and re
 
 To change deploy-level settings — new image, different model provider, updated API key — fill in the deploy form and deploy to the same namespace. The installer uses create-or-replace logic on every resource, and the Deployment's `openclaw.io/restart-at` annotation forces a pod rollout.
 
-The deploy config (with secrets redacted) is saved to `~/.openclaw-installer/k8s/<namespace>/deploy-config.json`. The gateway token is saved alongside.
+The deploy config (with secrets redacted) is saved to `~/.openclaw/installer/k8s/<namespace>/deploy-config.json`. The gateway token is saved alongside.
 
 ## Managing instances
 
@@ -218,7 +220,7 @@ From the Instances tab, click Delete on the instance. The installer explicitly d
 
 | What | How |
 |------|-----|
-| Customize your agent | Edit files in `~/.openclaw-installer/agents/workspace-<id>/` and click Re-deploy |
+| Customize your agent | Edit files in `~/.openclaw/workspace-<id>/` and click Re-deploy |
 | Use Vertex AI with Claude | Upload credentials JSON, select Anthropic as the Vertex provider |
 | Run locally first | The installer also supports local podman deployment — select "Local" mode |
 | View example YAMLs | See [`docs/examples/`](examples/) for annotated templates of every resource |

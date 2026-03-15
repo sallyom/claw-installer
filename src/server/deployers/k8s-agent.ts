@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { agentId } from "./k8s-helpers.js";
 import type { DeployConfig, LogCallback } from "./types.js";
+import { agentWorkspaceDir } from "../paths.js";
 
 export function buildAgentsMd(config: DeployConfig): string {
   const id = agentId(config);
@@ -171,12 +172,12 @@ export const WORKSPACE_FILES: Record<string, (config: DeployConfig) => string> =
 
 /**
  * Load agent workspace files, preferring user-customized files from
- * ~/.openclaw-installer/agents/workspace-<agentId>/ over generated defaults.
+ * ~/.openclaw/workspace-<agentId>/ over generated defaults.
  * Saves generated defaults to the host dir if they don't already exist.
  */
 export function loadWorkspaceFiles(config: DeployConfig, log: LogCallback): { files: Record<string, string>; fromHost: boolean } {
   const id = agentId(config);
-  const hostDir = join(homedir(), ".openclaw-installer", "agents", `workspace-${id}`);
+  const hostDir = agentWorkspaceDir(id);
   const files: Record<string, string> = {};
   const allNames = ["AGENTS.md", "agent.json", ...Object.keys(WORKSPACE_FILES)];
   const builders: Record<string, (c: DeployConfig) => string> = {
@@ -197,7 +198,7 @@ export function loadWorkspaceFiles(config: DeployConfig, log: LogCallback): { fi
   }
 
   if (fromHost) {
-    log(`Using agent files from ~/.openclaw-installer/agents/workspace-${id}/`);
+    log(`Using agent files from ~/.openclaw/workspace-${id}/`);
   }
 
   // Save generated defaults to host so user can customize

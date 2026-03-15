@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { readFile } from "node:fs/promises";
+import { installerLocalInstanceDir } from "../paths.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -30,7 +31,10 @@ function containerToInstance(c: DiscoveredContainer): DeployResult {
     port = parseInt(portMatch[1], 10);
   } else {
     // Podman JSON format: [{"host_port":8080,"container_port":18789,...}]
-    const hostPortMatch = portsStr.match(/"host_port"\s*:\s*(\d+)/);
+    // Match specifically on container_port 18789 to avoid picking up sidecar ports
+    const gatewayPortMatch = portsStr.match(/"host_port"\s*:\s*(\d+)[^}]*"container_port"\s*:\s*18789/);
+    const reverseMatch = portsStr.match(/"container_port"\s*:\s*18789[^}]*"host_port"\s*:\s*(\d+)/);
+    const hostPortMatch = gatewayPortMatch || reverseMatch;
     if (hostPortMatch) port = parseInt(hostPortMatch[1], 10);
   }
 
@@ -521,13 +525,13 @@ router.delete("/:id", async (req, res) => {
 });
 
 /**
- * Read saved .env file from ~/.openclaw-installer/local/<dir>/.env
+ * Read saved .env file from ~/.openclaw/installer/local/<dir>/.env
  * to reconstruct deploy config for stopped instances.
  */
 async function readSavedConfig(containerName: string): Promise<Record<string, string>> {
   const vars: Record<string, string> = {};
   try {
-    const envPath = join(homedir(), ".openclaw-installer", "local", containerName, ".env");
+    const envPath = join(installerLocalInstanceDir(containerName), ".env");
     const content = await readFile(envPath, "utf8");
     for (const line of content.split("\n")) {
       if (line.startsWith("#") || !line.includes("=")) continue;
@@ -580,6 +584,11 @@ async function findInstance(name: string): Promise<DeployResult | null> {
           // SA JSON is on the volume — set a sentinel so buildRunArgs sets GOOGLE_APPLICATION_CREDENTIALS
           gcpServiceAccountJson: savedVars.GOOGLE_APPLICATION_CREDENTIALS ? "(on-volume)" : undefined,
           litellmProxy: savedVars.LITELLM_PROXY === "true" || undefined,
+          otelEnabled: savedVars.OTEL_ENABLED === "true" || undefined,
+          otelJaeger: savedVars.OTEL_JAEGER === "true" || undefined,
+          otelEndpoint: savedVars.OTEL_ENDPOINT || undefined,
+          otelExperimentId: savedVars.OTEL_EXPERIMENT_ID || undefined,
+          otelImage: savedVars.OTEL_IMAGE || undefined,
           telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
           telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
         },

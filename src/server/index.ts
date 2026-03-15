@@ -10,7 +10,8 @@ import { detectRuntime } from "./services/container.js";
 import { isClusterReachable, isOpenShift, currentContext } from "./services/k8s.js";
 import { detectGcpDefaults } from "./services/gcp.js";
 import { readdir, readFile } from "node:fs/promises";
-import { homedir, userInfo } from "node:os";
+import { userInfo } from "node:os";
+import { installerDataDir } from "./paths.js";
 
 const app = express();
 const server = createServer(app);
@@ -60,10 +61,10 @@ app.get("/api/configs/gcp-defaults", async (_req, res) => {
   });
 });
 
-// List saved instance configs from ~/.openclaw-installer/local/*/.env
-// and ~/.openclaw-installer/k8s/*/deploy-config.json
+// List saved instance configs from ~/.openclaw/installer/local/*/.env
+// and ~/.openclaw/installer/k8s/*/deploy-config.json
 app.get("/api/configs", async (_req, res) => {
-  const baseDir = join(homedir(), ".openclaw-installer");
+  const baseDir = installerDataDir();
   const configs: Array<{ name: string; type: string; vars: Record<string, string> }> = [];
 
   // Local instances (.env files)

@@ -3,7 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { v4 as uuid } from "uuid";
-import { coreApi, appsApi, isOpenShift } from "../services/k8s.js";
+import { coreApi, appsApi, loadKubeConfig, isOpenShift, hasOtelOperator } from "../services/k8s.js";
+import { installerK8sInstanceDir } from "../paths.js";
 import type {
   Deployer,
   DeployConfig,
@@ -20,11 +21,13 @@ import {
   agentConfigMapManifest,
   gcpSaSecretManifest,
   litellmConfigMapManifest,
+  otelConfigMapManifest,
   secretManifest,
   serviceManifest,
   deploymentManifest,
 } from "./k8s-manifests.js";
 import { shouldUseLitellmProxy, generateLitellmMasterKey, generateLitellmConfig } from "./litellm.js";
+import { shouldUseOtel, generateOtelConfig } from "./otel.js";
 
 // Re-export discovery for consumers
 export type { K8sPodInfo, K8sInstance } from "./k8s-discovery.js";
@@ -87,7 +90,7 @@ export class KubernetesDeployer implements Deployer {
     log(`Deploying OpenClaw to namespace: ${ns}`);
     if (onOcp) log("OpenShift detected — deploying with OAuth proxy");
 
-    // Load workspace files (prefers user-customized from ~/.openclaw-installer/agents/)
+    // Load workspace files (prefers user-customized from ~/.openclaw/workspace-*)
     const { files: workspaceFiles } = loadWorkspaceFiles(config, log);
 
     // 1. Namespace
@@ -178,6 +181,67 @@ export class KubernetesDeployer implements Deployer {
       );
     }
 
+    // 5c. OTEL collector config
+    let otelViaOperator = false;
+    if (shouldUseOtel(config)) {
+      const endpoint = config.otelEndpoint || (config.otelJaeger ? "localhost:4317" : "");
+      log("OTEL collector enabled — traces will be exported to " + endpoint);
+
+      const operatorAvailable = await hasOtelOperator();
+      if (operatorAvailable) {
+        // Use the OTel Operator: create an OpenTelemetryCollector CR in sidecar mode.
+        // The operator injects the collector container automatically when the pod
+        // has the sidecar.opentelemetry.io/inject annotation.
+        otelViaOperator = true;
+        log("OpenTelemetry Operator detected — using operator-managed sidecar");
+        const otelYaml = generateOtelConfig(config);
+        const otelCr = {
+          apiVersion: "opentelemetry.io/v1beta1",
+          kind: "OpenTelemetryCollector",
+          metadata: { name: "openclaw-sidecar", namespace: ns, labels: { app: "openclaw" } },
+          spec: {
+            mode: "sidecar",
+            config: otelYaml,
+            resources: {
+              requests: { memory: "128Mi", cpu: "100m" },
+              limits: { memory: "256Mi", cpu: "200m" },
+            },
+          },
+        };
+        const customApi = loadKubeConfig().makeApiClient(k8s.CustomObjectsApi);
+        const crParams = {
+          group: "opentelemetry.io",
+          version: "v1beta1",
+          namespace: ns,
+          plural: "opentelemetrycollectors",
+        };
+        try {
+          await customApi.getNamespacedCustomObject({ ...crParams, name: "openclaw-sidecar" });
+          log("Updating OpenTelemetryCollector openclaw-sidecar...");
+          await customApi.patchNamespacedCustomObject(
+            { ...crParams, name: "openclaw-sidecar", body: otelCr },
+            k8s.setHeaderOptions("Content-Type", k8s.PatchStrategy.MergePatch),
+          );
+        } catch {
+          log("Creating OpenTelemetryCollector openclaw-sidecar...");
+          await customApi.createNamespacedCustomObject({ ...crParams, body: otelCr });
+        }
+        log("OpenTelemetryCollector CR applied");
+      } else {
+        // No operator: use direct sidecar container via ConfigMap
+        log("No OTel Operator — deploying collector as a direct sidecar");
+        const otelYaml = generateOtelConfig(config);
+        const otelCm = otelConfigMapManifest(ns, otelYaml);
+        await applyResource(
+          () => core.readNamespacedConfigMap({ name: "otel-collector-config", namespace: ns }),
+          () => core.createNamespacedConfigMap({ namespace: ns, body: otelCm }),
+          () => core.replaceNamespacedConfigMap({ name: "otel-collector-config", namespace: ns, body: otelCm }),
+          "ConfigMap otel-collector-config",
+          log,
+        );
+      }
+    }
+
     // 6. Secret
     const secret = secretManifest(ns, config, gatewayToken, litellmMasterKey);
     await applyResource(
@@ -213,7 +277,7 @@ export class KubernetesDeployer implements Deployer {
     }
 
     // 8. Deployment
-    const dep = deploymentManifest(ns, config, onOcp);
+    const dep = deploymentManifest(ns, config, onOcp, otelViaOperator);
     await applyResource(
       () => apps.readNamespacedDeployment({ name: "openclaw", namespace: ns }),
       () => apps.createNamespacedDeployment({ namespace: ns, body: dep }),
@@ -235,7 +299,7 @@ export class KubernetesDeployer implements Deployer {
 
     // Save deploy config for re-deploy (strip secrets, keep references)
     try {
-      const configDir = join(homedir(), ".openclaw-installer", "k8s", ns);
+      const configDir = installerK8sInstanceDir(ns);
       mkdirSync(configDir, { recursive: true });
       const savedConfig = {
         ...config,
@@ -322,7 +386,7 @@ export class KubernetesDeployer implements Deployer {
 
     log(`Re-deploying agent files to ${ns}...`);
 
-    // Load workspace files from ~/.openclaw-installer/agents/
+    // Load workspace files from ~/.openclaw/workspace-*
     const { files: workspaceFiles, fromHost } = loadWorkspaceFiles(result.config, log);
     if (!fromHost) {
       log("No custom agent files found — using generated defaults");
@@ -398,6 +462,14 @@ echo "Config initialized"
       { name: "ConfigMap openclaw-config", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-config", namespace: ns }) },
       { name: "ConfigMap openclaw-agent", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }) },
       { name: "ConfigMap litellm-config", fn: () => core.deleteNamespacedConfigMap({ name: "litellm-config", namespace: ns }) },
+      { name: "ConfigMap otel-collector-config", fn: () => core.deleteNamespacedConfigMap({ name: "otel-collector-config", namespace: ns }) },
+      { name: "OpenTelemetryCollector openclaw-sidecar", fn: async () => {
+        const customApi = loadKubeConfig().makeApiClient(k8s.CustomObjectsApi);
+        await customApi.deleteNamespacedCustomObject({
+          group: "opentelemetry.io", version: "v1beta1", namespace: ns,
+          plural: "opentelemetrycollectors", name: "openclaw-sidecar",
+        });
+      }},
       { name: "PVC", fn: () => core.deleteNamespacedPersistentVolumeClaim({ name: "openclaw-home-pvc", namespace: ns }) },
     ];
 

@@ -24,6 +24,16 @@ npm install && npm run build && npm run dev
 
 Open `http://localhost:3000`, pick your deploy target, fill in the form, and click Deploy.
 
+## Native Layout
+
+`claw-installer` now uses the same home directory layout as a native OpenClaw install:
+
+- `~/.openclaw/workspace-*` for agent workspaces
+- `~/.openclaw/skills` for shared skills
+- `~/.openclaw/installer` for installer-only metadata
+
+That keeps local, Kubernetes, and native OpenClaw agent files in one place without introducing a separate installer-specific home.
+
 ## Deploy Targets
 
 | Target | Guide | What it does |
@@ -59,7 +69,7 @@ For Vertex AI, upload your GCP service account JSON file (or provide an absolute
 
 ## Customizing Your Agent
 
-After the first deploy, agent files are saved to `~/.openclaw-installer/agents/workspace-<id>/` on the host:
+After the first deploy, agent files are saved to `~/.openclaw/workspace-<id>/` on the host:
 
 ```
 AGENTS.md       # Agent identity, instructions, security rules
@@ -76,8 +86,8 @@ Edit these files locally, then push the changes to your running instance:
 
 | Deploy target | How to update agent files |
 |---------------|--------------------------|
-| **Local (podman/docker)** | Edit files in `~/.openclaw-installer/agents/workspace-<id>/`, then **Stop** and **Start** the container from the Instances tab. The installer copies your local files into the volume on every Start. |
-| **Kubernetes / OpenShift** | Edit files in `~/.openclaw-installer/agents/workspace-<id>/`, then click **Re-deploy** from the Instances tab. This updates the ConfigMap from your local files and restarts the pod. A plain Stop/Start only scales replicas — it does *not* sync files from the host. |
+| **Local (podman/docker)** | Edit files in `~/.openclaw/workspace-<id>/`, then **Stop** and **Start** the container from the Instances tab. The installer copies your local files into the volume on every Start. |
+| **Kubernetes / OpenShift** | Edit files in `~/.openclaw/workspace-<id>/`, then click **Re-deploy** from the Instances tab. This updates the ConfigMap from your local files and restarts the pod. A plain Stop/Start only scales replicas — it does *not* sync files from the host. |
 
 The installer uses your local files when they exist, falling back to generated defaults for anything missing.
 

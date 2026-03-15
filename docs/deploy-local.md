@@ -18,6 +18,12 @@ The script pulls the installer image, starts it as a container with your podman 
 
 On macOS with podman, the script extracts the app from the image and runs it natively with Node.js (`brew install node` required).
 
+The installer uses the native OpenClaw home layout:
+
+- `~/.openclaw/workspace-*` for agent workspaces
+- `~/.openclaw/skills` for shared skills
+- `~/.openclaw/installer` for installer state
+
 ### From source
 
 ```bash
@@ -104,7 +110,8 @@ podman run -d --name claw-installer \
   --security-opt label=disable \
   -p 3000:3000 \
   -v /run/user/$(id -u)/podman/podman.sock:/run/podman/podman.sock \
-  -v ~/.openclaw-installer:/home/node/.openclaw-installer:Z \
+  -v ~/.openclaw:/home/node/.openclaw:ro,Z \
+  -v ~/.openclaw/installer:/home/node/.openclaw/installer:Z \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   quay.io/sallyom/claw-installer:latest
 
@@ -112,7 +119,8 @@ podman run -d --name claw-installer \
 docker run -d --name claw-installer \
   -p 3000:3000 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v ~/.openclaw-installer:/home/node/.openclaw-installer \
+  -v ~/.openclaw:/home/node/.openclaw:ro \
+  -v ~/.openclaw/installer:/home/node/.openclaw/installer \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   quay.io/sallyom/claw-installer:latest
 
@@ -136,7 +144,7 @@ ssh -L 3000:localhost:3000 user@remote-host
 
 ## Updating Your Agent
 
-After the initial deploy, your agent files live in `~/.openclaw-installer/agents/workspace-<prefix>_<name>/` on the host. To update a running agent:
+After the initial deploy, your agent files live in `~/.openclaw/workspace-<prefix>_<name>/` on the host. To update a running agent:
 
 1. Edit the files locally (e.g., change `AGENTS.md` to update instructions, `SOUL.md` to change personality)
 2. Go to the **Instances** tab and **Stop** the container
@@ -158,27 +166,27 @@ The **Instances** tab discovers all OpenClaw containers via labels and image nam
 ## Host Filesystem
 
 ```
-~/.openclaw-installer/
-├── agents/                                  # Shared — agent workspace files
-│   ├── workspace-<prefix>_<name>/
-│   │   ├── AGENTS.md
-│   │   ├── agent.json
-│   │   ├── SOUL.md
-│   │   ├── IDENTITY.md
-│   │   ├── TOOLS.md
-│   │   ├── USER.md
-│   │   ├── HEARTBEAT.md
-│   │   └── MEMORY.md
-│   └── skills/
-│       └── <skill-name>/
-│           └── SKILL.md
-└── local/                                   # Local instance configs
-    └── openclaw-<prefix>-<name>/
-        ├── .env                             # Instance variables
-        └── gateway-token                    # Gateway auth token
+~/.openclaw/
+├── installer/
+│   └── local/                               # Local instance configs
+│       └── openclaw-<prefix>-<name>/
+│           ├── .env                         # Instance variables
+│           └── gateway-token                # Gateway auth token
+├── skills/
+│   └── <skill-name>/
+│       └── SKILL.md
+└── workspace-<prefix>_<name>/
+    ├── AGENTS.md
+    ├── agent.json
+    ├── SOUL.md
+    ├── IDENTITY.md
+    ├── TOOLS.md
+    ├── USER.md
+    ├── HEARTBEAT.md
+    └── MEMORY.md
 ```
 
-Edit files in `agents/workspace-<id>/`, then Stop and Start the container to push changes. The installer copies your local files into the volume on every Start, falling back to generated defaults for anything missing.
+Edit files in `workspace-<id>/`, then Stop and Start the container to push changes. The installer copies your local files into the volume on every Start, falling back to generated defaults for anything missing.
 
 ## Environment Variables
 

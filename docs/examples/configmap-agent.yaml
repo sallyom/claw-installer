@@ -1,6 +1,6 @@
 # Agent workspace files. These define the agent's identity, personality,
 # and operational rules. The installer generates defaults and saves them
-# to ~/.openclaw-installer/agents/workspace-<agentId>/ on the host so
+# to ~/.openclaw/workspace-<agentId>/ on the host so
 # you can customize and re-deploy.
 apiVersion: v1
 kind: ConfigMap

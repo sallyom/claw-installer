@@ -6,6 +6,12 @@ This guide covers OpenShift specifically. The deployer also works on plain Kuber
 
 For the full story — architecture, security model, and how the OAuth proxy works — see the [blog post](blog-installing-openclaw-on-openshift.md).
 
+The installer uses the same `~/.openclaw` home layout as native OpenClaw:
+
+- `~/.openclaw/workspace-*` for agent workspaces
+- `~/.openclaw/skills` for shared skills
+- `~/.openclaw/installer` for installer state
+
 ## Prerequisites
 
 - An OpenShift cluster where you can create a namespace (no cluster-admin required)
@@ -102,12 +108,12 @@ https://openclaw-alice-myagent-openclaw.apps.your-cluster.example.com
 OpenShift OAuth handles authentication — you'll be redirected to the login page. After authenticating, the Control UI asks for your **Gateway Token**, which was printed in the deploy log and saved to:
 
 ```
-~/.openclaw-installer/k8s/alice-myagent-openclaw/gateway-token
+~/.openclaw/installer/k8s/alice-myagent-openclaw/gateway-token
 ```
 
 ## Updating Your Agent
 
-After the initial deploy, your agent files live in `~/.openclaw-installer/agents/workspace-<prefix>_<name>/` on the host. To push changes to a running K8s deployment:
+After the initial deploy, your agent files live in `~/.openclaw/workspace-<prefix>_<name>/` on the host. To push changes to a running K8s deployment:
 
 1. Edit the files locally (e.g., change `AGENTS.md` to update instructions, `SOUL.md` to change personality)
 2. Go to the **Instances** tab and click **Re-deploy**
@@ -120,7 +126,7 @@ Re-deploy reads your local files, updates the `openclaw-agent` ConfigMap, and re
 
 To change deploy configuration (API keys, model provider, image, etc.), fill in the deploy form and deploy to the same namespace. The installer uses create-or-replace logic on every resource, and the Deployment's `openclaw.io/restart-at` annotation forces a pod rollout.
 
-The deploy config (with secrets redacted) is saved to `~/.openclaw-installer/k8s/<namespace>/deploy-config.json` after each deploy.
+The deploy config (with secrets redacted) is saved to `~/.openclaw/installer/k8s/<namespace>/deploy-config.json` after each deploy.
 
 ## Instance Management
 
@@ -147,22 +153,22 @@ From the Instances tab, click Delete. The installer explicitly deletes each reso
 ## Host Filesystem
 
 ```
-~/.openclaw-installer/
-├── agents/                                  # Shared — agent workspace files
-│   ├── workspace-<prefix>_<name>/
-│   │   ├── AGENTS.md
-│   │   ├── SOUL.md
-│   │   └── ...
-│   └── skills/
-│       └── <skill-name>/
-│           └── SKILL.md
-└── k8s/                                     # K8s instance configs
-    └── <namespace>/
-        ├── deploy-config.json               # Deploy config (secrets redacted)
-        └── gateway-token                    # Gateway auth token
+~/.openclaw/
+├── installer/
+│   └── k8s/                                 # K8s instance configs
+│       └── <namespace>/
+│           ├── deploy-config.json           # Deploy config (secrets redacted)
+│           └── gateway-token                # Gateway auth token
+├── skills/
+│   └── <skill-name>/
+│       └── SKILL.md
+└── workspace-<prefix>_<name>/
+    ├── AGENTS.md
+    ├── SOUL.md
+    └── ...
 ```
 
-Edit files in `agents/workspace-<id>/` and click **Re-deploy** from the Instances tab to push changes. The installer updates the ConfigMap and restarts the pod.
+Edit files in `workspace-<id>/` and click **Re-deploy** from the Instances tab to push changes. The installer updates the ConfigMap and restarts the pod.
 
 ## Vertex AI
 
