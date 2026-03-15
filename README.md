@@ -91,6 +91,13 @@ Edit these files locally, then push the changes to your running instance:
 
 The installer uses your local files when they exist, falling back to generated defaults for anything missing.
 
+Current sync model is intentionally one-way by default: host files in `~/.openclaw` are the source of truth, and changes are pushed into the running instance on Local Start or Kubernetes Re-deploy. If an agent or user edits files inside the running OpenClaw UI, those changes affect the live instance immediately but do not sync back to local files yet, so they may not survive a restart or re-deploy.
+
+Planned next steps:
+
+- explicit `Pull running changes to local` sync for local and Kubernetes instances
+- optional GitOps-backed sync, so `~/.openclaw` can be treated as a tracked working tree and re-deploys can follow git state
+
 ## Architecture
 
 ```
@@ -180,7 +187,10 @@ claw-installer/
 - [x] Agent provisioning with full workspace files
 - [x] Custom agent/skill provisioning from host directory
 - [x] Deploy config persistence for re-deploy
+- [x] One-way host-to-instance workspace sync on Local Start / K8s Re-deploy
 - [ ] Subagent provisioning
 - [ ] Cron job provisioning from JOB.md files
+- [ ] Pull running changes back to local files
+- [ ] GitOps-backed workspace sync
 - [ ] Skill import from git repos
 - [ ] SSH deployer (remote host)
