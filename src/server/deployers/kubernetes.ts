@@ -1,5 +1,4 @@
 import * as k8s from "@kubernetes/client-node";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { v4 as uuid } from "uuid";

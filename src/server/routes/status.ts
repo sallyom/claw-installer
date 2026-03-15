@@ -2,7 +2,6 @@ import { Router } from "express";
 import { readFile } from "node:fs/promises";
 import { installerLocalInstanceDir } from "../paths.js";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import {
   discoverContainers,
   discoverVolumes,

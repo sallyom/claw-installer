@@ -1,6 +1,6 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { v4 as uuid } from "uuid";
@@ -28,7 +28,7 @@ import {
   LITELLM_IMAGE,
   LITELLM_PORT,
 } from "./litellm.js";
-import { shouldUseOtel, otelAgentEnv, OTEL_HTTP_PORT } from "./otel.js";
+import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
 import { startOtelSidecar, stopOtelSidecar, startJaegerSidecar, otelContainerName, jaegerContainerName } from "./local-otel.js";
 import { JAEGER_UI_PORT } from "./otel.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";

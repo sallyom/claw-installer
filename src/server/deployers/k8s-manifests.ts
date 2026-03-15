@@ -2,7 +2,6 @@ import * as k8s from "@kubernetes/client-node";
 import {
   DEFAULT_IMAGE,
   agentId,
-  deriveModel,
   tryParseProjectId,
   buildOpenClawConfig,
 } from "./k8s-helpers.js";
