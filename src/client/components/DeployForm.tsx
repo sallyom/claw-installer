@@ -114,6 +114,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
     telegramEnabled: false,
     telegramBotToken: "",
     telegramAllowFrom: "",
+    // Agent security
+    cronEnabled: false,
+    subagentPolicy: "none" as "none" | "self" | "unrestricted",
     // Kubernetes
     namespace: "",
     // LiteLLM proxy
@@ -213,6 +216,8 @@ export default function DeployForm({ onDeployStarted }: Props) {
       telegramBotToken: v("TELEGRAM_BOT_TOKEN", "telegramBotToken") || prev.telegramBotToken,
       telegramAllowFrom: v("TELEGRAM_ALLOW_FROM", "telegramAllowFrom") || prev.telegramAllowFrom,
       litellmProxy: vars.litellmProxy === "false" ? false : prev.litellmProxy,
+      cronEnabled: vars.cronEnabled === "true" ? true : prev.cronEnabled,
+      subagentPolicy: (vars.subagentPolicy as "none" | "self" | "unrestricted") || prev.subagentPolicy,
     }));
   };
 
@@ -266,6 +271,8 @@ export default function DeployForm({ onDeployStarted }: Props) {
         telegramEnabled: config.telegramEnabled || undefined,
         telegramBotToken: config.telegramEnabled ? config.telegramBotToken || undefined : undefined,
         telegramAllowFrom: config.telegramEnabled ? config.telegramAllowFrom || undefined : undefined,
+        cronEnabled: config.cronEnabled || undefined,
+        subagentPolicy: config.subagentPolicy !== "none" ? config.subagentPolicy : undefined,
       };
 
       const res = await fetch("/api/deploy", {
@@ -843,6 +850,48 @@ export default function DeployForm({ onDeployStarted }: Props) {
             </div>
           </>
         )}
+
+        <h3 style={{ marginTop: "1.5rem" }}>Agent Security</h3>
+
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="checkbox"
+              checked={config.cronEnabled}
+              onChange={(e) =>
+                setConfig((prev) => ({ ...prev, cronEnabled: e.target.checked }))
+              }
+              style={{ width: "auto" }}
+            />
+            Enable cron jobs
+          </label>
+          <div className="hint">
+            Allow the agent to create and run scheduled tasks.
+            Most use cases don't require this, and it is a known risk vector
+            (agents can modify their own schedules).
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>Subagent spawning</label>
+          <select
+            value={config.subagentPolicy}
+            onChange={(e) =>
+              setConfig((prev) => ({
+                ...prev,
+                subagentPolicy: e.target.value as "none" | "self" | "unrestricted",
+              }))
+            }
+          >
+            <option value="none">Disabled</option>
+            <option value="self">Same agent only (self-delegation)</option>
+            <option value="unrestricted">Unrestricted (any agent)</option>
+          </select>
+          <div className="hint">
+            Controls whether the agent can spawn subagents.
+            "Unrestricted" allows spawning any agent, which increases attack surface.
+          </div>
+        </div>
 
         <div style={{ marginTop: "1.5rem" }}>
           <button

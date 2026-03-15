@@ -21,6 +21,9 @@ export interface DeployConfig {
   // LiteLLM proxy sidecar (default: true when Vertex + SA JSON)
   litellmProxy?: boolean;
   litellmImage?: string;
+  // Agent security
+  cronEnabled?: boolean; // default: false (opt-in)
+  subagentPolicy?: "none" | "self" | "unrestricted"; // default: "none"
   // Telegram channel
   telegramEnabled?: boolean;
   telegramBotToken?: string;
