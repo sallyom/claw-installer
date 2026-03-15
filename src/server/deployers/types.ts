@@ -35,7 +35,7 @@ export interface DeployConfig {
   containerRuntime?: "podman" | "docker";
   image?: string;
   port?: number;
-  agentSourceDir?: string; // Host directory with agents/ and skills/ to provision
+  agentSourceDir?: string; // Host directory with workspace-*, skills/, and cron/jobs.json to provision
   // Kubernetes mode
   namespace?: string;
   withA2a?: boolean;

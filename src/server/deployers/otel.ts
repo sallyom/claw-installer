@@ -39,6 +39,15 @@ export function resolveEndpointForContainer(endpoint: string, runtime?: string):
 }
 
 export function generateOtelConfig(config: DeployConfig): string {
+  const otelConfig = buildOtelConfig(config);
+  return renderOtelConfigYaml(otelConfig);
+}
+
+export function generateOtelConfigObject(config: DeployConfig): Record<string, unknown> {
+  return buildOtelConfig(config);
+}
+
+function buildOtelConfig(config: DeployConfig): Record<string, unknown> {
   // When Jaeger sidecar is enabled and no external endpoint is set,
   // export to the in-pod Jaeger on localhost:4317
   const rawEndpoint = config.otelEndpoint || (config.otelJaeger ? "localhost:4317" : "");
@@ -50,79 +59,109 @@ export function generateOtelConfig(config: DeployConfig): string {
     : rawEndpoint;
   const useGrpc = endpoint.includes(":4317");
   const ns = config.namespace || config.prefix || "default";
-
-  const lines: string[] = [
-    "receivers:",
-    "  otlp:",
-    "    protocols:",
-    "      grpc:",
-    `        endpoint: 127.0.0.1:${OTEL_GRPC_PORT}`,
-    "      http:",
-    `        endpoint: 127.0.0.1:${OTEL_HTTP_PORT}`,
-    "",
-    "processors:",
-    "  batch:",
-    "    timeout: 5s",
-    "    send_batch_size: 100",
-    "",
-    "  memory_limiter:",
-    "    check_interval: 1s",
-    "    limit_mib: 256",
-    "    spike_limit_mib: 64",
-    "",
-    "  resource:",
-    "    attributes:",
-    "      - key: service.namespace",
-    `        value: "${ns}"`,
-    "        action: upsert",
-    "      - key: deployment.environment",
-    "        value: production",
-    "        action: upsert",
-    "",
-    "exporters:",
-  ];
-
+  const exporters: Record<string, unknown> = {};
   if (useGrpc) {
-    // gRPC exporter (Jaeger, native OTLP)
-    lines.push(
-      "  otlp:",
-      `    endpoint: "${endpoint}"`,
-      "    tls:",
-      `      insecure: ${endpoint.startsWith("http://") || !endpoint.startsWith("https://") ? "true" : "false"}`,
-    );
+    exporters.otlp = {
+      endpoint,
+      tls: {
+        insecure: endpoint.startsWith("http://") || !endpoint.startsWith("https://"),
+      },
+    };
   } else {
-    // HTTP exporter (MLflow, Tempo, generic OTLP/HTTP)
-    const tls = endpoint.startsWith("https://") ? "false" : "true";
-    lines.push(
-      "  otlphttp:",
-      `    endpoint: "${endpoint}"`,
-    );
+    const otlpHttpExporter: Record<string, unknown> = {
+      endpoint,
+      tls: {
+        insecure: !endpoint.startsWith("https://"),
+      },
+    };
     if (config.otelExperimentId) {
-      lines.push(
-        "    headers:",
-        `      x-mlflow-experiment-id: "${config.otelExperimentId}"`,
-      );
+      otlpHttpExporter.headers = {
+        "x-mlflow-experiment-id": config.otelExperimentId,
+      };
     }
-    lines.push(
-      "    tls:",
-      `      insecure: ${tls}`,
-    );
+    exporters.otlphttp = otlpHttpExporter;
   }
 
-  lines.push(
-    "",
-    "  debug:",
-    "    verbosity: basic",
-    "",
-    "service:",
-    "  pipelines:",
-    "    traces:",
-    "      receivers: [otlp]",
-    "      processors: [memory_limiter, resource, batch]",
-    `      exporters: [${useGrpc ? "otlp" : "otlphttp"}, debug]`,
-  );
+  exporters.debug = { verbosity: "basic" };
 
-  return lines.join("\n") + "\n";
+  return {
+    receivers: {
+      otlp: {
+        protocols: {
+          grpc: { endpoint: `127.0.0.1:${OTEL_GRPC_PORT}` },
+          http: { endpoint: `127.0.0.1:${OTEL_HTTP_PORT}` },
+        },
+      },
+    },
+    processors: {
+      batch: {
+        timeout: "5s",
+        send_batch_size: 100,
+      },
+      memory_limiter: {
+        check_interval: "1s",
+        limit_mib: 256,
+        spike_limit_mib: 64,
+      },
+      resource: {
+        attributes: [
+          { key: "service.namespace", value: ns, action: "upsert" },
+          { key: "deployment.environment", value: "production", action: "upsert" },
+        ],
+      },
+    },
+    exporters,
+    service: {
+      pipelines: {
+        traces: {
+          receivers: ["otlp"],
+          processors: ["memory_limiter", "resource", "batch"],
+          exporters: [useGrpc ? "otlp" : "otlphttp", "debug"],
+        },
+      },
+    },
+  };
+}
+
+function renderOtelConfigYaml(value: unknown, indent = 0): string {
+  const pad = " ".repeat(indent);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (item !== null && typeof item === "object") {
+        const nested = renderOtelConfigYaml(item, indent + 2);
+        return `${pad}-\n${nested}`;
+      }
+      return `${pad}- ${formatScalar(item)}`;
+    }).join("\n");
+  }
+
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).map(([key, entry]) => {
+      if (entry !== null && typeof entry === "object") {
+        return `${pad}${key}:\n${renderOtelConfigYaml(entry, indent + 2)}`;
+      }
+      return `${pad}${key}: ${formatScalar(entry)}`;
+    }).join("\n");
+  }
+
+  return `${pad}${formatScalar(value)}`;
+}
+
+function formatScalar(value: unknown): string {
+  if (typeof value === "string") {
+    if (/^[A-Za-z0-9._/-]+$/.test(value)) {
+      return value;
+    }
+    return JSON.stringify(value);
+  }
+  if (typeof value === "boolean" || typeof value === "number") {
+    return String(value);
+  }
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  return JSON.stringify(value);
 }
 
 /**

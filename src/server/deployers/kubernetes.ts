@@ -1,9 +1,11 @@
 import * as k8s from "@kubernetes/client-node";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { v4 as uuid } from "uuid";
 import { coreApi, appsApi, loadKubeConfig, isOpenShift, hasOtelOperator } from "../services/k8s.js";
-import { installerK8sInstanceDir } from "../paths.js";
+import { cronJobsFile, installerK8sInstanceDir, skillsDir } from "../paths.js";
+import { loadTextTree } from "../state-tree.js";
 import type {
   Deployer,
   DeployConfig,
@@ -18,6 +20,8 @@ import {
   pvcManifest,
   configMapManifest,
   agentConfigMapManifest,
+  fileTreeConfigMapManifest,
+  fileConfigMapManifest,
   gcpSaSecretManifest,
   litellmConfigMapManifest,
   otelConfigMapManifest,
@@ -26,7 +30,7 @@ import {
   deploymentManifest,
 } from "./k8s-manifests.js";
 import { shouldUseLitellmProxy, generateLitellmMasterKey, generateLitellmConfig } from "./litellm.js";
-import { shouldUseOtel, generateOtelConfig } from "./otel.js";
+import { shouldUseOtel, generateOtelConfig, generateOtelConfigObject } from "./otel.js";
 
 // Re-export discovery for consumers
 export type { K8sPodInfo, K8sInstance } from "./k8s-discovery.js";
@@ -91,6 +95,8 @@ export class KubernetesDeployer implements Deployer {
 
     // Load workspace files (prefers user-customized from ~/.openclaw/workspace-*)
     const { files: workspaceFiles } = loadWorkspaceFiles(config, log);
+    const skillEntries = await loadTextTree(skillsDir()).catch(() => []);
+    const cronJobsContent = await readFile(cronJobsFile(), "utf8").catch(() => undefined);
 
     // 1. Namespace
     await applyNamespace(core, ns, log);
@@ -163,6 +169,24 @@ export class KubernetesDeployer implements Deployer {
       log,
     );
 
+    const skillsCm = fileTreeConfigMapManifest(ns, "openclaw-skills", skillEntries);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-skills", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: skillsCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-skills", namespace: ns, body: skillsCm }),
+      "ConfigMap openclaw-skills",
+      log,
+    );
+
+    const cronCm = fileConfigMapManifest(ns, "openclaw-cron", "jobs.json", cronJobsContent);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-cron", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: cronCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-cron", namespace: ns, body: cronCm }),
+      "ConfigMap openclaw-cron",
+      log,
+    );
+
     // 5b. LiteLLM proxy config (when using Vertex via proxy)
     const useProxy = shouldUseLitellmProxy(config);
     const litellmMasterKey = useProxy ? generateLitellmMasterKey() : undefined;
@@ -193,14 +217,13 @@ export class KubernetesDeployer implements Deployer {
         // has the sidecar.opentelemetry.io/inject annotation.
         otelViaOperator = true;
         log("OpenTelemetry Operator detected — using operator-managed sidecar");
-        const otelYaml = generateOtelConfig(config);
         const otelCr = {
           apiVersion: "opentelemetry.io/v1beta1",
           kind: "OpenTelemetryCollector",
           metadata: { name: "openclaw-sidecar", namespace: ns, labels: { app: "openclaw" } },
           spec: {
             mode: "sidecar",
-            config: otelYaml,
+            config: generateOtelConfigObject(config),
             resources: {
               requests: { memory: "128Mi", cpu: "100m" },
               limits: { memory: "256Mi", cpu: "200m" },
@@ -276,7 +299,7 @@ export class KubernetesDeployer implements Deployer {
     }
 
     // 8. Deployment
-    const dep = deploymentManifest(ns, config, onOcp, otelViaOperator);
+    const dep = deploymentManifest(ns, config, onOcp, otelViaOperator, skillEntries, cronJobsContent);
     await applyResource(
       () => apps.readNamespacedDeployment({ name: "openclaw", namespace: ns }),
       () => apps.createNamespacedDeployment({ namespace: ns, body: dep }),
@@ -290,10 +313,11 @@ export class KubernetesDeployer implements Deployer {
 
     log(`OpenClaw deployed to ${ns}`);
     if (routeUrl) {
-      log(`Open: ${routeUrl}#token=${encodeURIComponent(gatewayToken)}`);
+      log(`Open: ${routeUrl}`);
+      log("Use the Open action from the Instances page to open with the saved token");
     } else {
-      log(`Gateway token: ${gatewayToken}`);
       log(`Access via port-forward: kubectl port-forward svc/openclaw 18789:18789 -n ${ns}`);
+      log("Use the Open action from the Instances page to open with the saved token");
     }
 
     // Save deploy config for re-deploy (strip secrets, keep references)
@@ -387,6 +411,8 @@ export class KubernetesDeployer implements Deployer {
 
     // Load workspace files from ~/.openclaw/workspace-*
     const { files: workspaceFiles, fromHost } = loadWorkspaceFiles(result.config, log);
+    const skillEntries = await loadTextTree(skillsDir()).catch(() => []);
+    const cronJobsContent = await readFile(cronJobsFile(), "utf8").catch(() => undefined);
     if (!fromHost) {
       log("No custom agent files found — using generated defaults");
     }
@@ -398,6 +424,24 @@ export class KubernetesDeployer implements Deployer {
       () => core.createNamespacedConfigMap({ namespace: ns, body: agentCm }),
       () => core.replaceNamespacedConfigMap({ name: "openclaw-agent", namespace: ns, body: agentCm }),
       "ConfigMap openclaw-agent",
+      log,
+    );
+
+    const skillsCm = fileTreeConfigMapManifest(ns, "openclaw-skills", skillEntries);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-skills", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: skillsCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-skills", namespace: ns, body: skillsCm }),
+      "ConfigMap openclaw-skills",
+      log,
+    );
+
+    const cronCm = fileConfigMapManifest(ns, "openclaw-cron", "jobs.json", cronJobsContent);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-cron", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: cronCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-cron", namespace: ns, body: cronCm }),
+      "ConfigMap openclaw-cron",
       log,
     );
 
@@ -417,6 +461,8 @@ mkdir -p /home/node/.openclaw/skills
 mkdir -p /home/node/.openclaw/cron
 mkdir -p /home/node/.openclaw/workspace-${id}
 ${copyLines}
+cp -r /skills-src/. /home/node/.openclaw/skills/ 2>/dev/null || true
+cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true
 chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
 chmod -R g=u /home/node/.openclaw 2>/dev/null || true
 echo "Config initialized"
@@ -428,6 +474,26 @@ echo "Config initialized"
         op: "replace",
         path: "/spec/template/spec/initContainers/0/command",
         value: ["sh", "-c", initScript],
+      },
+      {
+        op: "replace",
+        path: "/spec/template/spec/volumes/3/configMap",
+        value: {
+          name: "openclaw-skills",
+          ...(skillEntries.length > 0
+            ? { items: skillEntries.map((entry) => ({ key: entry.key, path: entry.path })) }
+            : {}),
+        },
+      },
+      {
+        op: "replace",
+        path: "/spec/template/spec/volumes/4/configMap",
+        value: {
+          name: "openclaw-cron",
+          ...(cronJobsContent !== undefined
+            ? { items: [{ key: "jobs.json", path: "jobs.json" }] }
+            : {}),
+        },
       },
       {
         op: "replace",
@@ -460,6 +526,8 @@ echo "Config initialized"
       { name: "ServiceAccount openclaw-oauth-proxy", fn: () => core.deleteNamespacedServiceAccount({ name: "openclaw-oauth-proxy", namespace: ns }) },
       { name: "ConfigMap openclaw-config", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-config", namespace: ns }) },
       { name: "ConfigMap openclaw-agent", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }) },
+      { name: "ConfigMap openclaw-skills", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-skills", namespace: ns }) },
+      { name: "ConfigMap openclaw-cron", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-cron", namespace: ns }) },
       { name: "ConfigMap litellm-config", fn: () => core.deleteNamespacedConfigMap({ name: "litellm-config", namespace: ns }) },
       { name: "ConfigMap otel-collector-config", fn: () => core.deleteNamespacedConfigMap({ name: "otel-collector-config", namespace: ns }) },
       { name: "OpenTelemetryCollector openclaw-sidecar", fn: async () => {
