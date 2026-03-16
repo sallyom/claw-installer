@@ -1,0 +1,56 @@
+name: Build and Push OpenClaw Vertex Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile.openclaw'
+      - '.github/workflows/build-openclaw-vertex-image.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile.openclaw'
+      - '.github/workflows/build-openclaw-vertex-image.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE: quay.io/aicatalyst/openclaw
+  TAG: vertex-anthropic
+  OPENCLAW_REPO: https://github.com/sallyom/openclaw.git
+  OPENCLAW_REF: pi-vertex-testbranch
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Quay.io
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.openclaw
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          build-args: |
+            OPENCLAW_REPO=${{ env.OPENCLAW_REPO }}
+            OPENCLAW_REF=${{ env.OPENCLAW_REF }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
