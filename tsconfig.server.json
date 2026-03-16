@@ -4,6 +4,6 @@
     "jsx": "preserve",
     "outDir": "dist"
   },
-  "include": ["src/server/**/*"],
+  "include": ["src/server/**/*", "src/shared/**/*"],
   "exclude": ["src/server/**/*.test.ts", "src/server/**/__tests__/**"]
 }
