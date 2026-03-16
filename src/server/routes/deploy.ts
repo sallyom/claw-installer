@@ -3,6 +3,7 @@ import { v4 as uuid } from "uuid";
 import { readFileSync, existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import type { DeployConfig } from "../deployers/types.js";
+import { validateAgentName } from "../../shared/validate-agent-name.js";
 import { detectGcpDefaults, defaultVertexLocation } from "../services/gcp.js";
 import { LocalDeployer } from "../deployers/local.js";
 import { KubernetesDeployer } from "../deployers/kubernetes.js";
@@ -54,6 +55,12 @@ router.post("/", async (req, res) => {
     }
     return readFileSync(filePath, "utf-8");
   };
+
+  const agentNameError = validateAgentName(config.agentName);
+  if (agentNameError) {
+    res.status(400).json({ error: `Invalid agent name: ${agentNameError}` });
+    return;
+  }
 
   // Default prefix to OS username
   if (!config.prefix) {

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { validateAgentName } from "../../shared/validate-agent-name.js";
 
 type Mode = "local" | "kubernetes" | "ssh";
 type InferenceProvider = "anthropic" | "openai" | "vertex-anthropic" | "vertex-google" | "custom-endpoint";
@@ -682,9 +683,11 @@ export default function DeployForm({ onDeployStarted }: Props) {
     || config.sandboxToolAllowAutomation
     || config.sandboxToolAllowMessaging;
 
+  const agentNameError = validateAgentName(config.agentName);
+
   const validationErrors: string[] = [];
-  if (!config.agentName.trim()) {
-    validationErrors.push("Agent Name is required.");
+  if (agentNameError) {
+    validationErrors.push(agentNameError);
   }
   if (config.sandboxEnabled && !config.sandboxSshTarget.trim()) {
     validationErrors.push("SSH Target is required when the SSH sandbox backend is enabled.");
@@ -797,8 +800,13 @@ export default function DeployForm({ onDeployStarted }: Props) {
               placeholder="e.g., lynx"
               value={config.agentName}
               onChange={(e) => update("agentName", e.target.value)}
+              style={agentNameError ? { borderColor: "#e74c3c" } : undefined}
             />
-            <div className="hint">Your agent's identity</div>
+            {agentNameError ? (
+              <div className="hint" style={{ color: "#e74c3c" }}>{agentNameError}</div>
+            ) : (
+              <div className="hint">Lowercase letters, numbers, and hyphens (e.g., my-agent)</div>
+            )}
           </div>
           <div className="form-group">
             <label>Owner Prefix <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>(optional)</span></label>
