@@ -34,11 +34,17 @@ import { JAEGER_UI_PORT } from "./otel.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import { generateToken } from "./k8s-helpers.js";
 
-const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
+const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
+const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || "quay.io/aicatalyst/openclaw:vertex-anthropic";
 const DEFAULT_PORT = 18789;
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 const LITELLM_CONFIG_PATH = "/home/node/.openclaw/litellm/config.yaml";
 const LITELLM_KEY_PATH = "/home/node/.openclaw/litellm/master-key";
+
+function resolveImage(config: DeployConfig): string {
+  if (config.image) return config.image;
+  return config.vertexEnabled ? DEFAULT_VERTEX_IMAGE : DEFAULT_IMAGE;
+}
 
 function tryParseProjectId(saJson: string): string {
   try {
@@ -405,7 +411,7 @@ function buildRunArgs(
   }
 
   runArgs.push("-v", `${volumeName(config)}:/home/node/.openclaw`);
-  runArgs.push(config.image || DEFAULT_IMAGE);
+  runArgs.push(resolveImage(config));
 
   // Bind to lan (0.0.0.0) so port mapping works from host into pod/container
   runArgs.push("node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789");
@@ -430,7 +436,7 @@ export class LocalDeployer implements Deployer {
     // Remove existing container with same name (in case --rm didn't fire)
     await removeContainer(runtime, name);
 
-    const image = config.image || DEFAULT_IMAGE;
+    const image = resolveImage(config);
 
     // Check if image exists locally before pulling
     try {
@@ -837,7 +843,7 @@ something that requires the user's attention.`;
     const name = result.containerId ?? containerName(result.config);
     const port = result.config.port ?? DEFAULT_PORT;
     const vol = volumeName(result.config);
-    const image = result.config.image || DEFAULT_IMAGE;
+    const image = resolveImage(result.config);
 
     // Copy updated agent files from host into volume before starting
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
@@ -1081,7 +1087,7 @@ something that requires the user's attention.`;
         `OPENCLAW_PREFIX=${config.prefix || ""}`,
         `OPENCLAW_AGENT_NAME=${config.agentName}`,
         `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName || config.agentName}`,
-        `OPENCLAW_IMAGE=${config.image || DEFAULT_IMAGE}`,
+        `OPENCLAW_IMAGE=${resolveImage(config)}`,
         `OPENCLAW_PORT=${config.port ?? DEFAULT_PORT}`,
         `OPENCLAW_VOLUME=${volumeName(config)}`,
         `OPENCLAW_CONTAINER=${name}`,
@@ -1161,7 +1167,7 @@ something that requires the user's attention.`;
 
     const name = result.containerId ?? containerName(result.config);
     const vol = volumeName(result.config);
-    const image = result.config.image || DEFAULT_IMAGE;
+    const image = resolveImage(result.config);
     const agentId = `${result.config.prefix || "openclaw"}_${result.config.agentName}`;
     const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
 

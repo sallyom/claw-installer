@@ -118,7 +118,7 @@ spec:
 
         # ── OpenClaw gateway ──
         - name: gateway
-          image: quay.io/sallyom/openclaw:latest
+          image: quay.io/aicatalyst/openclaw:latest
           imagePullPolicy: Always
           command:
             - node

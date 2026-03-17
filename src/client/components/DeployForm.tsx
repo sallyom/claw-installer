@@ -455,12 +455,12 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Container Image</label>
           <input
             type="text"
-            placeholder="quay.io/sallyom/openclaw:latest"
+            placeholder="quay.io/aicatalyst/openclaw:latest"
             value={config.image}
             onChange={(e) => update("image", e.target.value)}
           />
           <div className="hint">
-            Leave blank for the default image (quay.io/sallyom/openclaw:latest).
+            Leave blank for the default image (quay.io/aicatalyst/openclaw:latest).
             This image includes Anthropic Vertex AI support not yet available upstream.
           </div>
         </div>

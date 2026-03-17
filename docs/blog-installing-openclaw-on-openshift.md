@@ -96,7 +96,7 @@ The installer UI presents a deploy form with these fields:
 | **Agent name** | `myagent` | ID for your default agent |
 | **Display name** | `My Agent` | Human-friendly name shown in the UI |
 | **Owner prefix** | *(optional)* | Defaults to your OS username. Combined with agent name for the namespace: `alice-myagent-openclaw` |
-| **Image** | `quay.io/sallyom/openclaw:latest` | Container image to deploy |
+| **Image** | `quay.io/aicatalyst/openclaw:latest` | Container image to deploy |
 | **API key** | *(your provider key)* | For Anthropic, OpenAI, or other providers |
 | **Google Cloud Credentials (JSON)** | *(file upload or path)* | For Vertex AI — project ID is auto-extracted |
 
