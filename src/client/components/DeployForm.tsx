@@ -70,7 +70,7 @@ const PROVIDER_OPTIONS: Array<{ id: InferenceProvider; label: string; desc: stri
 
 const MODEL_DEFAULTS: Record<InferenceProvider, string> = {
   "anthropic": "claude-sonnet-4-6",
-  "openai": "openai/gpt-5",
+  "openai": "openai/gpt-5.4",
   "vertex-anthropic": "anthropic-vertex/claude-sonnet-4-6",
   "vertex-google": "google-vertex/gemini-2.5-pro",
   "custom-endpoint": "",
@@ -78,7 +78,7 @@ const MODEL_DEFAULTS: Record<InferenceProvider, string> = {
 
 const MODEL_HINTS: Record<InferenceProvider, string> = {
   "anthropic": "Examples: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5",
-  "openai": "Examples: openai/gpt-5, openai/gpt-5.3",
+  "openai": "Examples: openai/gpt-5.4, openai/gpt-5.4-pro, openai/gpt-5-mini",
   "vertex-anthropic": "Examples: anthropic-vertex/claude-sonnet-4-6, anthropic-vertex/claude-opus-4-6",
   "vertex-google": "Examples: google-vertex/gemini-2.5-pro, google-vertex/gemini-2.5-flash",
   "custom-endpoint": "Specify the model ID served by your endpoint",

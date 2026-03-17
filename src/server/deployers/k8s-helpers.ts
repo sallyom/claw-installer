@@ -41,7 +41,7 @@ export function deriveModel(config: DeployConfig): string {
       ? "anthropic-vertex/claude-sonnet-4-6"
       : "google-vertex/gemini-2.5-pro";
   }
-  if (config.openaiApiKey) return "openai/gpt-5";
+  if (config.openaiApiKey) return "openai/gpt-5.4";
   if (config.modelEndpoint) return "openai/default";
   return "claude-sonnet-4-6";
 }

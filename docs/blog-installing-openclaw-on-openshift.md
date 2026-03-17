@@ -169,7 +169,7 @@ The installer supports multiple model providers. Select your provider in the dep
 | Provider | Model example | What you need |
 |----------|---------------|---------------|
 | Anthropic | `anthropic/claude-sonnet-4-6` | API key |
-| OpenAI | `openai/gpt-5` | API key |
+| OpenAI | `openai/gpt-5.4` | API key |
 | Google Vertex AI | `google-vertex/gemini-2.5-pro` | GCP service account JSON |
 | Claude via Vertex AI | `anthropic-vertex/claude-sonnet-4-6` | GCP service account JSON |
 | Custom endpoint (vLLM, etc.) | Any OpenAI-compatible model | Endpoint URL |

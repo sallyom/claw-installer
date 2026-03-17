@@ -66,7 +66,7 @@ function deriveModel(config: DeployConfig): string {
       : "google-vertex/gemini-2.5-pro";
   }
   if (config.openaiApiKey) {
-    return "openai/gpt-5";
+    return "openai/gpt-5.4";
   }
   if (config.modelEndpoint) {
     return "openai/default";
