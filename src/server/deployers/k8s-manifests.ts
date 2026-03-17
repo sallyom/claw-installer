@@ -9,6 +9,7 @@ import { oauthProxyContainer } from "./k8s-oauth.js";
 import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
 import { shouldUseOtel, OTEL_COLLECTOR_IMAGE, OTEL_GRPC_PORT, OTEL_HTTP_PORT, otelAgentEnv } from "./otel.js";
+import { shouldUseTokenizer, TOKENIZER_IMAGE, TOKENIZER_PORT } from "./tokenizer.js";
 import type { TreeEntry } from "../state-tree.js";
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
@@ -128,7 +129,13 @@ export function otelConfigMapManifest(ns: string, configYaml: string): k8s.V1Con
   };
 }
 
-export function secretManifest(ns: string, config: DeployConfig, gatewayToken: string, litellmMasterKey?: string): k8s.V1Secret {
+export function secretManifest(
+  ns: string,
+  config: DeployConfig,
+  gatewayToken: string,
+  litellmMasterKey?: string,
+  tokenizerData?: { openKey: string; agentEnv: Record<string, string> },
+): k8s.V1Secret {
   const data: Record<string, string> = {
     OPENCLAW_GATEWAY_TOKEN: gatewayToken,
   };
@@ -143,6 +150,10 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
   if (projectId) data.GOOGLE_CLOUD_PROJECT = projectId;
   if (config.googleCloudLocation) data.GOOGLE_CLOUD_LOCATION = config.googleCloudLocation;
   if (litellmMasterKey) data.LITELLM_MASTER_KEY = litellmMasterKey;
+  if (tokenizerData) {
+    data.TOKENIZER_OPEN_KEY = tokenizerData.openKey;
+    Object.assign(data, tokenizerData.agentEnv);
+  }
 
   return {
     apiVersion: "v1",
@@ -225,6 +236,7 @@ export function deploymentManifest(
   const useOtel = shouldUseOtel(config);
   // Direct sidecar only when OTEL is enabled and operator is NOT handling it
   const useOtelDirect = useOtel && !otelViaOperator;
+  const useTkz = shouldUseTokenizer(config);
 
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtel) {
@@ -249,10 +261,51 @@ export function deploymentManifest(
     }
   }
 
+  // Tokenizer env vars (sealed credentials + proxy URL injected via secret)
+  if (useTkz) {
+    const tkzKeys = [
+      "TOKENIZER_PROXY_URL",
+      "TOKENIZER_SEAL_KEY",
+    ];
+    // Add credential env var names — these are stored in the secret at deploy time
+    if (config.tokenizerCredentials) {
+      for (const c of config.tokenizerCredentials) {
+        const key = c.name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+        tkzKeys.push(`TOKENIZER_CRED_${key}`, `TOKENIZER_AUTH_${key}`);
+      }
+    }
+    for (const key of tkzKeys) {
+      envVars.push({
+        name: key,
+        valueFrom: { secretKeyRef: { name: "openclaw-secrets", key, optional: true } },
+      });
+    }
+  }
+
   const agentFiles = ["AGENTS.md", "agent.json", "SOUL.md", "IDENTITY.md", "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md"];
   const copyLines = agentFiles
     .map((f) => `  cp /agents/${f} /home/node/.openclaw/workspace-${id}/${f} 2>/dev/null || true`)
     .join("\n");
+
+  // Build the list of tokenizer secret keys to write into the agent .env
+  const tkzEnvKeys: string[] = [];
+  if (useTkz && config.tokenizerCredentials) {
+    tkzEnvKeys.push("TOKENIZER_PROXY_URL", "TOKENIZER_SEAL_KEY");
+    for (const c of config.tokenizerCredentials) {
+      const key = c.name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+      tkzEnvKeys.push(`TOKENIZER_CRED_${key}`, `TOKENIZER_AUTH_${key}`);
+    }
+  }
+
+  const tokenizerInitLines = useTkz ? [
+    `mkdir -p /home/node/.openclaw/skills/tokenizer`,
+    `cp /tokenizer-skill/SKILL.md /home/node/.openclaw/skills/tokenizer/SKILL.md`,
+    // Write tokenizer env vars from the mounted secret into the agent .env
+    ...tkzEnvKeys.map((k) =>
+      `echo '${k}='$(cat /tokenizer-env/${k}) >> /home/node/.openclaw/workspace-${id}/.env`,
+    ),
+    `chmod 600 /home/node/.openclaw/workspace-${id}/.env`,
+  ] : [];
 
   const initScript = `
 cp /config/openclaw.json /home/node/.openclaw/openclaw.json
@@ -264,6 +317,7 @@ mkdir -p /home/node/.openclaw/workspace-${id}
 ${copyLines}
 cp -r /skills-src/. /home/node/.openclaw/skills/ 2>/dev/null || true
 cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true
+${tokenizerInitLines.join("\n")}
 chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
 chmod -R g=u /home/node/.openclaw 2>/dev/null || true
 echo "Config initialized"
@@ -313,6 +367,10 @@ echo "Config initialized"
                 { name: "agent-config", mountPath: "/agents" },
                 { name: "skills-config", mountPath: "/skills-src", readOnly: true },
                 { name: "cron-config", mountPath: "/cron-src", readOnly: true },
+                ...(useTkz ? [
+                  { name: "tokenizer-skill", mountPath: "/tokenizer-skill", readOnly: true },
+                  { name: "tokenizer-env", mountPath: "/tokenizer-env", readOnly: true },
+                ] : []),
               ],
             },
           ],
@@ -427,6 +485,33 @@ echo "Config initialized"
                 capabilities: { drop: ["ALL"] },
               },
             }] : []),
+            // Tokenizer sidecar: HTTP proxy that injects credentials into requests.
+            // OPEN_KEY is read from a file mount (not an env var) so the private
+            // key doesn't leak via kubectl describe / podman inspect.
+            ...(useTkz ? [{
+              name: "tokenizer",
+              image: config.tokenizerImage || TOKENIZER_IMAGE,
+              imagePullPolicy: "IfNotPresent" as const,
+              command: ["sh", "-c", "export OPEN_KEY=$(cat /secrets/open-key) && exec tokenizer"],
+              ports: [{ name: "tokenizer", containerPort: TOKENIZER_PORT, protocol: "TCP" as const }],
+              env: [
+                { name: "LISTEN_ADDRESS", value: `0.0.0.0:${TOKENIZER_PORT}` },
+                { name: "NO_FLY_SRC", value: "true" },
+              ],
+              volumeMounts: [
+                { name: "tokenizer-open-key", mountPath: "/secrets", readOnly: true },
+                { name: "tokenizer-tmp", mountPath: "/tmp" },
+              ],
+              resources: {
+                requests: { memory: "64Mi", cpu: "50m" },
+                limits: { memory: "256Mi", cpu: "250m" },
+              },
+              securityContext: {
+                allowPrivilegeEscalation: false,
+                readOnlyRootFilesystem: true,
+                capabilities: { drop: ["ALL"] },
+              },
+            }] : []),
           ],
           volumes: [
             { name: "openclaw-home", persistentVolumeClaim: { claimName: "openclaw-home-pvc" } },
@@ -462,6 +547,22 @@ echo "Config initialized"
               : []),
             ...(useOtelDirect
               ? [{ name: "otel-config", configMap: { name: "otel-collector-config" } }]
+              : []),
+            ...(useTkz
+              ? [
+                  { name: "tokenizer-skill", configMap: { name: "tokenizer-skill" } },
+                  // Only the OPEN_KEY — mounted into the tokenizer container
+                  { name: "tokenizer-open-key", secret: {
+                    secretName: "openclaw-secrets",
+                    items: [{ key: "TOKENIZER_OPEN_KEY", path: "open-key" }],
+                  }},
+                  // Only the agent-facing tokenizer env vars — used by init to write .env
+                  { name: "tokenizer-env", secret: {
+                    secretName: "openclaw-secrets",
+                    items: tkzEnvKeys.map((k) => ({ key: k, path: k })),
+                  }},
+                  { name: "tokenizer-tmp", emptyDir: {} },
+                ]
               : []),
             ...(onOpenShift ? [
               { name: "oauth-config", secret: { secretName: "openclaw-oauth-config" } },

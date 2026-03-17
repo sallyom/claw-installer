@@ -34,11 +34,30 @@ import { JAEGER_UI_PORT } from "./otel.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import { generateToken } from "./k8s-helpers.js";
 
+import {
+  shouldUseTokenizer,
+  generateTokenizerOpenKey,
+  deriveTokenizerSealKey,
+  sealCredential,
+  tokenizerAgentEnv,
+  generateTokenizerSkill,
+  TOKENIZER_PORT,
+  type SealedCredential,
+} from "./tokenizer.js";
+
+import {
+  tokenizerContainerName as tkzContainerName,
+  startTokenizerContainer,
+  stopTokenizerContainer,
+} from "./local-tokenizer.js";
+
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/sallyom/openclaw:latest";
 const DEFAULT_PORT = 18789;
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 const LITELLM_CONFIG_PATH = "/home/node/.openclaw/litellm/config.yaml";
 const LITELLM_KEY_PATH = "/home/node/.openclaw/litellm/master-key";
+const TOKENIZER_OPEN_KEY_PATH = "/home/node/.openclaw/tokenizer/open-key";
+const TOKENIZER_SKILL_PATH = "/home/node/.openclaw/skills/tokenizer/SKILL.md";
 
 function tryParseProjectId(saJson: string): string {
   try {
@@ -323,10 +342,12 @@ function buildRunArgs(
   port: number,
   litellmMasterKey?: string,
   otelEnvVars?: Record<string, string>,
+  tokenizerEnvVars?: Record<string, string>,
 ): string[] {
-  const useProxy = shouldUseLitellmProxy(config) && !!litellmMasterKey;
+  const useLitellm = shouldUseLitellmProxy(config) && !!litellmMasterKey;
   const useOtelSidecar = shouldUseOtel(config) && !!otelEnvVars;
-  const hasSidecars = useProxy || useOtelSidecar;
+  const useTkz = shouldUseTokenizer(config) && !!tokenizerEnvVars;
+  const hasSidecars = useLitellm || useOtelSidecar || useTkz;
   const isPodman = runtime === "podman";
 
   const runArgs = [
@@ -338,13 +359,15 @@ function buildRunArgs(
   ];
 
   if (hasSidecars && isPodman) {
-    // Podman: gateway runs in the same pod as sidecars (port is on the pod)
+    // Podman: gateway runs in the same pod as sidecars (ports are on the pod)
     runArgs.push("--pod", podName(config));
   } else if (hasSidecars && !isPodman) {
     // Docker: share the first sidecar's network namespace
-    const networkContainer = useProxy
+    const networkContainer = useLitellm
       ? litellmContainerName(config)
-      : otelContainerName(config);
+      : useOtelSidecar
+        ? otelContainerName(config)
+        : tkzContainerName(name);
     runArgs.push("--network", `container:${networkContainer}`);
   } else {
     runArgs.push("-p", `${port}:18789`);
@@ -371,7 +394,7 @@ function buildRunArgs(
     env.MODEL_ENDPOINT = config.modelEndpoint;
   }
 
-  if (config.vertexEnabled && useProxy) {
+  if (config.vertexEnabled && useLitellm) {
     // Proxy mode: gateway talks to LiteLLM via the litellm provider config in openclaw.json
     env.LITELLM_API_KEY = litellmMasterKey;
   } else if (config.vertexEnabled) {
@@ -389,6 +412,11 @@ function buildRunArgs(
     if (config.gcpServiceAccountJson) {
       env.GOOGLE_APPLICATION_CREDENTIALS = GCP_SA_CONTAINER_PATH;
     }
+  }
+
+  // Tokenizer proxy env vars (sealed credentials + proxy URL)
+  if (useTkz && tokenizerEnvVars) {
+    Object.assign(env, tokenizerEnvVars);
   }
 
   if (config.telegramBotToken) {
@@ -710,6 +738,94 @@ something that requires the user's attention.`;
       }
     }
 
+    // Start Tokenizer proxy sidecar if enabled
+    const useTokenizer_ = shouldUseTokenizer(config);
+    let tokenizerEnv: Record<string, string> | undefined;
+    let sealedCredentials: SealedCredential[] | undefined;
+
+    if (useTokenizer_ && config.tokenizerCredentials?.length) {
+      log("Tokenizer proxy enabled — credentials will be sealed and injected by the proxy");
+
+      // Generate keys and seal each credential
+      const openKey = generateTokenizerOpenKey();
+      const sealKey = deriveTokenizerSealKey(openKey);
+      sealedCredentials = config.tokenizerCredentials.map((c) => sealCredential(c, sealKey));
+      tokenizerEnv = tokenizerAgentEnv(sealedCredentials, sealKey);
+
+      // Write open key + skill into volume
+      const openKeyB64 = Buffer.from(openKey).toString("base64");
+      const skillMd = generateTokenizerSkill(sealedCredentials);
+      const skillB64 = Buffer.from(skillMd).toString("base64");
+
+      // Build a .env snippet with all tokenizer env vars for the agent workspace
+      const envLines = Object.entries(tokenizerEnv)
+        .map(([k, v]) => `${k}=${v}`)
+        .join("\n");
+      const envB64 = Buffer.from(envLines + "\n").toString("base64");
+
+      const tkzInitScript = [
+        "mkdir -p /home/node/.openclaw/tokenizer",
+        "mkdir -p /home/node/.openclaw/skills/tokenizer",
+        `echo '${openKeyB64}' | base64 -d > ${TOKENIZER_OPEN_KEY_PATH}`,
+        `chmod 600 ${TOKENIZER_OPEN_KEY_PATH}`,
+        `echo '${skillB64}' | base64 -d > ${TOKENIZER_SKILL_PATH}`,
+        // Write tokenizer env vars into the agent workspace .env so the agent can find them
+        `echo '${envB64}' | base64 -d >> '${workspaceDir}/.env'`,
+        `chmod 600 '${workspaceDir}/.env'`,
+      ].join(" && ");
+
+      const tkzInitResult = await runCommand(runtime, [
+        "run", "--rm",
+        "-v", `${vol}:/home/node/.openclaw`,
+        image, "sh", "-c", tkzInitScript,
+      ], log);
+      if (tkzInitResult.code !== 0) {
+        log("WARNING: Failed to write Tokenizer config to volume");
+      }
+
+      // Pull or build Tokenizer image
+      const { TOKENIZER_IMAGE } = await import("./tokenizer.js");
+      const tkzImage = config.tokenizerImage || TOKENIZER_IMAGE;
+      try {
+        await execFileAsync(runtime, ["image", "exists", tkzImage]);
+        log(`Using local Tokenizer image: ${tkzImage}`);
+      } catch {
+        log(`Tokenizer image ${tkzImage} not found locally — building from GitHub...`);
+        const build = await runCommand(runtime, [
+          "build", "-t", tkzImage,
+          "https://github.com/superfly/tokenizer.git",
+        ], log);
+        if (build.code !== 0) {
+          throw new Error(
+            `Failed to build Tokenizer image. You can build it manually:\n` +
+            `  ${runtime} build -t ${tkzImage} https://github.com/superfly/tokenizer.git`,
+          );
+        }
+      }
+
+      const tkzName = tkzContainerName(name);
+      const isPodman = runtime === "podman";
+
+      // If no pod exists yet (LiteLLM not active), create one
+      if (!useProxy && isPodman) {
+        const pod = podName(config);
+        await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+        const podResult = await runCommand(runtime, [
+          "pod", "create", "--name", pod, "-p", `${port}:18789`,
+        ], log);
+        if (podResult.code !== 0) {
+          throw new Error("Failed to create pod for Tokenizer sidecar");
+        }
+      }
+
+      await startTokenizerContainer({
+        config, runtime, tkzName, vol, port,
+        podName: podName(config),
+        networkContainer: useProxy ? litellmContainerName(config) : undefined,
+        log, runCommand,
+      });
+    }
+
     // Save agent files to host so user can edit and re-deploy
     try {
       const hostAgentsDir = agentWorkspaceDir(agentId);
@@ -741,7 +857,7 @@ something that requires the user's attention.`;
 
     // Create pod for OTEL sidecars if LiteLLM didn't already create one
     const useOtelSidecars = shouldUseOtel(config);
-    if (useOtelSidecars && !useProxy && runtime === "podman") {
+    if (useOtelSidecars && !useProxy && !useTokenizer_ && runtime === "podman") {
       const pod = podName(config);
       await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
       const podPorts = [
@@ -764,13 +880,13 @@ something that requires the user's attention.`;
     // Start OTEL collector sidecar if enabled
     const otelEnv = await startOtelSidecar(
       config, runtime, vol,
-      (useProxy || useOtelSidecars) ? podName(config) : null,
+      (useProxy || useOtelSidecars || useTokenizer_) ? podName(config) : null,
       useProxy ? litellmContainerName(config) : null,
       port, image, log, runCommand,
       (rt, nm) => removeContainer(rt as ContainerRuntime, nm),
     );
 
-    const runArgs = buildRunArgs(config, runtime, name, port, litellmMasterKey, otelEnv);
+    const runArgs = buildRunArgs(config, runtime, name, port, litellmMasterKey, otelEnv, tokenizerEnv);
 
     log(`Starting OpenClaw container: ${name}`);
     const run = await runCommand(runtime, runArgs, log);
@@ -780,7 +896,7 @@ something that requires the user's attention.`;
 
     log("");
     log("=== Container Info ===");
-    const hasSidecars = useProxy || !!otelEnv;
+    const hasSidecars = useProxy || !!otelEnv || useTokenizer_;
     if (hasSidecars) {
       const isPodman = runtime === "podman";
       if (isPodman) {
@@ -790,6 +906,7 @@ something that requires the user's attention.`;
       if (useProxy) log(`LiteLLM container: ${litellmContainerName(config)}`);
       if (otelEnv) log(`OTEL container:    ${otelContainerName(config)}`);
       if (config.otelJaeger) log(`Jaeger container:  ${jaegerContainerName(config)}`);
+      if (useTokenizer_) log(`Tokenizer container: ${tkzContainerName(name)}`);
       log("");
       if (config.otelJaeger) log(`Jaeger UI: http://localhost:${JAEGER_UI_PORT}`);
       log("");
@@ -801,6 +918,7 @@ something that requires the user's attention.`;
       if (useProxy) log(`  ${runtime} logs ${litellmContainerName(config)}  # LiteLLM proxy logs`);
       if (otelEnv) log(`  ${runtime} logs ${otelContainerName(config)}  # OTEL collector logs`);
       if (config.otelJaeger) log(`  ${runtime} logs ${jaegerContainerName(config)}  # Jaeger logs`);
+      if (useTokenizer_) log(`  ${runtime} logs ${tkzContainerName(name)}  # Tokenizer proxy logs`);
     } else {
       log(`Container: ${name}`);
       log("");
@@ -980,8 +1098,57 @@ something that requires the user's attention.`;
       (rt, nm) => removeContainer(rt as ContainerRuntime, nm),
     );
 
+    // Recover Tokenizer state if it was active
+    const useTokenizer_ = shouldUseTokenizer(result.config);
+    let tokenizerEnv: Record<string, string> | undefined;
+
+    if (useTokenizer_ && result.config.tokenizerCredentials?.length) {
+      // Recover the open key from volume
+      let openKey: string;
+      try {
+        const { stdout } = await execFileAsync(runtime, [
+          "run", "--rm",
+          "-v", `${vol}:/home/node/.openclaw`,
+          image, "cat", TOKENIZER_OPEN_KEY_PATH,
+        ]);
+        openKey = stdout.trim();
+      } catch {
+        log("Tokenizer open key not found in volume — regenerating");
+        openKey = generateTokenizerOpenKey();
+        const openKeyB64 = Buffer.from(openKey).toString("base64");
+        await runCommand(runtime, [
+          "run", "--rm",
+          "-v", `${vol}:/home/node/.openclaw`,
+          image, "sh", "-c",
+          `mkdir -p /home/node/.openclaw/tokenizer && echo '${openKeyB64}' | base64 -d > ${TOKENIZER_OPEN_KEY_PATH} && chmod 600 ${TOKENIZER_OPEN_KEY_PATH}`,
+        ], log);
+      }
+
+      const sealKey = deriveTokenizerSealKey(openKey);
+      const sealed = result.config.tokenizerCredentials.map((c) => sealCredential(c, sealKey));
+      tokenizerEnv = tokenizerAgentEnv(sealed, sealKey);
+
+      const tkzName = tkzContainerName(name);
+      const isPodman = runtime === "podman";
+
+      if (!useProxy && isPodman) {
+        const pod = podName(result.config);
+        await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+        await runCommand(runtime, [
+          "pod", "create", "--name", pod, "-p", `${port}:18789`,
+        ], log);
+      }
+
+      await startTokenizerContainer({
+        config: result.config, runtime, tkzName, vol, port,
+        podName: podName(result.config),
+        networkContainer: useProxy ? litellmContainerName(result.config) : undefined,
+        log, runCommand,
+      });
+    }
+
     log(`Starting OpenClaw container: ${name}`);
-    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey, otelEnv);
+    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey, otelEnv, tokenizerEnv);
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to start container");
@@ -1225,8 +1392,26 @@ something that requires the user's attention.`;
       }
     }
 
+    // Recover Tokenizer env if active
+    let redeployTkzEnv: Record<string, string> | undefined;
+    if (shouldUseTokenizer(result.config) && result.config.tokenizerCredentials?.length) {
+      try {
+        const { stdout } = await execFileAsync(runtime, [
+          "run", "--rm",
+          "-v", `${vol}:/home/node/.openclaw`,
+          image, "cat", TOKENIZER_OPEN_KEY_PATH,
+        ]);
+        const openKey = stdout.trim();
+        const sealKey = deriveTokenizerSealKey(openKey);
+        const sealed = result.config.tokenizerCredentials.map((c) => sealCredential(c, sealKey));
+        redeployTkzEnv = tokenizerAgentEnv(sealed, sealKey);
+      } catch {
+        // No key — tokenizer will not be used for this restart
+      }
+    }
+
     const port = result.config.port ?? DEFAULT_PORT;
-    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey);
+    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey, redeployTkzEnv);
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to restart container");
@@ -1256,6 +1441,9 @@ something that requires the user's attention.`;
     // Stop OTEL sidecar if it exists
     await stopOtelSidecar(result.config, runtime, log, runCommand);
 
+    // Stop Tokenizer sidecar if it exists
+    await stopTokenizerContainer(runtime, tkzContainerName(name), log, runCommand);
+
     // Remove podman pod if it exists
     if (isPodman) {
       const pod = podName(result.config);
@@ -1283,6 +1471,9 @@ something that requires the user's attention.`;
     await removeContainer(runtime, litellmName);
     await removeContainer(runtime, otelContainerName(result.config));
     await removeContainer(runtime, jaegerContainerName(result.config));
+
+    // Stop Tokenizer sidecar
+    await removeContainer(runtime, tkzContainerName(name));
 
     // Remove podman pod if it exists
     if (isPodman) {
