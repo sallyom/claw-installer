@@ -223,7 +223,7 @@ describe("InstanceList", () => {
     await user.click(screen.getByText("http://localhost:18789"));
     await waitFor(() => {
       expect(openSpy).toHaveBeenCalledWith(
-        "http://localhost:18789#token=my-token",
+        "http://localhost:18789?session=main#token=my-token",
         "_blank",
         "noopener",
       );
