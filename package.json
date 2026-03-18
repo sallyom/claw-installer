@@ -20,6 +20,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
@@ -30,6 +33,7 @@
     "concurrently": "^9.0.0",
     "eslint": "^10.0.3",
     "globals": "^17.4.0",
+    "jsdom": "^28.1.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "tsx": "^4.19.0",

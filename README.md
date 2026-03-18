@@ -24,6 +24,13 @@ npm install && npm run build && npm run dev
 
 Open `http://localhost:3000`, pick your deploy target, fill in the form, and click Deploy.
 
+### Testing
+
+```bash
+npm test              # run all tests (server + client)
+npm run test:watch    # re-run on file changes
+```
+
 ## Native Layout
 
 `claw-installer` now uses the same home directory layout as a native OpenClaw install:
