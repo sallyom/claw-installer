@@ -18,6 +18,24 @@ const router = Router();
 const localDeployer = new LocalDeployer();
 const k8sDeployer = new KubernetesDeployer();
 
+/**
+ * Parse an openclaw container name (openclaw-{prefix}-{agentName}) into
+ * its prefix and agentName components. Must be consistent with
+ * containerName()/volumeName() in local.ts which compose these fields.
+ */
+export function parseContainerName(name: string): { prefix: string; agentName: string } {
+  const withoutPrefix = name.replace(/^openclaw-/, "");
+  const lastDash = withoutPrefix.lastIndexOf("-");
+  if (lastDash === -1) {
+    // Single segment: prefix and agentName are the same
+    return { prefix: withoutPrefix, agentName: withoutPrefix };
+  }
+  return {
+    prefix: withoutPrefix.slice(0, lastDash),
+    agentName: withoutPrefix.slice(lastDash + 1),
+  };
+}
+
 function containerToInstance(c: DiscoveredContainer): DeployResult {
   const prefix = c.labels["openclaw.prefix"] || "";
   const agent = c.labels["openclaw.agent"] || "";
@@ -72,9 +90,11 @@ router.get("/", async (_req, res) => {
       if (runningContainerNames.has(vol.containerName)) continue;
 
       const savedVars = await readSavedConfig(vol.containerName);
-      const agentName = savedVars.OPENCLAW_AGENT_NAME || vol.containerName;
+      // Fix for #31: split container name consistently with containerName()/volumeName()
+      const parsed = parseContainerName(vol.containerName);
+      const agentName = savedVars.OPENCLAW_AGENT_NAME || parsed.agentName;
       const displayName = savedVars.OPENCLAW_DISPLAY_NAME || agentName;
-      const prefix = savedVars.OPENCLAW_PREFIX || vol.containerName.replace(/^openclaw-/, "");
+      const prefix = savedVars.OPENCLAW_PREFIX || parsed.prefix;
 
       instances.push({
         id: vol.containerName,
@@ -557,8 +577,10 @@ async function findInstance(name: string): Promise<DeployResult | null> {
     const vol = volumes.find((v) => v.containerName === name);
     if (vol) {
       const savedVars = await readSavedConfig(name);
-      const prefix = savedVars.OPENCLAW_PREFIX || name.replace(/^openclaw-/, "");
-      const agentName = savedVars.OPENCLAW_AGENT_NAME || prefix;
+      // Fix for #31: split container name consistently with containerName()/volumeName()
+      const parsed = parseContainerName(name);
+      const prefix = savedVars.OPENCLAW_PREFIX || parsed.prefix;
+      const agentName = savedVars.OPENCLAW_AGENT_NAME || parsed.agentName;
 
       return {
         id: name,
