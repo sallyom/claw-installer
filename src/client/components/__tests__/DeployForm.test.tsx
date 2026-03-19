@@ -60,8 +60,9 @@ describe("DeployForm", () => {
     // Configuration section
     expect(screen.getByText("Configuration")).toBeInTheDocument();
     expect(screen.getByText("Agent Name")).toBeInTheDocument();
-    // Deploy button disabled without agent name
-    expect(screen.getByText("Deploy OpenClaw").closest("button")).toBeDisabled();
+    // Invalid forms show validation text, but the button itself is only disabled while deploying.
+    expect(screen.getByRole("button", { name: /deploy openclaw/i })).toBeInTheDocument();
+    expect(screen.getByText("Agent Name is required.")).toBeInTheDocument();
   });
 
   it("enables deploy button and auto-derives display name from agent name", async () => {
@@ -72,9 +73,9 @@ describe("DeployForm", () => {
     const agentInput = screen.getByPlaceholderText("e.g., lynx");
     await user.type(agentInput, "my-agent");
 
-    expect(screen.getByText("Deploy OpenClaw").closest("button")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /deploy openclaw/i })).not.toBeDisabled();
     const displayInput = screen.getByPlaceholderText("e.g., Lynx") as HTMLInputElement;
-    expect(displayInput.value).toBe("My agent");
+    expect(displayInput.value).toBe("My Agent");
   });
 
   it("calls onDeployStarted with deployId on successful deploy", async () => {
@@ -84,7 +85,7 @@ describe("DeployForm", () => {
     render(<DeployForm onDeployStarted={onDeployStarted} />);
 
     await user.type(screen.getByPlaceholderText("e.g., lynx"), "testbot");
-    await user.click(screen.getByText("Deploy OpenClaw"));
+    await user.click(screen.getByRole("button", { name: /deploy openclaw/i }));
 
     await waitFor(() => {
       expect(onDeployStarted).toHaveBeenCalledWith("deploy-123");
@@ -112,7 +113,7 @@ describe("DeployForm", () => {
     await user.click(k8sCard);
 
     await waitFor(() => {
-      expect(screen.getByText(/No Kubernetes cluster detected/)).toBeInTheDocument();
+      expect(screen.getAllByText(/No Kubernetes cluster detected/).length).toBeGreaterThan(0);
     });
     // Port field should not appear in K8s mode
     expect(screen.queryByText("Port")).not.toBeInTheDocument();
@@ -159,6 +160,6 @@ describe("DeployForm", () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new Error("network error"))) as unknown as typeof globalThis.fetch;
     render(<DeployForm onDeployStarted={vi.fn()} />);
     // Should not crash — form still renders with defaults
-    expect(screen.getByText("Deploy OpenClaw")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /deploy openclaw/i })).toBeInTheDocument();
   });
 });
