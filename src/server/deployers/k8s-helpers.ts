@@ -55,6 +55,14 @@ export function deriveModel(config: DeployConfig): string {
   return "claude-sonnet-4-6";
 }
 
+function subagentConfig(policy?: string): { allowAgents: string[] } {
+  switch (policy) {
+    case "self": return { allowAgents: ["self"] };
+    case "unrestricted": return { allowAgents: ["*"] };
+    default: return { allowAgents: [] };
+  }
+}
+
 export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, opts?: { routeUrl?: string }): object {
   const id = agentId(config);
   const model = deriveModel(config);
@@ -111,7 +119,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
           name: config.agentDisplayName || config.agentName,
           workspace: `~/.openclaw/workspace-${id}`,
           model: { primary: model },
-          subagents: sourceBundle?.mainAgent?.subagents || { allowAgents: ["*"] },
+          subagents: sourceBundle?.mainAgent?.subagents || subagentConfig(config.subagentPolicy),
           ...(sourceBundle?.mainAgent?.tools ? { tools: sourceBundle.mainAgent.tools } : {}),
         },
         ...((sourceBundle?.agents || []).map((entry) => ({
@@ -140,7 +148,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
     skills: {
       load: { extraDirs: ["~/.openclaw/skills"], watch: true, watchDebounceMs: 1000 },
     },
-    cron: { enabled: true },
+    cron: { enabled: !!config.cronEnabled },
   };
 
   const sandboxToolPolicy = buildSandboxToolPolicy(config);

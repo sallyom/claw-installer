@@ -138,6 +138,14 @@ function deriveModel(config: DeployConfig): string {
 /**
  * Build the openclaw.json config for a fresh volume.
  */
+function subagentConfig(policy?: string): { allowAgents: string[] } {
+  switch (policy) {
+    case "self": return { allowAgents: ["self"] };
+    case "unrestricted": return { allowAgents: ["*"] };
+    default: return { allowAgents: [] };
+  }
+}
+
 function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string {
   const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
   const model = deriveModel(config);
@@ -191,7 +199,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
           name: config.agentDisplayName || config.agentName,
           workspace: `~/.openclaw/workspace-${agentId}`,
           model: { primary: model },
-          subagents: sourceBundle?.mainAgent?.subagents || { allowAgents: ["*"] },
+          subagents: sourceBundle?.mainAgent?.subagents || subagentConfig(config.subagentPolicy),
           ...(sourceBundle?.mainAgent?.tools ? { tools: sourceBundle.mainAgent.tools } : {}),
         },
         ...((sourceBundle?.agents || []).map((entry) => ({
@@ -224,7 +232,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
         watchDebounceMs: 1000,
       },
     },
-    cron: { enabled: true },
+    cron: { enabled: !!config.cronEnabled },
   };
 
   const sandboxToolPolicy = buildSandboxToolPolicy(config);
