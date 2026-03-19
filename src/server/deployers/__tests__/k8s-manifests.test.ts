@@ -33,21 +33,27 @@ describe("k8s state sync manifests", () => {
       false,
       false,
       [{ key: "f0", path: "briefing-bot/SKILL.md", content: "# Briefing Bot" }],
+      [{ key: "f1", path: "workspace-main/AGENTS.md", content: "# Alpha" }],
       "{\"jobs\":[{\"name\":\"daily-brief\"}]}",
     );
 
     const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
+    expect(initContainer?.command?.[2]).toContain("find /agents-tree -mindepth 1 -type d -name 'workspace-*'");
     expect(initContainer?.command?.[2]).toContain("cp -r /skills-src/. /home/node/.openclaw/skills/");
     expect(initContainer?.command?.[2]).toContain("cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json");
 
     const volumeMounts = initContainer?.volumeMounts?.map((mount) => mount.mountPath) ?? [];
+    expect(volumeMounts).toContain("/agents-tree");
     expect(volumeMounts).toContain("/skills-src");
     expect(volumeMounts).toContain("/cron-src");
 
     const volumes = deployment.spec?.template.spec?.volumes ?? [];
+    const agentTreeVolume = volumes.find((volume) => volume.name === "agent-tree-config");
     const skillsVolume = volumes.find((volume) => volume.name === "skills-config");
     const cronVolume = volumes.find((volume) => volume.name === "cron-config");
 
+    expect(agentTreeVolume?.configMap?.name).toBe("openclaw-agent-tree");
+    expect(agentTreeVolume?.configMap?.items).toEqual([{ key: "f1", path: "workspace-main/AGENTS.md" }]);
     expect(skillsVolume?.configMap?.name).toBe("openclaw-skills");
     expect(skillsVolume?.configMap?.items).toEqual([{ key: "f0", path: "briefing-bot/SKILL.md" }]);
     expect(cronVolume?.configMap?.name).toBe("openclaw-cron");

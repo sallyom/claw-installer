@@ -59,6 +59,6 @@ For upstream sandbox behavior, see the [OpenClaw sandboxing docs](https://github
 
 ## Notes
 
-- Kubernetes access in this repo is plain K8s only. There is no OpenShift Route or OAuth proxy path.
+- Kubernetes access in this repo is plain K8s only. Platform-specific ingress and auth proxy flows are intentionally out of scope here.
 - Re-deploy updates ConfigMaps from your local agent files and restarts the pod.
 - Manual `kubectl port-forward` still works, but the `Open` action is now the recommended path for local access.

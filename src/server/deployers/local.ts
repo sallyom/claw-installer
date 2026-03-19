@@ -62,11 +62,6 @@ function resolveImage(config: DeployConfig): string {
   return config.vertexEnabled ? DEFAULT_VERTEX_IMAGE : DEFAULT_IMAGE;
 }
 
-function resolveImage(config: DeployConfig): string {
-  if (config.image) return config.image;
-  return config.vertexEnabled ? DEFAULT_VERTEX_IMAGE : DEFAULT_IMAGE;
-}
-
 function tryParseProjectId(saJson: string): string {
   try {
     const parsed = JSON.parse(saJson);

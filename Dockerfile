@@ -24,7 +24,7 @@ COPY --from=build --chown=node:0 /opt/app-root/src/package.json /opt/app-root/sr
 RUN npm ci --omit=dev
 COPY --from=build --chown=node:0 /opt/app-root/src/dist ./dist
 
-# Pre-create state directory with OpenShift-compatible perms (group 0 = root group)
+# Pre-create the state directory with container-friendly group perms
 RUN mkdir -p /home/node/.openclaw/installer && \
     chown -R node:0 /home/node && \
     chmod -R g=u /home/node

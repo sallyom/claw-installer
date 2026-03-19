@@ -18,8 +18,8 @@
 
 set -euo pipefail
 
-IMAGE_NAME="${OPENCLAW_INSTALLER_IMAGE:-quay.io/sallyom/openclaw-installer:latest}"
-CONTAINER_NAME="openclaw-installer"
+IMAGE_NAME="${CLAW_INSTALLER_IMAGE:-quay.io/sallyom/claw-installer:latest}"
+CONTAINER_NAME="claw-installer"
 PORT="${PORT:-3000}"
 BUILD=false
 RUNTIME=""
@@ -106,7 +106,7 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
       fi
 
       mkdir -p "$APP_DIR"
-      EXTRACT_CTR="openclaw-installer-extract-$$"
+      EXTRACT_CTR="claw-installer-extract-$$"
       podman create --name "$EXTRACT_CTR" "$IMAGE_NAME" true >/dev/null
       podman cp "$EXTRACT_CTR:/app/." "$APP_DIR/"
       podman rm "$EXTRACT_CTR" >/dev/null
