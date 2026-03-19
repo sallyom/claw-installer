@@ -686,7 +686,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const agentNameError = validateAgentName(config.agentName);
 
   const validationErrors: string[] = [];
-  if (agentNameError) {
+  if (!config.agentName.trim()) {
+    validationErrors.push("Agent Name is required.");
+  } else if (agentNameError) {
     validationErrors.push(agentNameError);
   }
   if (config.sandboxEnabled && !config.sandboxSshTarget.trim()) {
