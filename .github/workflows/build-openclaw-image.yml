@@ -16,13 +16,94 @@ env:
   IMAGE: quay.io/aicatalyst/openclaw
 
 jobs:
-  build:
+  # PR validation: amd64 only, no push
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build (amd64 only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.openclaw
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=build-amd64
+          cache-to: type=gha,mode=max,scope=build-amd64
+
+  # Production build: native runners per platform (no QEMU)
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Quay.io
+        uses: docker/login-action@v4
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.openclaw
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,"name=${{ env.IMAGE }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=build-${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.slug }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set image tags
         id: tags
@@ -35,27 +116,23 @@ jobs:
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to Quay.io
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: quay.io
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.openclaw
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
-          tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          TAGARGS=""
+          IFS=',' read -ra TAGLIST <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAGLIST[@]}"; do
+            TAGARGS="$TAGARGS --tag $tag"
+          done
+          docker buildx imagetools create $TAGARGS \
+            $(printf "${IMAGE}@sha256:%s " *)
