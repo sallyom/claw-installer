@@ -713,31 +713,29 @@ async function findInstance(name: string): Promise<DeployResult | null> {
   }
 
   // Check K8s namespaces
-  if (await isClusterReachable()) {
-    const k8sInstances = await discoverK8sInstances();
-    const ki = k8sInstances.find((i) => i.namespace === name);
-    if (ki) {
-      return {
-        id: ki.namespace,
+  const k8sInstances = await discoverK8sInstances({ namespaces: [name] });
+  const ki = k8sInstances.find((i) => i.namespace === name);
+  if (ki) {
+    return {
+      id: ki.namespace,
+      mode: "kubernetes",
+      status: ki.status,
+      config: {
         mode: "kubernetes",
-        status: ki.status,
-        config: {
-          mode: "kubernetes",
-          prefix: ki.prefix,
-          agentName: ki.agentName,
-          agentDisplayName: ki.agentName
-            ? ki.agentName.charAt(0).toUpperCase() + ki.agentName.slice(1)
-            : ki.namespace,
-          namespace: ki.namespace,
-          image: ki.image,
-        },
-        startedAt: "",
-        url: ki.url || undefined,
-        containerId: ki.namespace,
-        statusDetail: ki.statusDetail,
-        pods: ki.pods,
-      };
-    }
+        prefix: ki.prefix,
+        agentName: ki.agentName,
+        agentDisplayName: ki.agentName
+          ? ki.agentName.charAt(0).toUpperCase() + ki.agentName.slice(1)
+          : ki.namespace,
+        namespace: ki.namespace,
+        image: ki.image,
+      },
+      startedAt: "",
+      url: ki.url || undefined,
+      containerId: ki.namespace,
+      statusDetail: ki.statusDetail,
+      pods: ki.pods,
+    };
   }
 
   return null;

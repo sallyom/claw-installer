@@ -133,6 +133,42 @@ describe("DeployForm", () => {
     });
   });
 
+  it("auto-populates project namespace from prefix and agent name", async () => {
+    const user = userEvent.setup();
+    const health = { ...defaultHealth, k8sAvailable: true, k8sContext: "minikube" };
+    globalThis.fetch = mockFetchWith(health);
+    render(<DeployForm onDeployStarted={vi.fn()} />);
+
+    const k8sCard = screen.getByText("Kubernetes / OpenShift").closest(".mode-card")!;
+    await user.click(k8sCard);
+    await user.type(screen.getByPlaceholderText("e.g., lynx"), "demo-agent");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Project / Namespace")).toHaveValue("testuser-demo-agent-openclaw");
+    });
+  });
+
+  it("preserves a manually edited project namespace", async () => {
+    const user = userEvent.setup();
+    const health = { ...defaultHealth, k8sAvailable: true, k8sContext: "minikube" };
+    globalThis.fetch = mockFetchWith(health);
+    render(<DeployForm onDeployStarted={vi.fn()} />);
+
+    const k8sCard = screen.getByText("Kubernetes / OpenShift").closest(".mode-card")!;
+    await user.click(k8sCard);
+    await user.type(screen.getByPlaceholderText("e.g., lynx"), "demo-agent");
+
+    const namespaceInput = await screen.findByLabelText("Project / Namespace");
+    await user.clear(namespaceInput);
+    await user.type(namespaceInput, "custom-project");
+
+    const prefixInput = screen.getByPlaceholderText("testuser");
+    await user.clear(prefixInput);
+    await user.type(prefixInput, "other-user");
+
+    expect(namespaceInput).toHaveValue("custom-project");
+  });
+
   it("shows Telegram fields when checkbox is enabled", async () => {
     const user = userEvent.setup();
     globalThis.fetch = mockFetchWith();

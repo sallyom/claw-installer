@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from "react";
 
+interface HealthResponse {
+  k8sAvailable?: boolean;
+}
+
 interface PodInfo {
   name: string;
   phase: string;
@@ -91,6 +95,7 @@ export default function InstanceList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [includeK8s, setIncludeK8s] = useState(false);
+  const [k8sAvailable, setK8sAvailable] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, ExpandedPanel>>({});
   const [panelData, setPanelData] = useState<Record<string, string>>({});
@@ -113,17 +118,35 @@ export default function InstanceList() {
   };
 
   useEffect(() => {
+    fetch("/api/health")
+      .then((res) => res.json())
+      .then((data: HealthResponse) => {
+        setK8sAvailable(Boolean(data.k8sAvailable));
+      })
+      .catch(() => {
+        setK8sAvailable(false);
+        setIncludeK8s(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!k8sAvailable && includeK8s) {
+      setIncludeK8s(false);
+    }
+  }, [k8sAvailable, includeK8s]);
+
+  useEffect(() => {
     setLoading(true);
     fetchInstances();
     const interval = setInterval(fetchInstances, 5000);
     return () => clearInterval(interval);
   }, [includeK8s]);
 
-  const k8sToggle = (
+  const k8sToggle = k8sAvailable ? (
     <button className="btn btn-ghost" onClick={() => setIncludeK8s((prev) => !prev)}>
       {includeK8s ? "Hide K8s" : "Include K8s"}
     </button>
-  );
+  ) : null;
 
   const handleStart = async (id: string) => {
     setActing(id);
