@@ -1,0 +1,14 @@
+# Optional LiteLLM sidecar configuration.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: alice-myagent-openclaw
+  labels:
+    app: openclaw
+data:
+  config.yaml: |
+    model_list:
+      - model_name: google-vertex/gemini-2.5-pro
+        litellm_params:
+          model: vertex_ai/gemini-2.5-pro

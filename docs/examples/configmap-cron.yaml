@@ -1,0 +1,13 @@
+# Cron job bundle copied into ~/.openclaw/cron/jobs.json by the init container.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-cron
+  namespace: alice-myagent-openclaw
+  labels:
+    app: openclaw
+data:
+  jobs.json: |
+    {
+      "jobs": []
+    }

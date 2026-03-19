@@ -1,0 +1,16 @@
+# Additional bundled workspace trees from Agent Source Directory.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-agent-tree
+  namespace: alice-myagent-openclaw
+  labels:
+    app: openclaw
+data:
+  workspace-builder/AGENTS.md: |
+    ---
+    name: builder
+    description: Build-oriented subagent
+    ---
+  workspace-builder/SOUL.md: |
+    You are the builder subagent.

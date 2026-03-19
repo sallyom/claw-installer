@@ -1,0 +1,12 @@
+# Shared skills copied into ~/.openclaw/skills by the init container.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-skills
+  namespace: alice-myagent-openclaw
+  labels:
+    app: openclaw
+data:
+  hello/SKILL.md: |
+    # Hello
+    A minimal example skill.
