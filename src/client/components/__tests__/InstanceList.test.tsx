@@ -43,7 +43,7 @@ const errorK8sInstance = {
 
 function mockFetchWith(instances: unknown[]) {
   return vi.fn((url: string, opts?: RequestInit) => {
-    if (url === "/api/instances" && !opts?.method) {
+    if ((url === "/api/instances" || url === "/api/instances?includeK8s=1") && !opts?.method) {
       return Promise.resolve({ json: () => Promise.resolve(instances) });
     }
     return Promise.resolve({ json: () => Promise.resolve({}) });
@@ -73,6 +73,15 @@ describe("InstanceList", () => {
     await waitFor(() => {
       expect(screen.getByText("No OpenClaw instances found")).toBeInTheDocument();
     });
+  });
+
+  it("shows an error state when the instances request fails", async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("network down"))) as unknown as typeof globalThis.fetch;
+    render(<InstanceList />);
+    await waitFor(() => {
+      expect(screen.getByText("Could not load instances.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("network down")).toBeInTheDocument();
   });
 
   it("renders running local instance with all expected controls", async () => {
@@ -136,7 +145,7 @@ describe("InstanceList", () => {
   it("toggles token panel on button click", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     globalThis.fetch = vi.fn((url: string) => {
-      if (url === "/api/instances") {
+      if (url === "/api/instances" || url === "/api/instances?includeK8s=1") {
         return Promise.resolve({ json: () => Promise.resolve([runningInstance]) });
       }
       if (url === "/api/instances/inst-1/token") {
@@ -206,7 +215,7 @@ describe("InstanceList", () => {
     vi.stubGlobal("open", openSpy);
 
     globalThis.fetch = vi.fn((url: string) => {
-      if (url === "/api/instances") {
+      if (url === "/api/instances" || url === "/api/instances?includeK8s=1") {
         return Promise.resolve({ json: () => Promise.resolve([runningInstance]) });
       }
       if (url === "/api/instances/inst-1/token") {
@@ -266,6 +275,23 @@ describe("InstanceList", () => {
     // Should not crash — component catches the error and finishes loading
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opts into kubernetes discovery only when requested", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const fetchMock = mockFetchWith([]);
+    globalThis.fetch = fetchMock;
+
+    render(<InstanceList />);
+    await waitFor(() => {
+      expect(screen.getByText("Include K8s")).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/instances");
+
+    await user.click(screen.getByText("Include K8s"));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/instances?includeK8s=1");
     });
   });
 });
