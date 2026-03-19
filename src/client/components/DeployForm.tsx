@@ -120,6 +120,21 @@ function inferDisplayNameFromAgentName(value: string): string {
     .join(" ");
 }
 
+function sanitizeNamespacePart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function deriveNamespace(prefix: string, agentName: string): string {
+  const cleanPrefix = sanitizeNamespacePart(prefix) || "user";
+  const cleanAgent = sanitizeNamespacePart(agentName) || "agent";
+  return `${cleanPrefix}-${cleanAgent}-openclaw`;
+}
+
 const LAST_AGENT_SOURCE_DIR_KEY = "openclaw:last-agent-source-dir";
 
 export default function DeployForm({ onDeployStarted }: Props) {
@@ -277,6 +292,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const applyVars = (vars: Record<string, string>) => {
     // Support both local .env keys (OPENCLAW_PREFIX) and K8s JSON keys (prefix)
     const v = (envKey: string, jsonKey: string) => vars[envKey] || vars[jsonKey] || "";
+    const explicitNamespace = v("K8S_NAMESPACE", "namespace");
 
     // Map VERTEX_ENABLED / VERTEX_PROVIDER to inferenceProvider (both key formats)
     const vertexEnabled = vars.VERTEX_ENABLED === "true" || vars.vertexEnabled === "true";
@@ -290,6 +306,8 @@ export default function DeployForm({ onDeployStarted }: Props) {
     } else if (v("ANTHROPIC_API_KEY", "anthropicApiKey")) {
       setInferenceProvider("anthropic");
     }
+
+    setNamespaceManuallyEdited(Boolean(explicitNamespace));
 
     setConfig((prev) => ({
       ...prev,
@@ -382,6 +400,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
       agentSourceDir: v("AGENT_SOURCE_DIR", "agentSourceDir") || prev.agentSourceDir,
       telegramBotToken: v("TELEGRAM_BOT_TOKEN", "telegramBotToken") || prev.telegramBotToken,
       telegramAllowFrom: v("TELEGRAM_ALLOW_FROM", "telegramAllowFrom") || prev.telegramAllowFrom,
+      namespace: explicitNamespace || prev.namespace,
       litellmProxy: vars.litellmProxy === "false" ? false : prev.litellmProxy,
       otelEnabled: vars.OTEL_ENABLED === "true" || vars.otelEnabled === "true" || prev.otelEnabled,
       otelJaeger: vars.OTEL_JAEGER === "true" || vars.otelJaeger === "true" || prev.otelJaeger,
@@ -393,6 +412,16 @@ export default function DeployForm({ onDeployStarted }: Props) {
 
   const [displayNameManuallyEdited, setDisplayNameManuallyEdited] = useState(false);
   const [agentNameManuallyEdited, setAgentNameManuallyEdited] = useState(false);
+  const [namespaceManuallyEdited, setNamespaceManuallyEdited] = useState(false);
+  const derivedNamespace = deriveNamespace(config.prefix || defaults?.prefix || "", config.agentName);
+
+  useEffect(() => {
+    if (namespaceManuallyEdited) return;
+    setConfig((prev) => {
+      if (prev.namespace === derivedNamespace) return prev;
+      return { ...prev, namespace: derivedNamespace };
+    });
+  }, [derivedNamespace, namespaceManuallyEdited]);
 
   const update = (field: string, value: string) => {
     if (field === "agentName") {
@@ -400,6 +429,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
     }
     if (field === "agentDisplayName") {
       setDisplayNameManuallyEdited(true);
+    }
+    if (field === "namespace") {
+      setNamespaceManuallyEdited(true);
     }
     if (field === "agentSourceDir") {
       const inferredAgentName = inferAgentNameFromPath(value);
@@ -514,7 +546,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         gcpServiceAccountJson: vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
         gcpServiceAccountPath: vertexEnabled ? config.gcpServiceAccountPath || undefined : undefined,
         litellmProxy: vertexEnabled ? config.litellmProxy : undefined,
-        namespace: config.namespace || undefined,
+        namespace: (config.namespace || derivedNamespace) || undefined,
         sshHost: config.sshHost || undefined,
         sshUser: config.sshUser || undefined,
         agentSourceDir: config.agentSourceDir || undefined,
@@ -1066,16 +1098,18 @@ export default function DeployForm({ onDeployStarted }: Props) {
 
         {mode === "kubernetes" && (
           <div className="form-group">
-            <label>Namespace</label>
+            <label>Project / Namespace</label>
             <input
               type="text"
+              aria-label="Project / Namespace"
               autoComplete="off"
-              placeholder={`${config.prefix || defaults?.prefix || "user"}-${config.agentName || "agent"}-openclaw`}
+              placeholder={derivedNamespace}
               value={config.namespace || ""}
-              onChange={(e) => setConfig((prev) => ({ ...prev, namespace: e.target.value }))}
+              onChange={(e) => update("namespace", e.target.value)}
             />
             <div className="hint">
-              Leave blank to auto-generate (e.g., <code>{config.prefix || defaults?.prefix || "user"}-{config.agentName || "agent"}-openclaw</code>)
+              Auto-filled from owner prefix and agent name. Edit it if your OpenShift project or Kubernetes namespace is pre-created.
+              Default: <code>{derivedNamespace}</code>
             </div>
           </div>
         )}

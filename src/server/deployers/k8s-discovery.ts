@@ -1,5 +1,8 @@
 import * as k8s from "@kubernetes/client-node";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { coreApi, appsApi, isOpenShift } from "../services/k8s.js";
+import { installerDataDir } from "../paths.js";
 import { getRouteUrl } from "./k8s-helpers.js";
 
 export interface K8sPodInfo {
@@ -22,6 +25,22 @@ export interface K8sInstance {
   readyReplicas: number;
   pods: K8sPodInfo[];
   statusDetail: string;   // human-readable progress line
+}
+
+export interface DiscoverK8sInstancesOptions {
+  namespaces?: string[];
+}
+
+async function loadSavedNamespaces(): Promise<string[]> {
+  try {
+    const k8sDir = join(installerDataDir(), "k8s");
+    const entries = await readdir(k8sDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
 }
 
 function derivePodInfo(pod: k8s.V1Pod): K8sPodInfo {
@@ -109,20 +128,33 @@ function deriveInstanceStatus(
   return { status: "deploying", statusDetail: detail };
 }
 
-export async function discoverK8sInstances(): Promise<K8sInstance[]> {
+export async function discoverK8sInstances(options: DiscoverK8sInstancesOptions = {}): Promise<K8sInstance[]> {
   const results: K8sInstance[] = [];
   try {
     const core = coreApi();
     const apps = appsApi();
+    const namespaces = new Set((options.namespaces || []).filter(Boolean));
 
-    const nsList = await core.listNamespace({
-      labelSelector: "app.kubernetes.io/managed-by=openclaw-installer",
-    });
+    for (const nsName of await loadSavedNamespaces()) {
+      namespaces.add(nsName);
+    }
 
-    for (const ns of nsList.items) {
-      const nsName = ns.metadata?.name || "";
-      // Skip namespaces being deleted
-      if (ns.status?.phase === "Terminating") continue;
+    try {
+      const nsList = await core.listNamespace({
+        labelSelector: "app.kubernetes.io/managed-by=openclaw-installer",
+      });
+      for (const ns of nsList.items) {
+        const nsName = ns.metadata?.name || "";
+        if (nsName && ns.status?.phase !== "Terminating") {
+          namespaces.add(nsName);
+        }
+      }
+    } catch {
+      // Regular users often cannot list namespaces cluster-wide. Saved namespaces
+      // and explicit namespace probes still let us discover user-owned installs.
+    }
+
+    for (const nsName of namespaces) {
       try {
         const dep = await apps.readNamespacedDeployment({ name: "openclaw", namespace: nsName });
         const labels = dep.metadata?.labels || {};
@@ -158,18 +190,8 @@ export async function discoverK8sInstances(): Promise<K8sInstance[]> {
           statusDetail,
         });
       } catch {
-        results.push({
-          namespace: nsName,
-          status: "unknown",
-          prefix: nsName.replace(/-openclaw$/, ""),
-          agentName: "",
-          image: "",
-          url: "",
-          replicas: 0,
-          readyReplicas: 0,
-          pods: [],
-          statusDetail: "No deployment found",
-        });
+        // Ignore stale saved namespaces or inaccessible targets. The Instances view
+        // should only show namespaces that currently contain an OpenClaw deployment.
       }
     }
   } catch {

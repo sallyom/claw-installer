@@ -57,8 +57,8 @@ export async function isOpenShift(): Promise<boolean> {
  */
 export async function isClusterReachable(): Promise<boolean> {
   try {
-    const api = coreApi();
-    await withTimeout(api.listNamespace());
+    const client = loadKubeConfig().makeApiClient(k8s.VersionApi);
+    await withTimeout(client.getCode());
     return true;
   } catch {
     return false;
