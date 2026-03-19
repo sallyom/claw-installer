@@ -43,10 +43,10 @@ const errorK8sInstance = {
 
 function mockFetchWith(instances: unknown[]) {
   return vi.fn((url: string, opts?: RequestInit) => {
-    if (url === "/api/instances" && !opts?.method) {
-      return Promise.resolve({ json: () => Promise.resolve(instances) });
+    if ((url === "/api/instances" || url === "/api/instances?includeK8s=1") && !opts?.method) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(instances) });
     }
-    return Promise.resolve({ json: () => Promise.resolve({}) });
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
   }) as unknown as typeof globalThis.fetch;
 }
 
@@ -75,6 +75,15 @@ describe("InstanceList", () => {
     });
   });
 
+  it("shows an error state when the instances request fails", async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("network down"))) as unknown as typeof globalThis.fetch;
+    render(<InstanceList />);
+    await waitFor(() => {
+      expect(screen.getByText("Could not load instances.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("network down")).toBeInTheDocument();
+  });
+
   it("renders running local instance with all expected controls", async () => {
     globalThis.fetch = mockFetchWith([runningInstance]);
     render(<InstanceList />);
@@ -89,7 +98,7 @@ describe("InstanceList", () => {
     expect(screen.getByText("Logs")).toBeInTheDocument();
     expect(screen.getByText("Stop")).toBeInTheDocument();
     // Running local instance cannot be deleted
-    expect(screen.getByText("Delete Data").closest("button")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /delete data/i })).toBeDisabled();
   });
 
   it("renders stopped instance with Start button and no panel buttons", async () => {
@@ -128,33 +137,33 @@ describe("InstanceList", () => {
     globalThis.fetch = mockFetchWith([runningK8s]);
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Delete Data")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /delete data/i })).toBeInTheDocument();
     });
-    expect(screen.getByText("Delete Data").closest("button")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /delete data/i })).not.toBeDisabled();
   });
 
   it("toggles token panel on button click", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     globalThis.fetch = vi.fn((url: string) => {
-      if (url === "/api/instances") {
-        return Promise.resolve({ json: () => Promise.resolve([runningInstance]) });
+      if (url === "/api/instances" || url === "/api/instances?includeK8s=1") {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([runningInstance]) });
       }
       if (url === "/api/instances/inst-1/token") {
-        return Promise.resolve({ json: () => Promise.resolve({ token: "secret-token-123" }) });
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ token: "secret-token-123" }) });
       }
-      return Promise.resolve({ json: () => Promise.resolve({}) });
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
     }) as unknown as typeof globalThis.fetch;
 
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Token")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /token/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Token"));
+    await user.click(screen.getByRole("button", { name: /token/i }));
     await waitFor(() => {
       expect(screen.getByText("secret-token-123")).toBeInTheDocument();
     });
-    expect(screen.getByText("Hide")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /hide/i })).toBeInTheDocument();
   });
 
   it("calls start endpoint when Start is clicked", async () => {
@@ -164,10 +173,10 @@ describe("InstanceList", () => {
 
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Start")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /start/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Start"));
+    await user.click(screen.getByRole("button", { name: /start/i }));
     expect(fetchMock).toHaveBeenCalledWith("/api/instances/inst-2/start", { method: "POST" });
   });
 
@@ -178,10 +187,10 @@ describe("InstanceList", () => {
 
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Stop")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Stop"));
+    await user.click(screen.getByRole("button", { name: /stop/i }));
     expect(fetchMock).toHaveBeenCalledWith("/api/instances/inst-1/stop", { method: "POST" });
   });
 
@@ -193,10 +202,10 @@ describe("InstanceList", () => {
 
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Re-deploy")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /re-deploy/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Re-deploy"));
+    await user.click(screen.getByRole("button", { name: /re-deploy/i }));
     expect(fetchMock).toHaveBeenCalledWith("/api/instances/k8s-1/redeploy", { method: "POST" });
   });
 
@@ -206,13 +215,13 @@ describe("InstanceList", () => {
     vi.stubGlobal("open", openSpy);
 
     globalThis.fetch = vi.fn((url: string) => {
-      if (url === "/api/instances") {
-        return Promise.resolve({ json: () => Promise.resolve([runningInstance]) });
+      if (url === "/api/instances" || url === "/api/instances?includeK8s=1") {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([runningInstance]) });
       }
       if (url === "/api/instances/inst-1/token") {
-        return Promise.resolve({ json: () => Promise.resolve({ token: "my-token" }) });
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ token: "my-token" }) });
       }
-      return Promise.resolve({ json: () => Promise.resolve({}) });
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
     }) as unknown as typeof globalThis.fetch;
 
     render(<InstanceList />);
@@ -238,10 +247,10 @@ describe("InstanceList", () => {
 
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Delete Data")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /delete data/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Delete Data"));
+    await user.click(screen.getByRole("button", { name: /delete data/i }));
     expect(fetchMock).toHaveBeenCalledWith("/api/instances/inst-2", { method: "DELETE" });
   });
 
@@ -253,10 +262,10 @@ describe("InstanceList", () => {
 
     render(<InstanceList />);
     await waitFor(() => {
-      expect(screen.getByText("Delete Data")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /delete data/i })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Delete Data"));
+    await user.click(screen.getByRole("button", { name: /delete data/i }));
     expect(fetchMock).not.toHaveBeenCalledWith("/api/instances/inst-2", { method: "DELETE" });
   });
 
@@ -266,6 +275,23 @@ describe("InstanceList", () => {
     // Should not crash — component catches the error and finishes loading
     await waitFor(() => {
       expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opts into kubernetes discovery only when requested", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const fetchMock = mockFetchWith([]);
+    globalThis.fetch = fetchMock;
+
+    render(<InstanceList />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /include k8s/i })).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/instances");
+
+    await user.click(screen.getByRole("button", { name: /include k8s/i }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/instances?includeK8s=1");
     });
   });
 });

@@ -93,7 +93,7 @@ WORKDIR /app
 
 USER 0
 RUN microdnf update -y && \
-    microdnf install -y procps-ng hostname git findutils openssl shadow-utils && \
+    microdnf install -y procps-ng hostname git findutils openssl openssh-clients shadow-utils && \
     microdnf clean all && \
     useradd -u 1000 -g 0 -d /home/node -m node && \
     chown node:0 /app

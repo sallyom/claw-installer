@@ -6,6 +6,30 @@ export interface DeployConfig {
   agentName: string;
   agentDisplayName: string;
   prefix?: string;
+  // Sandbox
+  sandboxEnabled?: boolean;
+  sandboxMode?: "off" | "non-main" | "all";
+  sandboxScope?: "session" | "agent" | "shared";
+  sandboxWorkspaceAccess?: "none" | "ro" | "rw";
+  sandboxBackend?: "ssh";
+  sandboxToolPolicyEnabled?: boolean;
+  sandboxToolAllowFiles?: boolean;
+  sandboxToolAllowSessions?: boolean;
+  sandboxToolAllowMemory?: boolean;
+  sandboxToolAllowRuntime?: boolean;
+  sandboxToolAllowBrowser?: boolean;
+  sandboxToolAllowAutomation?: boolean;
+  sandboxToolAllowMessaging?: boolean;
+  sandboxSshTarget?: string;
+  sandboxSshWorkspaceRoot?: string;
+  sandboxSshStrictHostKeyChecking?: boolean;
+  sandboxSshUpdateHostKeys?: boolean;
+  sandboxSshIdentity?: string;
+  sandboxSshIdentityPath?: string;
+  sandboxSshCertificate?: string;
+  sandboxSshCertificatePath?: string;
+  sandboxSshKnownHosts?: string;
+  sandboxSshKnownHostsPath?: string;
   // Model provider (all optional — without them, agents use in-cluster model)
   anthropicApiKey?: string;
   openaiApiKey?: string;

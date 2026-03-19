@@ -88,6 +88,39 @@ const PROXY_MODEL_HINTS: Record<string, string> = {
   "vertex-anthropic": "Examples: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5",
   "vertex-google": "Examples: gemini-2.5-pro, gemini-2.5-flash",
 };
+function decodeBase64(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return window.atob(value);
+  } catch {
+    return "";
+  }
+}
+
+function encodeBase64(value: string): string {
+  return window.btoa(value);
+}
+
+function inferAgentNameFromPath(value: string): string {
+  const trimmed = value.trim().replace(/[\\/]+$/, "");
+  if (!trimmed) return "";
+  const parts = trimmed.split(/[\\/]/).filter(Boolean);
+  const base = parts[parts.length - 1] || "";
+  return base
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function inferDisplayNameFromAgentName(value: string): string {
+  return value
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+const LAST_AGENT_SOURCE_DIR_KEY = "openclaw:last-agent-source-dir";
 
 export default function DeployForm({ onDeployStarted }: Props) {
   const [mode, setMode] = useState<Mode>("local");
@@ -95,12 +128,34 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const [defaults, setDefaults] = useState<ServerDefaults | null>(null);
   const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([]);
   const [loadedConfigLabel, setLoadedConfigLabel] = useState<string | null>(null);
+  const [autoLoadedEnvDir, setAutoLoadedEnvDir] = useState<string | null>(null);
   const [inferenceProvider, setInferenceProvider] = useState<InferenceProvider>("anthropic");
   const [config, setConfig] = useState({
     prefix: "",
     agentName: "",
     agentDisplayName: "",
     image: "",
+    sandboxEnabled: false,
+    sandboxMode: "all",
+    sandboxScope: "session",
+    sandboxWorkspaceAccess: "rw",
+    sandboxToolPolicyEnabled: false,
+    sandboxToolAllowFiles: true,
+    sandboxToolAllowSessions: true,
+    sandboxToolAllowMemory: true,
+    sandboxToolAllowRuntime: false,
+    sandboxToolAllowBrowser: false,
+    sandboxToolAllowAutomation: false,
+    sandboxToolAllowMessaging: false,
+    sandboxSshTarget: "",
+    sandboxSshWorkspaceRoot: "/tmp/openclaw-sandboxes",
+    sandboxSshStrictHostKeyChecking: true,
+    sandboxSshUpdateHostKeys: true,
+    sandboxSshIdentityPath: "",
+    sandboxSshCertificate: "",
+    sandboxSshCertificatePath: "",
+    sandboxSshKnownHosts: "",
+    sandboxSshKnownHostsPath: "",
     anthropicApiKey: "",
     openaiApiKey: "",
     agentModel: "",
@@ -189,6 +244,36 @@ export default function DeployForm({ onDeployStarted }: Props) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    try {
+      const lastAgentSourceDir = window.localStorage.getItem(LAST_AGENT_SOURCE_DIR_KEY);
+      if (!lastAgentSourceDir) return;
+      setConfig((prev) => (
+        prev.agentSourceDir
+          ? prev
+          : {
+              ...prev,
+              agentSourceDir: lastAgentSourceDir,
+            }
+      ));
+    } catch {
+      // Ignore localStorage access failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const trimmed = config.agentSourceDir.trim();
+      if (trimmed) {
+        window.localStorage.setItem(LAST_AGENT_SOURCE_DIR_KEY, trimmed);
+      } else {
+        window.localStorage.removeItem(LAST_AGENT_SOURCE_DIR_KEY);
+      }
+    } catch {
+      // Ignore localStorage access failures.
+    }
+  }, [config.agentSourceDir]);
+
   const applyVars = (vars: Record<string, string>) => {
     // Support both local .env keys (OPENCLAW_PREFIX) and K8s JSON keys (prefix)
     const v = (envKey: string, jsonKey: string) => vars[envKey] || vars[jsonKey] || "";
@@ -212,6 +297,83 @@ export default function DeployForm({ onDeployStarted }: Props) {
       agentName: v("OPENCLAW_AGENT_NAME", "agentName") || prev.agentName,
       agentDisplayName: v("OPENCLAW_DISPLAY_NAME", "agentDisplayName") || prev.agentDisplayName,
       image: v("OPENCLAW_IMAGE", "image") || prev.image,
+      sandboxEnabled:
+        vars.SANDBOX_ENABLED === "true" || vars.sandboxEnabled === "true" || prev.sandboxEnabled,
+      sandboxMode: v("SANDBOX_MODE", "sandboxMode") || prev.sandboxMode,
+      sandboxScope: v("SANDBOX_SCOPE", "sandboxScope") || prev.sandboxScope,
+      sandboxToolPolicyEnabled:
+        vars.SANDBOX_TOOL_POLICY_ENABLED === "true"
+          || vars.sandboxToolPolicyEnabled === "true"
+          || prev.sandboxToolPolicyEnabled,
+      sandboxToolAllowFiles:
+        vars.SANDBOX_TOOL_ALLOW_FILES === "false"
+          ? false
+          : vars.sandboxToolAllowFiles === "false"
+            ? false
+            : prev.sandboxToolAllowFiles,
+      sandboxToolAllowSessions:
+        vars.SANDBOX_TOOL_ALLOW_SESSIONS === "false"
+          ? false
+          : vars.sandboxToolAllowSessions === "false"
+            ? false
+            : prev.sandboxToolAllowSessions,
+      sandboxToolAllowMemory:
+        vars.SANDBOX_TOOL_ALLOW_MEMORY === "false"
+          ? false
+          : vars.sandboxToolAllowMemory === "false"
+            ? false
+            : prev.sandboxToolAllowMemory,
+      sandboxToolAllowRuntime:
+        vars.SANDBOX_TOOL_ALLOW_RUNTIME === "true"
+          || vars.sandboxToolAllowRuntime === "true"
+          || prev.sandboxToolAllowRuntime,
+      sandboxToolAllowBrowser:
+        vars.SANDBOX_TOOL_ALLOW_BROWSER === "true"
+          || vars.sandboxToolAllowBrowser === "true"
+          || prev.sandboxToolAllowBrowser,
+      sandboxToolAllowAutomation:
+        vars.SANDBOX_TOOL_ALLOW_AUTOMATION === "true"
+          || vars.sandboxToolAllowAutomation === "true"
+          || prev.sandboxToolAllowAutomation,
+      sandboxToolAllowMessaging:
+        vars.SANDBOX_TOOL_ALLOW_MESSAGING === "true"
+          || vars.sandboxToolAllowMessaging === "true"
+          || prev.sandboxToolAllowMessaging,
+      sandboxWorkspaceAccess:
+        v("SANDBOX_WORKSPACE_ACCESS", "sandboxWorkspaceAccess") || prev.sandboxWorkspaceAccess,
+      sandboxSshTarget:
+        v("SANDBOX_SSH_TARGET", "sandboxSshTarget") || prev.sandboxSshTarget,
+      sandboxSshWorkspaceRoot:
+        v("SANDBOX_SSH_WORKSPACE_ROOT", "sandboxSshWorkspaceRoot") ||
+        prev.sandboxSshWorkspaceRoot,
+      sandboxSshIdentityPath:
+        v("SANDBOX_SSH_IDENTITY_PATH", "sandboxSshIdentityPath") || prev.sandboxSshIdentityPath,
+      sandboxSshCertificatePath:
+        v("SANDBOX_SSH_CERTIFICATE_PATH", "sandboxSshCertificatePath") ||
+        prev.sandboxSshCertificatePath,
+      sandboxSshKnownHostsPath:
+        v("SANDBOX_SSH_KNOWN_HOSTS_PATH", "sandboxSshKnownHostsPath") ||
+        prev.sandboxSshKnownHostsPath,
+      sandboxSshStrictHostKeyChecking:
+        vars.SANDBOX_SSH_STRICT_HOST_KEY_CHECKING === "false"
+          ? false
+          : vars.sandboxSshStrictHostKeyChecking === "false"
+            ? false
+            : prev.sandboxSshStrictHostKeyChecking,
+      sandboxSshUpdateHostKeys:
+        vars.SANDBOX_SSH_UPDATE_HOST_KEYS === "false"
+          ? false
+          : vars.sandboxSshUpdateHostKeys === "false"
+            ? false
+            : prev.sandboxSshUpdateHostKeys,
+      sandboxSshCertificate:
+        decodeBase64(vars.SANDBOX_SSH_CERTIFICATE_B64) ||
+        v("sandboxSshCertificate", "sandboxSshCertificate") ||
+        prev.sandboxSshCertificate,
+      sandboxSshKnownHosts:
+        decodeBase64(vars.SANDBOX_SSH_KNOWN_HOSTS_B64) ||
+        v("sandboxSshKnownHosts", "sandboxSshKnownHosts") ||
+        prev.sandboxSshKnownHosts,
       port: v("OPENCLAW_PORT", "port") || prev.port,
       agentModel: v("AGENT_MODEL", "agentModel") || prev.agentModel,
       modelEndpoint: v("MODEL_ENDPOINT", "modelEndpoint") || prev.modelEndpoint,
@@ -230,18 +392,57 @@ export default function DeployForm({ onDeployStarted }: Props) {
   };
 
   const [displayNameManuallyEdited, setDisplayNameManuallyEdited] = useState(false);
+  const [agentNameManuallyEdited, setAgentNameManuallyEdited] = useState(false);
 
   const update = (field: string, value: string) => {
+    if (field === "agentName") {
+      setAgentNameManuallyEdited(true);
+    }
     if (field === "agentDisplayName") {
       setDisplayNameManuallyEdited(true);
+    }
+    if (field === "agentSourceDir") {
+      const inferredAgentName = inferAgentNameFromPath(value);
+      setConfig((prev) => ({
+        ...prev,
+        agentSourceDir: value,
+        agentName:
+          (!agentNameManuallyEdited || !prev.agentName) && inferredAgentName
+            ? inferredAgentName
+            : prev.agentName,
+        agentDisplayName:
+          (!displayNameManuallyEdited || !prev.agentDisplayName) && inferredAgentName
+            ? inferDisplayNameFromAgentName(inferredAgentName)
+            : prev.agentDisplayName,
+      }));
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === autoLoadedEnvDir) {
+        return;
+      }
+      fetch("/api/configs/source-env", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentSourceDir: trimmed }),
+      })
+        .then(async (r) => {
+          if (!r.ok) return null;
+          return await r.json() as { vars?: Record<string, string> };
+        })
+        .then((data) => {
+          if (!data?.vars) return;
+          applyVars(data.vars);
+          setLoadedConfigLabel(`${trimmed}/.env`);
+          setAutoLoadedEnvDir(trimmed);
+        })
+        .catch(() => {});
+      return;
     }
     if (field === "agentName" && !displayNameManuallyEdited) {
       // Auto-derive display name from agent name
       setConfig((prev) => ({
         ...prev,
         agentName: value,
-        agentDisplayName:
-          value.charAt(0).toUpperCase() + value.slice(1).replace(/-/g, " "),
+        agentDisplayName: inferDisplayNameFromAgentName(value),
       }));
     } else {
       setConfig((prev) => ({ ...prev, [field]: value }));
@@ -249,6 +450,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
   };
 
   const handleDeploy = async () => {
+    if (!isValid) {
+      return;
+    }
     setDeploying(true);
     try {
       const vertexEnabled = isVertex;
@@ -260,6 +464,44 @@ export default function DeployForm({ onDeployStarted }: Props) {
         agentName: config.agentName,
         agentDisplayName: config.agentDisplayName || config.agentName,
         image: config.image || undefined,
+        sandboxEnabled: config.sandboxEnabled || undefined,
+        sandboxBackend: config.sandboxEnabled ? "ssh" : undefined,
+        sandboxMode: config.sandboxEnabled ? config.sandboxMode : undefined,
+        sandboxScope: config.sandboxEnabled ? config.sandboxScope : undefined,
+        sandboxToolPolicyEnabled:
+          config.sandboxEnabled ? config.sandboxToolPolicyEnabled || undefined : undefined,
+        sandboxToolAllowFiles:
+          config.sandboxEnabled ? config.sandboxToolAllowFiles : undefined,
+        sandboxToolAllowSessions:
+          config.sandboxEnabled ? config.sandboxToolAllowSessions : undefined,
+        sandboxToolAllowMemory:
+          config.sandboxEnabled ? config.sandboxToolAllowMemory : undefined,
+        sandboxToolAllowRuntime:
+          config.sandboxEnabled ? config.sandboxToolAllowRuntime : undefined,
+        sandboxToolAllowBrowser:
+          config.sandboxEnabled ? config.sandboxToolAllowBrowser : undefined,
+        sandboxToolAllowAutomation:
+          config.sandboxEnabled ? config.sandboxToolAllowAutomation : undefined,
+        sandboxToolAllowMessaging:
+          config.sandboxEnabled ? config.sandboxToolAllowMessaging : undefined,
+        sandboxWorkspaceAccess: config.sandboxEnabled ? config.sandboxWorkspaceAccess : undefined,
+        sandboxSshTarget: config.sandboxEnabled ? config.sandboxSshTarget || undefined : undefined,
+        sandboxSshWorkspaceRoot:
+          config.sandboxEnabled ? config.sandboxSshWorkspaceRoot || undefined : undefined,
+        sandboxSshIdentityPath:
+          config.sandboxEnabled ? config.sandboxSshIdentityPath || undefined : undefined,
+        sandboxSshCertificatePath:
+          config.sandboxEnabled ? config.sandboxSshCertificatePath || undefined : undefined,
+        sandboxSshKnownHostsPath:
+          config.sandboxEnabled ? config.sandboxSshKnownHostsPath || undefined : undefined,
+        sandboxSshStrictHostKeyChecking:
+          config.sandboxEnabled ? config.sandboxSshStrictHostKeyChecking : undefined,
+        sandboxSshUpdateHostKeys:
+          config.sandboxEnabled ? config.sandboxSshUpdateHostKeys : undefined,
+        sandboxSshCertificate:
+          config.sandboxEnabled ? config.sandboxSshCertificate || undefined : undefined,
+        sandboxSshKnownHosts:
+          config.sandboxEnabled ? config.sandboxSshKnownHosts || undefined : undefined,
         anthropicApiKey: inferenceProvider === "anthropic" ? config.anthropicApiKey || undefined : undefined,
         openaiApiKey: (inferenceProvider === "openai" || inferenceProvider === "custom-endpoint") ? config.openaiApiKey || undefined : undefined,
         agentModel: config.agentModel || undefined,
@@ -302,29 +544,103 @@ export default function DeployForm({ onDeployStarted }: Props) {
     }
   };
 
-  const handleEnvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = reader.result as string;
-      const vars: Record<string, string> = {};
-      for (const line of text.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx < 0) continue;
-        vars[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
-      }
-      applyVars(vars);
-    };
-    reader.readAsText(file);
-    // Reset so the same file can be re-uploaded
-    e.target.value = "";
+  const handleEnvDownload = () => {
+    const lines = [
+      "# OpenClaw installer config",
+      `OPENCLAW_PREFIX=${config.prefix}`,
+      `OPENCLAW_AGENT_NAME=${config.agentName}`,
+      `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName}`,
+      `OPENCLAW_IMAGE=${config.image}`,
+      `OPENCLAW_PORT=${config.port}`,
+      `AGENT_SOURCE_DIR=${config.agentSourceDir}`,
+      "",
+      `ANTHROPIC_API_KEY=${config.anthropicApiKey}`,
+      `OPENAI_API_KEY=${config.openaiApiKey}`,
+      `MODEL_ENDPOINT=${config.modelEndpoint}`,
+      `AGENT_MODEL=${config.agentModel}`,
+      "",
+      `VERTEX_ENABLED=${isVertex}`,
+      `VERTEX_PROVIDER=${inferenceProvider === "vertex-google" ? "google" : "anthropic"}`,
+      `GOOGLE_CLOUD_PROJECT=${config.googleCloudProject}`,
+      `GOOGLE_CLOUD_LOCATION=${config.googleCloudLocation}`,
+      `GCP_SERVICE_ACCOUNT_PATH=${config.gcpServiceAccountPath}`,
+      `LITELLM_PROXY=${config.litellmProxy}`,
+      "",
+      `SANDBOX_ENABLED=${config.sandboxEnabled}`,
+      "SANDBOX_BACKEND=ssh",
+      `SANDBOX_MODE=${config.sandboxMode}`,
+      `SANDBOX_SCOPE=${config.sandboxScope}`,
+      `SANDBOX_WORKSPACE_ACCESS=${config.sandboxWorkspaceAccess}`,
+      `SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`,
+      `SANDBOX_SSH_WORKSPACE_ROOT=${config.sandboxSshWorkspaceRoot}`,
+      `SANDBOX_SSH_IDENTITY_PATH=${config.sandboxSshIdentityPath}`,
+      `SANDBOX_SSH_CERTIFICATE_PATH=${config.sandboxSshCertificatePath}`,
+      `SANDBOX_SSH_KNOWN_HOSTS_PATH=${config.sandboxSshKnownHostsPath}`,
+      `SANDBOX_SSH_STRICT_HOST_KEY_CHECKING=${config.sandboxSshStrictHostKeyChecking}`,
+      `SANDBOX_SSH_UPDATE_HOST_KEYS=${config.sandboxSshUpdateHostKeys}`,
+      `SANDBOX_TOOL_POLICY_ENABLED=${config.sandboxToolPolicyEnabled}`,
+      `SANDBOX_TOOL_ALLOW_FILES=${config.sandboxToolAllowFiles}`,
+      `SANDBOX_TOOL_ALLOW_SESSIONS=${config.sandboxToolAllowSessions}`,
+      `SANDBOX_TOOL_ALLOW_MEMORY=${config.sandboxToolAllowMemory}`,
+      `SANDBOX_TOOL_ALLOW_RUNTIME=${config.sandboxToolAllowRuntime}`,
+      `SANDBOX_TOOL_ALLOW_BROWSER=${config.sandboxToolAllowBrowser}`,
+      `SANDBOX_TOOL_ALLOW_AUTOMATION=${config.sandboxToolAllowAutomation}`,
+      `SANDBOX_TOOL_ALLOW_MESSAGING=${config.sandboxToolAllowMessaging}`,
+      "",
+      `TELEGRAM_ENABLED=${config.telegramEnabled}`,
+      `TELEGRAM_BOT_TOKEN=${config.telegramBotToken}`,
+      `TELEGRAM_ALLOW_FROM=${config.telegramAllowFrom}`,
+      `OTEL_ENABLED=${config.otelEnabled}`,
+      `OTEL_JAEGER=${config.otelJaeger}`,
+      `OTEL_ENDPOINT=${config.otelEndpoint}`,
+      `OTEL_EXPERIMENT_ID=${config.otelExperimentId}`,
+      "",
+      `K8S_NAMESPACE=${config.namespace}`,
+    ];
+
+    if (config.sandboxSshCertificate && !config.sandboxSshCertificatePath) {
+      lines.push(`SANDBOX_SSH_CERTIFICATE_B64=${encodeBase64(config.sandboxSshCertificate)}`);
+    }
+    if (config.sandboxSshKnownHosts && !config.sandboxSshKnownHostsPath) {
+      lines.push(`SANDBOX_SSH_KNOWN_HOSTS_B64=${encodeBase64(config.sandboxSshKnownHosts)}`);
+    }
+
+    const text = lines.join("\n") + "\n";
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = `${config.agentName || "openclaw"}.env`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(href);
   };
 
-  const isValid = config.agentName
-    && (mode !== "kubernetes" || defaults?.k8sAvailable);
+  const hasSandboxToolSelection = !config.sandboxToolPolicyEnabled
+    || config.sandboxToolAllowFiles
+    || config.sandboxToolAllowSessions
+    || config.sandboxToolAllowMemory
+    || config.sandboxToolAllowRuntime
+    || config.sandboxToolAllowBrowser
+    || config.sandboxToolAllowAutomation
+    || config.sandboxToolAllowMessaging;
+
+  const validationErrors: string[] = [];
+  if (!config.agentName.trim()) {
+    validationErrors.push("Agent Name is required.");
+  }
+  if (config.sandboxEnabled && !config.sandboxSshTarget.trim()) {
+    validationErrors.push("SSH Target is required when the SSH sandbox backend is enabled.");
+  }
+  if (config.sandboxEnabled && !hasSandboxToolSelection) {
+    validationErrors.push("Select at least one sandbox tool group or disable custom sandbox tool baseline.");
+  }
+  if (mode === "kubernetes" && !defaults?.k8sAvailable) {
+    validationErrors.push("No Kubernetes cluster detected.");
+  }
+
+  const isValid = validationErrors.length === 0;
 
   return (
     <div>
@@ -369,7 +685,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
           <h3 style={{ margin: 0 }}>Configuration</h3>
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             {savedConfigs.length > 0 && (
               <select
                 className="btn btn-ghost"
@@ -380,6 +696,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
                     setMode(cfg.type === "k8s" ? "kubernetes" : "local");
                     applyVars(cfg.vars);
                     setLoadedConfigLabel(`${cfg.name} (${cfg.type === "k8s" ? "K8s" : "Local"})`);
+                    setAutoLoadedEnvDir(null);
                   }
                 }}
                 defaultValue=""
@@ -390,15 +707,13 @@ export default function DeployForm({ onDeployStarted }: Props) {
                 ))}
               </select>
             )}
-            <label className="btn btn-ghost" style={{ cursor: "pointer", margin: 0 }}>
-              Upload .env
-              <input
-                type="file"
-                accept=".env,text/plain"
-                onChange={handleEnvUpload}
-                style={{ display: "none" }}
-              />
-            </label>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleEnvDownload}
+            >
+              Save .env
+            </button>
           </div>
         </div>
 
@@ -456,6 +771,22 @@ export default function DeployForm({ onDeployStarted }: Props) {
           />
         </div>
 
+        {mode === "local" && (
+          <div className="form-group">
+            <label>Agent Source Directory</label>
+            <input
+              type="text"
+              placeholder="/path/to/agents-dir (optional)"
+              value={config.agentSourceDir}
+              onChange={(e) => update("agentSourceDir", e.target.value)}
+            />
+            <div className="hint">
+              Host directory with <code>workspace-*</code>, <code>skills/</code>, and <code>cron/jobs.json</code> to provision into the instance.
+              Defaults to <code>~/.openclaw/</code> if it exists.
+            </div>
+          </div>
+        )}
+
         <div className="form-group">
           <label>Container Image</label>
           <input
@@ -470,6 +801,269 @@ export default function DeployForm({ onDeployStarted }: Props) {
           </div>
         </div>
 
+        <h3 style={{ marginTop: "1.5rem" }}>Sandbox</h3>
+
+        <div className="form-group">
+          <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={config.sandboxEnabled}
+              onChange={(e) =>
+                setConfig((prev) => ({ ...prev, sandboxEnabled: e.target.checked }))
+              }
+            />
+            Enable SSH sandbox backend
+          </label>
+          <div className="hint">
+            Recommended path for this installer on both local containers and Kubernetes/OpenShift.
+          </div>
+        </div>
+
+        {config.sandboxEnabled && (
+          <>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Sandbox Mode</label>
+                <select
+                  value={config.sandboxMode}
+                  onChange={(e) => update("sandboxMode", e.target.value)}
+                >
+                  <option value="all">all</option>
+                  <option value="non-main">non-main</option>
+                  <option value="off">off</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Sandbox Scope</label>
+                <select
+                  value={config.sandboxScope}
+                  onChange={(e) => update("sandboxScope", e.target.value)}
+                >
+                  <option value="session">session</option>
+                  <option value="agent">agent</option>
+                  <option value="shared">shared</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>Workspace Access</label>
+                <select
+                  value={config.sandboxWorkspaceAccess}
+                  onChange={(e) => update("sandboxWorkspaceAccess", e.target.value)}
+                >
+                  <option value="rw">rw</option>
+                  <option value="ro">ro</option>
+                  <option value="none">none</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Remote Workspace Root</label>
+                <input
+                  type="text"
+                  placeholder="/tmp/openclaw-sandboxes"
+                  value={config.sandboxSshWorkspaceRoot}
+                  onChange={(e) => update("sandboxSshWorkspaceRoot", e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={config.sandboxToolPolicyEnabled}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, sandboxToolPolicyEnabled: e.target.checked }))
+                  }
+                />
+                Customize sandbox tool baseline
+              </label>
+              <div className="hint">
+                Optional persistent baseline for sandboxed tools. This is intentionally much smaller than the full gateway UI.
+              </div>
+            </div>
+
+            {config.sandboxToolPolicyEnabled && (
+              <div className="form-row" style={{ flexWrap: "wrap", gap: "1rem 1.5rem", marginBottom: "1rem" }}>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowFiles}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowFiles: e.target.checked }))
+                    }
+                  />
+                  File tools
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowSessions}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowSessions: e.target.checked }))
+                    }
+                  />
+                  Session tools
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowMemory}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowMemory: e.target.checked }))
+                    }
+                  />
+                  Memory tools
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowRuntime}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowRuntime: e.target.checked }))
+                    }
+                  />
+                  Runtime tools (`exec`, `bash`, `process`)
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowBrowser}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowBrowser: e.target.checked }))
+                    }
+                  />
+                  Browser and canvas
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowAutomation}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowAutomation: e.target.checked }))
+                    }
+                  />
+                  Automation tools
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxToolAllowMessaging}
+                    onChange={(e) =>
+                      setConfig((prev) => ({ ...prev, sandboxToolAllowMessaging: e.target.checked }))
+                    }
+                  />
+                  Messaging tools
+                </label>
+              </div>
+            )}
+
+            <div className="form-group">
+              <label>SSH Target</label>
+              <input
+                type="text"
+                placeholder="user@gateway-host:22"
+                value={config.sandboxSshTarget}
+                onChange={(e) => update("sandboxSshTarget", e.target.value)}
+              />
+              <div className="hint">
+                Required. OpenClaw will run sandboxed tools on this remote host.
+              </div>
+            </div>
+
+            <div className="form-row">
+              <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={config.sandboxSshStrictHostKeyChecking}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      sandboxSshStrictHostKeyChecking: e.target.checked,
+                    }))}
+                />
+                Strict host key checking
+              </label>
+              <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={config.sandboxSshUpdateHostKeys}
+                  onChange={(e) =>
+                    setConfig((prev) => ({
+                      ...prev,
+                      sandboxSshUpdateHostKeys: e.target.checked,
+                    }))}
+                />
+                Update host keys
+              </label>
+            </div>
+
+            <div className="form-group">
+              <label>
+                SSH Private Key
+                <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
+                  {" "}(optional)
+                </span>
+              </label>
+              <input
+                type="text"
+                placeholder="/path/to/id_ed25519"
+                value={config.sandboxSshIdentityPath}
+                onChange={(e) => update("sandboxSshIdentityPath", e.target.value)}
+              />
+              <div className="hint">Path on the installer host to the private key file.</div>
+            </div>
+
+            <div className="form-group">
+              <label>
+                SSH Certificate
+                <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
+                  {" "}(optional)
+                </span>
+              </label>
+              <input
+                type="text"
+                placeholder="/path/to/id_ed25519-cert.pub"
+                value={config.sandboxSshCertificatePath}
+                onChange={(e) => update("sandboxSshCertificatePath", e.target.value)}
+                style={{ marginBottom: "0.5rem" }}
+              />
+              <textarea
+                rows={4}
+                placeholder="ssh-ed25519-cert-v01@openssh.com ..."
+                value={config.sandboxSshCertificate}
+                onChange={(e) => update("sandboxSshCertificate", e.target.value)}
+              />
+              <div className="hint">Type a path on the installer host, or paste the certificate directly.</div>
+            </div>
+
+            <div className="form-group">
+              <label>
+                Known Hosts
+                <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
+                  {" "}(optional)
+                </span>
+              </label>
+              <input
+                type="text"
+                placeholder="/path/to/known_hosts"
+                value={config.sandboxSshKnownHostsPath}
+                onChange={(e) => update("sandboxSshKnownHostsPath", e.target.value)}
+                style={{ marginBottom: "0.5rem" }}
+              />
+              <textarea
+                rows={4}
+                placeholder="gateway-host ssh-ed25519 AAAA..."
+                value={config.sandboxSshKnownHosts}
+                onChange={(e) => update("sandboxSshKnownHosts", e.target.value)}
+              />
+              <div className="hint">Type a path on the installer host, or paste known_hosts entries directly.</div>
+            </div>
+          </>
+        )}
+
         {mode === "kubernetes" && (
           <div className="form-group">
             <label>Namespace</label>
@@ -482,22 +1076,6 @@ export default function DeployForm({ onDeployStarted }: Props) {
             />
             <div className="hint">
               Leave blank to auto-generate (e.g., <code>{config.prefix || defaults?.prefix || "user"}-{config.agentName || "agent"}-openclaw</code>)
-            </div>
-          </div>
-        )}
-
-        {mode === "local" && (
-          <div className="form-group">
-            <label>Agent Source Directory</label>
-            <input
-              type="text"
-              placeholder="/path/to/agents-dir (optional)"
-              value={config.agentSourceDir}
-              onChange={(e) => update("agentSourceDir", e.target.value)}
-            />
-            <div className="hint">
-              Host directory with <code>workspace-*</code>, <code>skills/</code>, and <code>cron/jobs.json</code> to provision into the instance.
-              Defaults to <code>~/.openclaw/</code> if it exists.
             </div>
           </div>
         )}
@@ -947,9 +1525,14 @@ export default function DeployForm({ onDeployStarted }: Props) {
         )}
 
         <div style={{ marginTop: "1.5rem" }}>
+          {!isValid && (
+            <div style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+              {validationErrors.join(" ")}
+            </div>
+          )}
           <button
             className="btn btn-primary"
-            disabled={!isValid || deploying}
+            disabled={deploying}
             onClick={handleDeploy}
           >
             {deploying ? "Deploying..." : "Deploy OpenClaw"}

@@ -143,6 +143,11 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
   if (projectId) data.GOOGLE_CLOUD_PROJECT = projectId;
   if (config.googleCloudLocation) data.GOOGLE_CLOUD_LOCATION = config.googleCloudLocation;
   if (litellmMasterKey) data.LITELLM_MASTER_KEY = litellmMasterKey;
+  if (config.sandboxEnabled) {
+    if (config.sandboxSshIdentity) data.SSH_IDENTITY = config.sandboxSshIdentity;
+    if (config.sandboxSshCertificate) data.SSH_CERTIFICATE = config.sandboxSshCertificate;
+    if (config.sandboxSshKnownHosts) data.SSH_KNOWN_HOSTS = config.sandboxSshKnownHosts;
+  }
 
   return {
     apiVersion: "v1",
@@ -190,6 +195,7 @@ export function deploymentManifest(
   onOpenShift: boolean,
   otelViaOperator = false,
   skillEntries: TreeEntry[] = [],
+  agentTreeEntries: TreeEntry[] = [],
   cronJobsContent?: string,
 ): k8s.V1Deployment {
   const image = defaultImage(config);
@@ -219,6 +225,9 @@ export function deploymentManifest(
     // In proxy mode LiteLLM gets project/location from its config.yaml;
     // the gateway doesn't need them.
     ...(!useProxy ? ["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"] : []),
+    "SSH_IDENTITY",
+    "SSH_CERTIFICATE",
+    "SSH_KNOWN_HOSTS",
   ];
   for (const key of optionalKeys) {
     envVars.push({
@@ -263,6 +272,7 @@ mkdir -p /home/node/.openclaw/skills
 mkdir -p /home/node/.openclaw/cron
 mkdir -p /home/node/.openclaw/workspace-${id}
 ${copyLines}
+find /agents-tree -mindepth 1 -type d -name 'workspace-*' -exec sh -c 'base="$(basename "$1")"; if [ "$base" = "workspace-main" ]; then dest="/home/node/.openclaw/workspace-${id}"; else dest="/home/node/.openclaw/$base"; fi; mkdir -p "$dest"; cp -r "$1"/* "$dest"/ 2>/dev/null || true' _ {} \\;
 cp -r /skills-src/. /home/node/.openclaw/skills/ 2>/dev/null || true
 cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true
 chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
@@ -312,6 +322,7 @@ echo "Config initialized"
                 { name: "openclaw-home", mountPath: "/home/node/.openclaw" },
                 { name: "config-template", mountPath: "/config" },
                 { name: "agent-config", mountPath: "/agents" },
+                { name: "agent-tree-config", mountPath: "/agents-tree", readOnly: true },
                 { name: "skills-config", mountPath: "/skills-src", readOnly: true },
                 { name: "cron-config", mountPath: "/cron-src", readOnly: true },
               ],
@@ -448,6 +459,15 @@ echo "Config initialized"
                 name: "openclaw-cron",
                 ...(cronJobsContent !== undefined
                   ? { items: [{ key: "jobs.json", path: "jobs.json" }] }
+                  : {}),
+              },
+            },
+            {
+              name: "agent-tree-config",
+              configMap: {
+                name: "openclaw-agent-tree",
+                ...(agentTreeEntries.length > 0
+                  ? { items: agentTreeEntries.map((entry) => ({ key: entry.key, path: entry.path })) }
                   : {}),
               },
             },

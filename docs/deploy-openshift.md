@@ -50,8 +50,18 @@ Open `http://localhost:3000`, pick **Kubernetes**, fill in the form, and hit Dep
 | **Owner prefix** | *(optional)* | Defaults to OS username. Combined with agent name: `alice-myagent-openclaw` |
 | **Display name** | `My Agent` | Shown in the UI |
 | **Image** | `quay.io/aicatalyst/openclaw:latest` | Container image |
+| **Enable SSH sandbox backend** | checked | Recommended sandbox option for cluster deploys |
+| **SSH Target** | `sandbox@gateway-host:22` | Remote sandbox runtime host |
 | **API key** | *(your key)* | For Anthropic, OpenAI, or other providers |
 | **Google Cloud Credentials (JSON)** | *(file upload or path)* | For Vertex AI — project ID auto-extracted |
+
+## SSH Sandbox on OpenShift / Kubernetes
+
+This installer supports OpenClaw's `ssh` sandbox backend for cluster deployments.
+
+See [SANDBOX.md](../SANDBOX.md) for the recommended form values, secret handling, and troubleshooting.
+
+For upstream sandbox behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
 
 ## What Gets Created
 
@@ -128,6 +138,8 @@ To change deploy configuration (API keys, model provider, image, etc.), fill in 
 
 The deploy config (with secrets redacted) is saved to `~/.openclaw/installer/k8s/<namespace>/deploy-config.json` after each deploy.
 
+If you change SSH sandbox settings, re-deploy to the same namespace so the ConfigMap and Secret are updated together.
+
 ## Instance Management
 
 The **Instances** tab finds all namespaces labeled `app.kubernetes.io/managed-by=openclaw-installer`. For each instance:
@@ -179,3 +191,7 @@ For Google Vertex AI or Anthropic Claude via Vertex AI:
 3. Creates a `gcp-sa` Kubernetes Secret with the JSON
 4. Mounts it at `/home/node/gcp/sa.json` in the gateway container
 5. Sets `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT`, and `VERTEX_ENABLED` env vars
+
+## Troubleshooting SSH Sandbox
+
+See [SANDBOX.md](../SANDBOX.md#troubleshooting).

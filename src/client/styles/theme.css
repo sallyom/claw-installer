@@ -128,6 +128,13 @@ body {
   transition: border-color 0.15s;
 }
 
+.form-group input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {

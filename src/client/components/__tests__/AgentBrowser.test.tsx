@@ -55,7 +55,7 @@ describe("AgentBrowser", () => {
     render(<AgentBrowser />);
     expect(screen.getByText("Import from Git Repository")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("https://github.com/org/agents-repo.git")).toBeInTheDocument();
-    expect(screen.getByText("Browse")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /browse/i })).toBeInTheDocument();
   });
 
   it("calls browse endpoint when Browse is clicked with URL", async () => {
@@ -82,7 +82,7 @@ describe("AgentBrowser", () => {
 
     const input = screen.getByPlaceholderText("https://github.com/org/agents-repo.git");
     await user.type(input, "https://github.com/test/repo.git");
-    await user.click(screen.getByText("Browse"));
+    await user.click(screen.getByRole("button", { name: /browse/i }));
 
     await waitFor(() => {
       expect(screen.getByText("remote-agent")).toBeInTheDocument();

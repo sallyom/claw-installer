@@ -113,6 +113,30 @@ app.get("/api/configs", async (_req, res) => {
   res.json(configs);
 });
 
+app.post("/api/configs/source-env", async (req, res) => {
+  const agentSourceDir = String(req.body?.agentSourceDir || "").trim();
+  if (!agentSourceDir) {
+    res.status(400).json({ error: "agentSourceDir is required" });
+    return;
+  }
+
+  const envPath = join(agentSourceDir, ".env");
+  try {
+    const envContent = await readFile(envPath, "utf8");
+    const vars: Record<string, string> = {};
+    for (const line of envContent.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx < 0) continue;
+      vars[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+    }
+    res.json({ vars });
+  } catch {
+    res.status(404).json({ error: `No .env found at ${envPath}` });
+  }
+});
+
 // Serve frontend — check both dev (vite build output) and production (Dockerfile) paths
 const clientCandidates = [
   resolve(import.meta.dirname, "..", "..", "dist", "client"), // from src/server/ after vite build

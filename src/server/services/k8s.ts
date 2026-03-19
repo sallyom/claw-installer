@@ -1,6 +1,16 @@
 import * as k8s from "@kubernetes/client-node";
 
 let _kc: k8s.KubeConfig | null = null;
+const K8S_PROBE_TIMEOUT_MS = 2000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = K8S_PROBE_TIMEOUT_MS): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
+}
 
 /**
  * Load kubeconfig from default locations (~/.kube/config or in-cluster SA).
@@ -34,7 +44,7 @@ export function appsApi(): k8s.AppsV1Api {
 export async function isOpenShift(): Promise<boolean> {
   try {
     const client = loadKubeConfig().makeApiClient(k8s.ApisApi);
-    const result = await client.getAPIVersions();
+    const result = await withTimeout(client.getAPIVersions());
     const groups = result.groups || [];
     return groups.some((g: k8s.V1APIGroup) => g.name === "route.openshift.io");
   } catch {
@@ -48,7 +58,7 @@ export async function isOpenShift(): Promise<boolean> {
 export async function isClusterReachable(): Promise<boolean> {
   try {
     const api = coreApi();
-    await api.listNamespace();
+    await withTimeout(api.listNamespace());
     return true;
   } catch {
     return false;
@@ -61,7 +71,9 @@ export async function isClusterReachable(): Promise<boolean> {
 export async function hasOtelOperator(): Promise<boolean> {
   try {
     const client = loadKubeConfig().makeApiClient(k8s.ApiextensionsV1Api);
-    await client.readCustomResourceDefinition({ name: "opentelemetrycollectors.opentelemetry.io" });
+    await withTimeout(
+      client.readCustomResourceDefinition({ name: "opentelemetrycollectors.opentelemetry.io" }),
+    );
     return true;
   } catch {
     return false;

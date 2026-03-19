@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import { namespaceName, agentId, generateToken, applyRoute, getRouteUrl } from "./k8s-helpers.js";
 import { loadWorkspaceFiles } from "./k8s-agent.js";
+import { loadAgentSourceWorkspaceTree } from "./agent-source.js";
 import { oauthServiceAccount, oauthConfigSecret } from "./k8s-oauth.js";
 import {
   namespaceManifest,
@@ -96,6 +97,7 @@ export class KubernetesDeployer implements Deployer {
     // Load workspace files (prefers user-customized from ~/.openclaw/workspace-*)
     const { files: workspaceFiles } = loadWorkspaceFiles(config, log);
     const skillEntries = await loadTextTree(skillsDir()).catch(() => []);
+    const agentTreeEntries = await loadAgentSourceWorkspaceTree(config.agentSourceDir).catch(() => []);
     const cronJobsContent = await readFile(cronJobsFile(), "utf8").catch(() => undefined);
 
     // 1. Namespace
@@ -166,6 +168,15 @@ export class KubernetesDeployer implements Deployer {
       () => core.createNamespacedConfigMap({ namespace: ns, body: agentCm }),
       () => core.replaceNamespacedConfigMap({ name: "openclaw-agent", namespace: ns, body: agentCm }),
       "ConfigMap openclaw-agent",
+      log,
+    );
+
+    const agentTreeCm = fileTreeConfigMapManifest(ns, "openclaw-agent-tree", agentTreeEntries);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-agent-tree", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: agentTreeCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-agent-tree", namespace: ns, body: agentTreeCm }),
+      "ConfigMap openclaw-agent-tree",
       log,
     );
 
@@ -299,7 +310,7 @@ export class KubernetesDeployer implements Deployer {
     }
 
     // 8. Deployment
-    const dep = deploymentManifest(ns, config, onOcp, otelViaOperator, skillEntries, cronJobsContent);
+    const dep = deploymentManifest(ns, config, onOcp, otelViaOperator, skillEntries, agentTreeEntries, cronJobsContent);
     await applyResource(
       () => apps.readNamespacedDeployment({ name: "openclaw", namespace: ns }),
       () => apps.createNamespacedDeployment({ namespace: ns, body: dep }),
@@ -412,6 +423,7 @@ export class KubernetesDeployer implements Deployer {
     // Load workspace files from ~/.openclaw/workspace-*
     const { files: workspaceFiles, fromHost } = loadWorkspaceFiles(result.config, log);
     const skillEntries = await loadTextTree(skillsDir()).catch(() => []);
+    const agentTreeEntries = await loadAgentSourceWorkspaceTree(result.config.agentSourceDir).catch(() => []);
     const cronJobsContent = await readFile(cronJobsFile(), "utf8").catch(() => undefined);
     if (!fromHost) {
       log("No custom agent files found — using generated defaults");
@@ -433,6 +445,15 @@ export class KubernetesDeployer implements Deployer {
       () => core.createNamespacedConfigMap({ namespace: ns, body: skillsCm }),
       () => core.replaceNamespacedConfigMap({ name: "openclaw-skills", namespace: ns, body: skillsCm }),
       "ConfigMap openclaw-skills",
+      log,
+    );
+
+    const agentTreeCm = fileTreeConfigMapManifest(ns, "openclaw-agent-tree", agentTreeEntries);
+    await applyResource(
+      () => core.readNamespacedConfigMap({ name: "openclaw-agent-tree", namespace: ns }),
+      () => core.createNamespacedConfigMap({ namespace: ns, body: agentTreeCm }),
+      () => core.replaceNamespacedConfigMap({ name: "openclaw-agent-tree", namespace: ns, body: agentTreeCm }),
+      "ConfigMap openclaw-agent-tree",
       log,
     );
 
@@ -461,6 +482,7 @@ mkdir -p /home/node/.openclaw/skills
 mkdir -p /home/node/.openclaw/cron
 mkdir -p /home/node/.openclaw/workspace-${id}
 ${copyLines}
+find /agents-tree -mindepth 1 -type d -name 'workspace-*' -exec sh -c 'base="$(basename "$1")"; if [ "$base" = "workspace-main" ]; then dest="/home/node/.openclaw/workspace-${id}"; else dest="/home/node/.openclaw/$base"; fi; mkdir -p "$dest"; cp -r "$1"/* "$dest"/ 2>/dev/null || true' _ {} \\;
 cp -r /skills-src/. /home/node/.openclaw/skills/ 2>/dev/null || true
 cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true
 chgrp -R 0 /home/node/.openclaw 2>/dev/null || true
@@ -497,6 +519,16 @@ echo "Config initialized"
       },
       {
         op: "replace",
+        path: "/spec/template/spec/volumes/5/configMap",
+        value: {
+          name: "openclaw-agent-tree",
+          ...(agentTreeEntries.length > 0
+            ? { items: agentTreeEntries.map((entry) => ({ key: entry.key, path: entry.path })) }
+            : {}),
+        },
+      },
+      {
+        op: "replace",
         path: "/spec/template/metadata/annotations/openclaw.io~1restart-at",
         value: new Date().toISOString(),
       },
@@ -526,6 +558,7 @@ echo "Config initialized"
       { name: "ServiceAccount openclaw-oauth-proxy", fn: () => core.deleteNamespacedServiceAccount({ name: "openclaw-oauth-proxy", namespace: ns }) },
       { name: "ConfigMap openclaw-config", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-config", namespace: ns }) },
       { name: "ConfigMap openclaw-agent", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-agent", namespace: ns }) },
+      { name: "ConfigMap openclaw-agent-tree", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-agent-tree", namespace: ns }) },
       { name: "ConfigMap openclaw-skills", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-skills", namespace: ns }) },
       { name: "ConfigMap openclaw-cron", fn: () => core.deleteNamespacedConfigMap({ name: "openclaw-cron", namespace: ns }) },
       { name: "ConfigMap litellm-config", fn: () => core.deleteNamespacedConfigMap({ name: "litellm-config", namespace: ns }) },

@@ -55,77 +55,150 @@ function containerToInstance(c: DiscoveredContainer): DeployResult {
   };
 }
 
+function decodeSavedBase64(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return Buffer.from(value, "base64").toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeSavedBase64UnlessPath(savedValue?: string, savedPath?: string): string | undefined {
+  if (savedPath?.trim()) {
+    return undefined;
+  }
+  return decodeSavedBase64(savedValue);
+}
+
 // List all instances: running containers + stopped volumes (no container due to --rm) + K8s
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   const instances: DeployResult[] = [];
+  const includeK8s = req.query.includeK8s === "1";
 
-  // Local instances
-  const runtime = await detectRuntime();
-  if (runtime) {
-    const containers = await discoverContainers(runtime);
-    const volumes = await discoverVolumes(runtime);
-    instances.push(...containers.map(containerToInstance));
+  try {
+    // Local instances
+    const runtime = await detectRuntime();
+    if (runtime) {
+      const containers = await discoverContainers(runtime);
+      const volumes = await discoverVolumes(runtime);
+      instances.push(...containers.map(containerToInstance));
 
-    const runningContainerNames = new Set(instances.map((i) => i.containerId));
+      const runningContainerNames = new Set(instances.map((i) => i.containerId));
 
-    for (const vol of volumes) {
-      if (runningContainerNames.has(vol.containerName)) continue;
+      for (const vol of volumes) {
+        if (runningContainerNames.has(vol.containerName)) continue;
 
-      const savedVars = await readSavedConfig(vol.containerName);
-      const agentName = savedVars.OPENCLAW_AGENT_NAME || vol.containerName;
-      const displayName = savedVars.OPENCLAW_DISPLAY_NAME || agentName;
-      const prefix = savedVars.OPENCLAW_PREFIX || vol.containerName.replace(/^openclaw-/, "");
+        try {
+          const savedVars = await readSavedConfig(vol.containerName);
+          const agentName = savedVars.OPENCLAW_AGENT_NAME || vol.containerName;
+          const displayName = savedVars.OPENCLAW_DISPLAY_NAME || agentName;
+          const prefix = savedVars.OPENCLAW_PREFIX || vol.containerName.replace(/^openclaw-/, "");
 
-      instances.push({
-        id: vol.containerName,
-        mode: "local",
-        status: "stopped",
-        config: {
-          mode: "local",
-          prefix,
-          agentName,
-          agentDisplayName: displayName.charAt(0).toUpperCase() + displayName.slice(1),
-          image: savedVars.OPENCLAW_IMAGE || undefined,
-          port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
-          anthropicApiKey: savedVars.ANTHROPIC_API_KEY || undefined,
-          openaiApiKey: savedVars.OPENAI_API_KEY || undefined,
-          telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
-          telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
-        },
-        startedAt: "",
-        containerId: vol.containerName,
-      });
+          instances.push({
+            id: vol.containerName,
+            mode: "local",
+            status: "stopped",
+            config: {
+              mode: "local",
+              prefix,
+              agentName,
+              agentDisplayName: displayName.charAt(0).toUpperCase() + displayName.slice(1),
+              image: savedVars.OPENCLAW_IMAGE || undefined,
+              port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
+              anthropicApiKey: savedVars.ANTHROPIC_API_KEY || undefined,
+              openaiApiKey: savedVars.OPENAI_API_KEY || undefined,
+              telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
+              telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
+              sandboxEnabled: savedVars.SANDBOX_ENABLED === "true" || undefined,
+              sandboxBackend: (savedVars.SANDBOX_BACKEND as "ssh") || undefined,
+              sandboxMode:
+                (savedVars.SANDBOX_MODE as "off" | "non-main" | "all") || undefined,
+              sandboxScope:
+                (savedVars.SANDBOX_SCOPE as "session" | "agent" | "shared") || undefined,
+              sandboxToolPolicyEnabled:
+                savedVars.SANDBOX_TOOL_POLICY_ENABLED === "true" || undefined,
+              sandboxToolAllowFiles:
+                savedVars.SANDBOX_TOOL_ALLOW_FILES === "false" ? false : undefined,
+              sandboxToolAllowSessions:
+                savedVars.SANDBOX_TOOL_ALLOW_SESSIONS === "false" ? false : undefined,
+              sandboxToolAllowMemory:
+                savedVars.SANDBOX_TOOL_ALLOW_MEMORY === "false" ? false : undefined,
+              sandboxToolAllowRuntime:
+                savedVars.SANDBOX_TOOL_ALLOW_RUNTIME === "true" || undefined,
+              sandboxToolAllowBrowser:
+                savedVars.SANDBOX_TOOL_ALLOW_BROWSER === "true" || undefined,
+              sandboxToolAllowAutomation:
+                savedVars.SANDBOX_TOOL_ALLOW_AUTOMATION === "true" || undefined,
+              sandboxToolAllowMessaging:
+                savedVars.SANDBOX_TOOL_ALLOW_MESSAGING === "true" || undefined,
+              sandboxWorkspaceAccess:
+                (savedVars.SANDBOX_WORKSPACE_ACCESS as "none" | "ro" | "rw") || undefined,
+              sandboxSshTarget: savedVars.SANDBOX_SSH_TARGET || undefined,
+              sandboxSshWorkspaceRoot: savedVars.SANDBOX_SSH_WORKSPACE_ROOT || undefined,
+              sandboxSshIdentityPath: savedVars.SANDBOX_SSH_IDENTITY_PATH || undefined,
+              sandboxSshCertificatePath: savedVars.SANDBOX_SSH_CERTIFICATE_PATH || undefined,
+              sandboxSshKnownHostsPath: savedVars.SANDBOX_SSH_KNOWN_HOSTS_PATH || undefined,
+              sandboxSshStrictHostKeyChecking:
+                savedVars.SANDBOX_SSH_STRICT_HOST_KEY_CHECKING === "false" ? false : undefined,
+              sandboxSshUpdateHostKeys:
+                savedVars.SANDBOX_SSH_UPDATE_HOST_KEYS === "false" ? false : undefined,
+              sandboxSshCertificate: decodeSavedBase64UnlessPath(
+                savedVars.SANDBOX_SSH_CERTIFICATE_B64,
+                savedVars.SANDBOX_SSH_CERTIFICATE_PATH,
+              ),
+              sandboxSshKnownHosts: decodeSavedBase64UnlessPath(
+                savedVars.SANDBOX_SSH_KNOWN_HOSTS_B64,
+                savedVars.SANDBOX_SSH_KNOWN_HOSTS_PATH,
+              ),
+            },
+            startedAt: "",
+            containerId: vol.containerName,
+          });
+        } catch {
+          // Skip one broken saved instance instead of failing the whole list.
+        }
+      }
     }
-  }
 
-  // K8s instances
-  if (await isClusterReachable()) {
-    const k8sInstances = await discoverK8sInstances();
-    for (const ki of k8sInstances) {
-      instances.push({
-        id: ki.namespace,
-        mode: "kubernetes",
-        status: ki.status,
-        config: {
-          mode: "kubernetes",
-          prefix: ki.prefix,
-          agentName: ki.agentName,
-          agentDisplayName: ki.agentName
-            ? ki.agentName.charAt(0).toUpperCase() + ki.agentName.slice(1)
-            : ki.namespace,
-          namespace: ki.namespace,
-          image: ki.image,
-        },
-        startedAt: "",
-        url: ki.url || undefined,
-        containerId: ki.namespace,
-        statusDetail: ki.statusDetail,
-        pods: ki.pods,
-      });
+    // K8s instances
+    if (includeK8s && await isClusterReachable()) {
+      try {
+        const k8sInstances = await discoverK8sInstances();
+        for (const ki of k8sInstances) {
+          instances.push({
+            id: ki.namespace,
+            mode: "kubernetes",
+            status: ki.status,
+            config: {
+              mode: "kubernetes",
+              prefix: ki.prefix,
+              agentName: ki.agentName,
+              agentDisplayName: ki.agentName
+                ? ki.agentName.charAt(0).toUpperCase() + ki.agentName.slice(1)
+                : ki.namespace,
+              namespace: ki.namespace,
+              image: ki.image,
+            },
+            startedAt: "",
+            url: ki.url || undefined,
+            containerId: ki.namespace,
+            statusDetail: ki.statusDetail,
+            pods: ki.pods,
+          });
+        }
+      } catch {
+        // Keep local instances visible even if cluster discovery fails.
+      }
     }
-  }
 
-  res.json(instances);
+    res.json(instances);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
 });
 
 // Get single instance by container name
@@ -576,6 +649,7 @@ async function findInstance(name: string): Promise<DeployResult | null> {
           openaiApiKey: savedVars.OPENAI_API_KEY || undefined,
           agentModel: savedVars.AGENT_MODEL || undefined,
           modelEndpoint: savedVars.MODEL_ENDPOINT || undefined,
+          agentSourceDir: savedVars.AGENT_SOURCE_DIR || undefined,
           vertexEnabled: savedVars.VERTEX_ENABLED === "true" || undefined,
           vertexProvider: (savedVars.VERTEX_PROVIDER as "google" | "anthropic") || undefined,
           googleCloudProject: savedVars.GOOGLE_CLOUD_PROJECT || undefined,
@@ -590,6 +664,47 @@ async function findInstance(name: string): Promise<DeployResult | null> {
           otelImage: savedVars.OTEL_IMAGE || undefined,
           telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
           telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
+          sandboxEnabled: savedVars.SANDBOX_ENABLED === "true" || undefined,
+          sandboxBackend: (savedVars.SANDBOX_BACKEND as "ssh") || undefined,
+          sandboxMode:
+            (savedVars.SANDBOX_MODE as "off" | "non-main" | "all") || undefined,
+          sandboxScope:
+            (savedVars.SANDBOX_SCOPE as "session" | "agent" | "shared") || undefined,
+          sandboxToolPolicyEnabled:
+            savedVars.SANDBOX_TOOL_POLICY_ENABLED === "true" || undefined,
+          sandboxToolAllowFiles:
+            savedVars.SANDBOX_TOOL_ALLOW_FILES === "false" ? false : undefined,
+          sandboxToolAllowSessions:
+            savedVars.SANDBOX_TOOL_ALLOW_SESSIONS === "false" ? false : undefined,
+          sandboxToolAllowMemory:
+            savedVars.SANDBOX_TOOL_ALLOW_MEMORY === "false" ? false : undefined,
+          sandboxToolAllowRuntime:
+            savedVars.SANDBOX_TOOL_ALLOW_RUNTIME === "true" || undefined,
+          sandboxToolAllowBrowser:
+            savedVars.SANDBOX_TOOL_ALLOW_BROWSER === "true" || undefined,
+          sandboxToolAllowAutomation:
+            savedVars.SANDBOX_TOOL_ALLOW_AUTOMATION === "true" || undefined,
+          sandboxToolAllowMessaging:
+            savedVars.SANDBOX_TOOL_ALLOW_MESSAGING === "true" || undefined,
+          sandboxWorkspaceAccess:
+            (savedVars.SANDBOX_WORKSPACE_ACCESS as "none" | "ro" | "rw") || undefined,
+          sandboxSshTarget: savedVars.SANDBOX_SSH_TARGET || undefined,
+          sandboxSshWorkspaceRoot: savedVars.SANDBOX_SSH_WORKSPACE_ROOT || undefined,
+          sandboxSshIdentityPath: savedVars.SANDBOX_SSH_IDENTITY_PATH || undefined,
+          sandboxSshCertificatePath: savedVars.SANDBOX_SSH_CERTIFICATE_PATH || undefined,
+          sandboxSshKnownHostsPath: savedVars.SANDBOX_SSH_KNOWN_HOSTS_PATH || undefined,
+          sandboxSshStrictHostKeyChecking:
+            savedVars.SANDBOX_SSH_STRICT_HOST_KEY_CHECKING === "false" ? false : undefined,
+          sandboxSshUpdateHostKeys:
+            savedVars.SANDBOX_SSH_UPDATE_HOST_KEYS === "false" ? false : undefined,
+          sandboxSshCertificate: decodeSavedBase64UnlessPath(
+            savedVars.SANDBOX_SSH_CERTIFICATE_B64,
+            savedVars.SANDBOX_SSH_CERTIFICATE_PATH,
+          ),
+          sandboxSshKnownHosts: decodeSavedBase64UnlessPath(
+            savedVars.SANDBOX_SSH_KNOWN_HOSTS_B64,
+            savedVars.SANDBOX_SSH_KNOWN_HOSTS_PATH,
+          ),
         },
         startedAt: "",
         containerId: name,

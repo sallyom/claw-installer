@@ -4,6 +4,9 @@ import { loadKubeConfig } from "../services/k8s.js";
 import type { DeployConfig, LogCallback } from "./types.js";
 import { shouldUseLitellmProxy, litellmModelName, LITELLM_PORT } from "./litellm.js";
 import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
+import { buildSandboxConfig } from "./sandbox.js";
+import { buildSandboxToolPolicy } from "./tool-policy.js";
+import { loadAgentSourceBundle } from "./agent-source.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
 export const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || "quay.io/aicatalyst/openclaw:vertex-anthropic";
@@ -55,6 +58,7 @@ export function deriveModel(config: DeployConfig): string {
 export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, opts?: { routeUrl?: string }): object {
   const id = agentId(config);
   const model = deriveModel(config);
+  const sourceBundle = loadAgentSourceBundle(config);
   const controlUi: Record<string, unknown> = {
     enabled: true,
   };
@@ -99,6 +103,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
       defaults: {
         workspace: "~/.openclaw/workspace",
         model: { primary: model },
+        ...(buildSandboxConfig(config) ? { sandbox: buildSandboxConfig(config) } : {}),
       },
       list: [
         {
@@ -106,8 +111,17 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
           name: config.agentDisplayName || config.agentName,
           workspace: `~/.openclaw/workspace-${id}`,
           model: { primary: model },
-          subagents: { allowAgents: ["*"] },
+          subagents: sourceBundle?.mainAgent?.subagents || { allowAgents: ["*"] },
+          ...(sourceBundle?.mainAgent?.tools ? { tools: sourceBundle.mainAgent.tools } : {}),
         },
+        ...((sourceBundle?.agents || []).map((entry) => ({
+          id: entry.id,
+          name: entry.name || entry.id,
+          workspace: `~/.openclaw/workspace-${entry.id}`,
+          model: entry.model || { primary: model },
+          ...(entry.subagents ? { subagents: entry.subagents } : {}),
+          ...(entry.tools ? { tools: entry.tools } : {}),
+        }))),
       ],
     },
     ...(shouldUseLitellmProxy(config) ? {
@@ -128,6 +142,11 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
     },
     cron: { enabled: true },
   };
+
+  const sandboxToolPolicy = buildSandboxToolPolicy(config);
+  if (sandboxToolPolicy) {
+    ocConfig.tools = sandboxToolPolicy;
+  }
 
   if (config.telegramBotToken && config.telegramAllowFrom) {
     const allowFrom = config.telegramAllowFrom

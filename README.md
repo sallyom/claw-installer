@@ -74,6 +74,14 @@ See [`docs/examples/`](docs/examples/) for annotated YAMLs showing every resourc
 
 For Vertex AI, upload your GCP service account JSON file (or provide an absolute path). The installer extracts the `project_id` automatically.
 
+## SSH Sandbox
+
+The installer supports OpenClaw's `ssh` sandbox backend for local, Kubernetes, and OpenShift deployments.
+
+For the installer-specific setup, credential handling, and troubleshooting, see [SANDBOX.md](SANDBOX.md).
+
+For upstream sandbox concepts and backend behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
+
 ## Customizing Your Agent
 
 After the first deploy, agent files are saved to `~/.openclaw/workspace-<id>/` on the host:
@@ -104,6 +112,31 @@ Planned next steps:
 
 - explicit `Pull running changes to local` sync for local and Kubernetes instances
 - optional GitOps-backed sync, so `~/.openclaw` can be treated as a tracked working tree and re-deploys can follow git state
+
+## Demo Bundles
+
+`Agent Source Directory` can now point at a bundled multi-agent demo tree.
+
+Try:
+
+- `demos/openclaw-builder-research-ops`
+
+This demo includes:
+
+- `workspace-main/` for the orchestrator agent
+- `workspace-builder/`
+- `workspace-research/`
+- `workspace-ops/`
+- `openclaw-agents.json` to register extra named agents and simple per-agent sandbox tool policies
+
+`workspace-main/` is applied to the computed main agent workspace for the current deploy.
+Other `workspace-*` directories are copied through as named agent workspaces and can be
+registered as additional agents through `openclaw-agents.json`.
+
+Environment templates are included too:
+
+- `.env.example` for a generic installer setup
+- `demos/openclaw-builder-research-ops/.env.example` for the bundled sandbox demo
 
 ## Architecture
 

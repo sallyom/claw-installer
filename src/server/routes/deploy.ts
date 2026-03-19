@@ -12,6 +12,12 @@ const router = Router();
 const localDeployer = new LocalDeployer();
 const k8sDeployer = new KubernetesDeployer();
 
+function normalizeSshMaterial(value: string): string {
+  const withoutBom = value.replace(/^\uFEFF/, "");
+  const normalizedNewlines = withoutBom.replace(/\r\n?/g, "\n");
+  return normalizedNewlines.endsWith("\n") ? normalizedNewlines : `${normalizedNewlines}\n`;
+}
+
 function getDeployer(mode: string) {
   switch (mode) {
     case "local":
@@ -32,6 +38,20 @@ router.post("/", async (req, res) => {
     });
     return;
   }
+  if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshTarget?.trim()) {
+    res.status(400).json({
+      error: "SSH sandbox requires sandboxSshTarget",
+    });
+    return;
+  }
+
+  const resolveTextFile = (filePath: string, label: string): string | null => {
+    if (!existsSync(filePath)) {
+      res.status(400).json({ error: `${label} file not found: ${filePath}` });
+      return null;
+    }
+    return readFileSync(filePath, "utf-8");
+  };
 
   // Default prefix to OS username
   if (!config.prefix) {
@@ -74,6 +94,30 @@ router.post("/", async (req, res) => {
       return;
     }
     config.gcpServiceAccountJson = readFileSync(saPath, "utf-8");
+  }
+
+  if (config.sandboxEnabled) {
+    if (config.sandboxSshIdentityPath) {
+      const value = resolveTextFile(config.sandboxSshIdentityPath, "SSH private key");
+      if (value === null) return;
+      config.sandboxSshIdentity = normalizeSshMaterial(value);
+    }
+    if (config.sandboxSshCertificatePath) {
+      const value = resolveTextFile(config.sandboxSshCertificatePath, "SSH certificate");
+      if (value === null) return;
+      config.sandboxSshCertificate = normalizeSshMaterial(value);
+    }
+    if (config.sandboxSshKnownHostsPath) {
+      const value = resolveTextFile(config.sandboxSshKnownHostsPath, "Known hosts");
+      if (value === null) return;
+      config.sandboxSshKnownHosts = normalizeSshMaterial(value);
+    }
+    if (config.sandboxSshCertificate) {
+      config.sandboxSshCertificate = normalizeSshMaterial(config.sandboxSshCertificate);
+    }
+    if (config.sandboxSshKnownHosts) {
+      config.sandboxSshKnownHosts = normalizeSshMaterial(config.sandboxSshKnownHosts);
+    }
   }
 
   // Fall back to GCP environment defaults for Vertex AI

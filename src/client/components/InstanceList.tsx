@@ -89,27 +89,41 @@ function K8sProgress({ inst }: { inst: Instance }) {
 export default function InstanceList() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [includeK8s, setIncludeK8s] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, ExpandedPanel>>({});
   const [panelData, setPanelData] = useState<Record<string, string>>({});
 
   const fetchInstances = async () => {
     try {
-      const res = await fetch("/api/instances");
+      const res = await fetch(includeK8s ? "/api/instances?includeK8s=1" : "/api/instances");
+      if (!res.ok) {
+        throw new Error(`Failed to load instances (${res.status})`);
+      }
       const data = await res.json();
       setInstances(data);
-    } catch {
-      // ignore
+      setError(null);
+    } catch (err) {
+      setInstances([]);
+      setError(err instanceof Error ? err.message : "Failed to load instances");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    setLoading(true);
     fetchInstances();
     const interval = setInterval(fetchInstances, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [includeK8s]);
+
+  const k8sToggle = (
+    <button className="btn btn-ghost" onClick={() => setIncludeK8s((prev) => !prev)}>
+      {includeK8s ? "Hide K8s" : "Include K8s"}
+    </button>
+  );
 
   const handleStart = async (id: string) => {
     setActing(id);
@@ -200,24 +214,53 @@ export default function InstanceList() {
   };
 
   if (loading) {
-    return <div className="card">Loading...</div>;
+    return (
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.75rem" }}>
+          {k8sToggle}
+        </div>
+        Loading...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.75rem" }}>
+          {k8sToggle}
+        </div>
+        <strong>Could not load instances.</strong>
+        <div style={{ marginTop: "0.5rem", color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+          {error}
+        </div>
+      </div>
+    );
   }
 
   if (instances.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-icon">📦</div>
-        <p>No OpenClaw instances found</p>
-        <p style={{ fontSize: "0.85rem" }}>
-          Deploy from the Deploy tab, or start a container manually — any
-          container running an OpenClaw image will appear here automatically.
-        </p>
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.75rem" }}>
+          {k8sToggle}
+        </div>
+        <div className="empty-state">
+          <div className="empty-icon">📦</div>
+          <p>No OpenClaw instances found</p>
+          <p style={{ fontSize: "0.85rem" }}>
+            Deploy from the Deploy tab, or start a container manually — any
+            container running an OpenClaw image will appear here automatically.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="card" style={{ padding: 0 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", padding: "1rem 1rem 0" }}>
+        {k8sToggle}
+      </div>
       {instances.map((inst) => {
         const isActing = acting === inst.id;
         const activePanel = expanded[inst.id];

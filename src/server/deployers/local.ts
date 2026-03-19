@@ -2,7 +2,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { v4 as uuid } from "uuid";
 import type {
   Deployer,
@@ -33,6 +33,9 @@ import { startOtelSidecar, stopOtelSidecar, startJaegerSidecar, otelContainerNam
 import { JAEGER_UI_PORT } from "./otel.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import { generateToken } from "./k8s-helpers.js";
+import { buildSandboxConfig } from "./sandbox.js";
+import { buildSandboxToolPolicy } from "./tool-policy.js";
+import { loadAgentSourceBundle } from "./agent-source.js";
 
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
 const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || "quay.io/aicatalyst/openclaw:vertex-anthropic";
@@ -40,6 +43,10 @@ const DEFAULT_PORT = 18789;
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 const LITELLM_CONFIG_PATH = "/home/node/.openclaw/litellm/config.yaml";
 const LITELLM_KEY_PATH = "/home/node/.openclaw/litellm/master-key";
+const SANDBOX_SSH_DIR = "/home/node/.openclaw/sandbox-ssh";
+const SANDBOX_SSH_IDENTITY_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/identity`;
+const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.pub`;
+const SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/known_hosts`;
 
 /** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
 export function shouldAlwaysPull(image: string): boolean {
@@ -62,6 +69,45 @@ function tryParseProjectId(saJson: string): string {
   } catch {
     return "";
   }
+}
+
+function normalizeHostPath(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function resolveOptionalTextFile(filePath?: string): string | undefined {
+  const normalizedPath = normalizeHostPath(filePath);
+  if (!normalizedPath || !existsSync(normalizedPath)) {
+    return undefined;
+  }
+  return readFileSync(normalizedPath, "utf8");
+}
+
+function prepareLocalSandboxSshConfig(config: DeployConfig): {
+  effectiveConfig: DeployConfig;
+} {
+  const effectiveConfig: DeployConfig = { ...config };
+
+  const identityPath = normalizeHostPath(config.sandboxSshIdentityPath);
+  if (identityPath && existsSync(identityPath)) {
+    effectiveConfig.sandboxSshIdentityPath = SANDBOX_SSH_IDENTITY_CONTAINER_PATH;
+    effectiveConfig.sandboxSshIdentity = resolveOptionalTextFile(identityPath);
+  }
+
+  const certificatePath = normalizeHostPath(config.sandboxSshCertificatePath);
+  if (certificatePath && existsSync(certificatePath)) {
+    effectiveConfig.sandboxSshCertificatePath = SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH;
+    effectiveConfig.sandboxSshCertificate = resolveOptionalTextFile(certificatePath);
+  }
+
+  const knownHostsPath = normalizeHostPath(config.sandboxSshKnownHostsPath);
+  if (knownHostsPath && existsSync(knownHostsPath)) {
+    effectiveConfig.sandboxSshKnownHostsPath = SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH;
+    effectiveConfig.sandboxSshKnownHosts = resolveOptionalTextFile(knownHostsPath);
+  }
+
+  return { effectiveConfig };
 }
 
 
@@ -97,6 +143,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
   const model = deriveModel(config);
   const port = config.port ?? 18789;
   const useOtel = shouldUseOtel(config);
+  const sourceBundle = loadAgentSourceBundle(config);
   const ocConfig: Record<string, unknown> = {
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces
     ...(useOtel ? {
@@ -136,6 +183,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
       defaults: {
         workspace: "~/.openclaw/workspace",
         model: { primary: model },
+        ...(buildSandboxConfig(config) ? { sandbox: buildSandboxConfig(config) } : {}),
       },
       list: [
         {
@@ -143,8 +191,17 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
           name: config.agentDisplayName || config.agentName,
           workspace: `~/.openclaw/workspace-${agentId}`,
           model: { primary: model },
-          subagents: { allowAgents: ["*"] },
+          subagents: sourceBundle?.mainAgent?.subagents || { allowAgents: ["*"] },
+          ...(sourceBundle?.mainAgent?.tools ? { tools: sourceBundle.mainAgent.tools } : {}),
         },
+        ...((sourceBundle?.agents || []).map((entry) => ({
+          id: entry.id,
+          name: entry.name || entry.id,
+          workspace: `~/.openclaw/workspace-${entry.id}`,
+          model: entry.model || { primary: model },
+          ...(entry.subagents ? { subagents: entry.subagents } : {}),
+          ...(entry.tools ? { tools: entry.tools } : {}),
+        }))),
       ],
     },
     ...(shouldUseLitellmProxy(config) ? {
@@ -169,6 +226,11 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
     },
     cron: { enabled: true },
   };
+
+  const sandboxToolPolicy = buildSandboxToolPolicy(config);
+  if (sandboxToolPolicy) {
+    ocConfig.tools = sandboxToolPolicy;
+  }
 
   // Add Telegram channel config if enabled
   if (config.telegramBotToken && config.telegramAllowFrom) {
@@ -297,7 +359,10 @@ function runCommand(
   return new Promise((resolve, reject) => {
     // Redact secrets from logged command
     const redacted = args.map((a, i) =>
-      args[i - 1] === "-e" && /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|TELEGRAM_BOT_TOKEN)=/.test(a)
+      args[i - 1] === "-e" &&
+      /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|TELEGRAM_BOT_TOKEN|SSH_IDENTITY|SSH_CERTIFICATE|SSH_KNOWN_HOSTS)=/.test(
+        a,
+      )
         ? a.replace(/=.*/, "=***")
         : a
     );
@@ -339,9 +404,10 @@ function buildRunArgs(
   litellmMasterKey?: string,
   otelEnvVars?: Record<string, string>,
 ): string[] {
-  const image = resolveImage(config);
-  const useProxy = shouldUseLitellmProxy(config) && !!litellmMasterKey;
-  const useOtelSidecar = shouldUseOtel(config) && !!otelEnvVars;
+  const { effectiveConfig } = prepareLocalSandboxSshConfig(config);
+  const image = resolveImage(effectiveConfig);
+  const useProxy = shouldUseLitellmProxy(effectiveConfig) && !!litellmMasterKey;
+  const useOtelSidecar = shouldUseOtel(effectiveConfig) && !!otelEnvVars;
   const hasSidecars = useProxy || useOtelSidecar;
   const isPodman = runtime === "podman";
 
@@ -357,12 +423,12 @@ function buildRunArgs(
 
   if (hasSidecars && isPodman) {
     // Podman: gateway runs in the same pod as sidecars (port is on the pod)
-    runArgs.push("--pod", podName(config));
+    runArgs.push("--pod", podName(effectiveConfig));
   } else if (hasSidecars && !isPodman) {
     // Docker: share the first sidecar's network namespace
     const networkContainer = useProxy
-      ? litellmContainerName(config)
-      : otelContainerName(config);
+      ? litellmContainerName(effectiveConfig)
+      : otelContainerName(effectiveConfig);
     runArgs.push("--network", `container:${networkContainer}`);
   } else {
     runArgs.push("-p", `${port}:18789`);
@@ -370,8 +436,8 @@ function buildRunArgs(
 
   runArgs.push(
     "--label", OPENCLAW_LABELS.managed,
-    "--label", OPENCLAW_LABELS.prefix(config.prefix || "openclaw"),
-    "--label", OPENCLAW_LABELS.agent(config.agentName),
+    "--label", OPENCLAW_LABELS.prefix(effectiveConfig.prefix || "openclaw"),
+    "--label", OPENCLAW_LABELS.agent(effectiveConfig.agentName),
   );
 
   const env: Record<string, string> = {
@@ -379,38 +445,49 @@ function buildRunArgs(
     NODE_ENV: "production",
   };
 
-  if (config.anthropicApiKey) {
-    env.ANTHROPIC_API_KEY = config.anthropicApiKey;
+  if (effectiveConfig.anthropicApiKey) {
+    env.ANTHROPIC_API_KEY = effectiveConfig.anthropicApiKey;
   }
-  if (config.openaiApiKey) {
-    env.OPENAI_API_KEY = config.openaiApiKey;
+  if (effectiveConfig.openaiApiKey) {
+    env.OPENAI_API_KEY = effectiveConfig.openaiApiKey;
   }
-  if (config.modelEndpoint) {
-    env.MODEL_ENDPOINT = config.modelEndpoint;
+  if (effectiveConfig.modelEndpoint) {
+    env.MODEL_ENDPOINT = effectiveConfig.modelEndpoint;
   }
 
-  if (config.vertexEnabled && useProxy) {
+  if (effectiveConfig.vertexEnabled && useProxy) {
     // Proxy mode: gateway talks to LiteLLM via the litellm provider config in openclaw.json
     env.LITELLM_API_KEY = litellmMasterKey;
-  } else if (config.vertexEnabled) {
+  } else if (effectiveConfig.vertexEnabled) {
     // Direct Vertex mode (legacy)
     env.VERTEX_ENABLED = "true";
-    env.VERTEX_PROVIDER = config.vertexProvider || "anthropic";
-    const projectId = config.googleCloudProject
-      || (config.gcpServiceAccountJson ? tryParseProjectId(config.gcpServiceAccountJson) : "");
+    env.VERTEX_PROVIDER = effectiveConfig.vertexProvider || "anthropic";
+    const projectId = effectiveConfig.googleCloudProject
+      || (effectiveConfig.gcpServiceAccountJson ? tryParseProjectId(effectiveConfig.gcpServiceAccountJson) : "");
     if (projectId) {
       env.GOOGLE_CLOUD_PROJECT = projectId;
     }
-    if (config.googleCloudLocation) {
-      env.GOOGLE_CLOUD_LOCATION = config.googleCloudLocation;
+    if (effectiveConfig.googleCloudLocation) {
+      env.GOOGLE_CLOUD_LOCATION = effectiveConfig.googleCloudLocation;
     }
-    if (config.gcpServiceAccountJson) {
+    if (effectiveConfig.gcpServiceAccountJson) {
       env.GOOGLE_APPLICATION_CREDENTIALS = GCP_SA_CONTAINER_PATH;
     }
   }
 
-  if (config.telegramBotToken) {
-    env.TELEGRAM_BOT_TOKEN = config.telegramBotToken;
+  if (effectiveConfig.telegramBotToken) {
+    env.TELEGRAM_BOT_TOKEN = effectiveConfig.telegramBotToken;
+  }
+  if (effectiveConfig.sandboxEnabled) {
+    if (effectiveConfig.sandboxSshIdentity) {
+      env.SSH_IDENTITY = effectiveConfig.sandboxSshIdentity;
+    }
+    if (effectiveConfig.sandboxSshCertificate) {
+      env.SSH_CERTIFICATE = effectiveConfig.sandboxSshCertificate;
+    }
+    if (effectiveConfig.sandboxSshKnownHosts) {
+      env.SSH_KNOWN_HOSTS = effectiveConfig.sandboxSshKnownHosts;
+    }
   }
 
   // OTEL collector env vars (tell the agent where to send traces)
@@ -422,8 +499,8 @@ function buildRunArgs(
     runArgs.push("-e", `${key}=${val}`);
   }
 
-  runArgs.push("-v", `${volumeName(config)}:/home/node/.openclaw`);
-  runArgs.push(resolveImage(config));
+  runArgs.push("-v", `${volumeName(effectiveConfig)}:/home/node/.openclaw`);
+  runArgs.push(image);
 
   // Bind to lan (0.0.0.0) so port mapping works from host into pod/container
   runArgs.push("node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789");
@@ -477,7 +554,8 @@ export class LocalDeployer implements Deployer {
 
     // Build init script: write config + workspace files on first deploy
     const gatewayToken = generateToken();
-    const ocConfig = buildOpenClawConfig(config, gatewayToken);
+    const localSandboxPrepared = prepareLocalSandboxSshConfig(config);
+    const ocConfig = buildOpenClawConfig(localSandboxPrepared.effectiveConfig, gatewayToken);
     const agentsMd = buildDefaultAgentsMd(config);
     const agentJson = buildAgentJson(config);
 
@@ -557,6 +635,26 @@ something that requires the user's attention.`;
     const initScript = [
       // Write openclaw.json only if missing (don't overwrite live config)
       `test -f /home/node/.openclaw/openclaw.json || echo '${esc(ocConfig)}' > /home/node/.openclaw/openclaw.json`,
+      // Materialize SSH sandbox auth files into the writable volume for the node user.
+      `mkdir -p '${SANDBOX_SSH_DIR}'`,
+      ...(localSandboxPrepared.effectiveConfig.sandboxSshIdentity
+        ? [
+            `cat > '${SANDBOX_SSH_IDENTITY_CONTAINER_PATH}' << 'SSHIDENTITYEOF'\n${localSandboxPrepared.effectiveConfig.sandboxSshIdentity}\nSSHIDENTITYEOF`,
+            `chmod 600 '${SANDBOX_SSH_IDENTITY_CONTAINER_PATH}'`,
+          ]
+        : []),
+      ...(localSandboxPrepared.effectiveConfig.sandboxSshCertificate
+        ? [
+            `cat > '${SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH}' << 'SSHCERTEOF'\n${localSandboxPrepared.effectiveConfig.sandboxSshCertificate}\nSSHCERTEOF`,
+            `chmod 600 '${SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH}'`,
+          ]
+        : []),
+      ...(localSandboxPrepared.effectiveConfig.sandboxSshKnownHosts
+        ? [
+            `cat > '${SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH}' << 'SSHKNOWNHOSTSEOF'\n${localSandboxPrepared.effectiveConfig.sandboxSshKnownHosts}\nSSHKNOWNHOSTSEOF`,
+            `chmod 600 '${SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH}'`,
+          ]
+        : []),
       // Create workspace directory
       `mkdir -p '${workspaceDir}'`,
       // Create skills directory
@@ -573,7 +671,7 @@ something that requires the user's attention.`;
       `test -f '${workspaceDir}/HEARTBEAT.md' || cat > '${workspaceDir}/HEARTBEAT.md' << 'HBEOF'\n${heartbeatMd}\nHBEOF`,
       `test -f '${workspaceDir}/MEMORY.md' || cat > '${workspaceDir}/MEMORY.md' << 'MEMEOF'\n${memoryMd}\nMEMEOF`,
       // If user provided agent source files via mount, copy them in (overrides defaults)
-      `if [ -d /tmp/agent-source/workspace-${agentId} ]; then cp -r /tmp/agent-source/workspace-${agentId}/* '${workspaceDir}/' 2>/dev/null || true; fi`,
+      `for d in /tmp/agent-source/workspace-*; do if [ -d "$d" ]; then base="$(basename "$d")"; if [ "$base" = "workspace-main" ]; then dest='${workspaceDir}'; else dest="/home/node/.openclaw/$base"; fi; mkdir -p "$dest"; cp -r "$d"/* "$dest"/ 2>/dev/null || true; fi; done`,
       `if [ -d /tmp/agent-source/skills ]; then cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
       `if [ -f /tmp/agent-source/cron/jobs.json ]; then mkdir -p /home/node/.openclaw/cron && cp /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true; fi`,
     ].join("\n");
@@ -587,7 +685,7 @@ something that requires the user's attention.`;
     // Auto-detect only works when running directly (not containerized), because
     // the path must be valid on the container host, not inside the installer container.
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
-    const agentSourceDir = config.agentSourceDir || defaultAgentSourceDir(isContainerized);
+    const agentSourceDir = normalizeHostPath(config.agentSourceDir) || defaultAgentSourceDir(isContainerized);
 
     if (agentSourceDir) {
       initArgs.push("-v", `${agentSourceDir}:/tmp/agent-source:ro`);
@@ -858,17 +956,24 @@ something that requires the user's attention.`;
   async start(result: DeployResult, log: LogCallback): Promise<DeployResult> {
     const runtime = result.config.containerRuntime ?? (await detectRuntime());
     if (!runtime) throw new Error("No container runtime found");
-    const name = result.containerId ?? containerName(result.config);
-    const port = result.config.port ?? DEFAULT_PORT;
-    const vol = volumeName(result.config);
-    const image = resolveImage(result.config);
+    const localSandboxPrepared = prepareLocalSandboxSshConfig(result.config);
+    const effectiveConfig = localSandboxPrepared.effectiveConfig;
+    const name = result.containerId ?? containerName(effectiveConfig);
+    const port = effectiveConfig.port ?? DEFAULT_PORT;
+    const vol = volumeName(effectiveConfig);
+    const image = resolveImage(effectiveConfig);
 
     // Copy updated agent files from host into volume before starting
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
-    const agentId = `${result.config.prefix || "openclaw"}_${result.config.agentName}`;
-    const agentSourceDir = result.config.agentSourceDir || defaultAgentSourceDir(isContainerized);
+    const agentId = `${effectiveConfig.prefix || "openclaw"}_${effectiveConfig.agentName}`;
+    const agentSourceDir = normalizeHostPath(effectiveConfig.agentSourceDir) || defaultAgentSourceDir(isContainerized);
 
-    if (agentSourceDir && existsSync(join(agentSourceDir, `workspace-${agentId}`))) {
+    if (
+      agentSourceDir && (
+        existsSync(join(agentSourceDir, `workspace-${agentId}`))
+        || existsSync(join(agentSourceDir, "workspace-main"))
+      )
+    ) {
       log("Updating agent files from host...");
       const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
       const copyScript = [
@@ -885,11 +990,39 @@ something that requires the user's attention.`;
       ], log);
     }
 
+    const sshMaterialScript = [
+      `mkdir -p '${SANDBOX_SSH_DIR}'`,
+      ...(localSandboxPrepared.effectiveConfig.sandboxSshIdentity
+        ? [
+            `cat > '${SANDBOX_SSH_IDENTITY_CONTAINER_PATH}' << 'SSHIDENTITYEOF'\n${localSandboxPrepared.effectiveConfig.sandboxSshIdentity}\nSSHIDENTITYEOF`,
+            `chmod 600 '${SANDBOX_SSH_IDENTITY_CONTAINER_PATH}'`,
+          ]
+        : []),
+      ...(localSandboxPrepared.effectiveConfig.sandboxSshCertificate
+        ? [
+            `cat > '${SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH}' << 'SSHCERTEOF'\n${localSandboxPrepared.effectiveConfig.sandboxSshCertificate}\nSSHCERTEOF`,
+            `chmod 600 '${SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH}'`,
+          ]
+        : []),
+      ...(localSandboxPrepared.effectiveConfig.sandboxSshKnownHosts
+        ? [
+            `cat > '${SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH}' << 'SSHKNOWNHOSTSEOF'\n${localSandboxPrepared.effectiveConfig.sandboxSshKnownHosts}\nSSHKNOWNHOSTSEOF`,
+            `chmod 600 '${SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH}'`,
+          ]
+        : []),
+    ].join("\n");
+
+    await runCommand(runtime, [
+      "run", "--rm",
+      "-v", `${vol}:/home/node/.openclaw`,
+      image, "sh", "-c", sshMaterialScript,
+    ], log);
+
     // Remove old container if it exists (stop may not have fully cleaned up)
     await removeContainer(runtime, name);
 
     // Recover LiteLLM master key from the volume if proxy was used
-    const useProxy = shouldUseLitellmProxy(result.config);
+    const useProxy = shouldUseLitellmProxy(effectiveConfig);
     let litellmMasterKey: string | undefined;
 
     if (useProxy) {
@@ -904,7 +1037,7 @@ something that requires the user's attention.`;
         // Key not found — generate a new one and rewrite config
         log("LiteLLM master key not found in volume — regenerating");
         litellmMasterKey = generateLitellmMasterKey();
-        const litellmYaml = generateLitellmConfig(result.config, litellmMasterKey);
+        const litellmYaml = generateLitellmConfig(effectiveConfig, litellmMasterKey);
         const litellmB64 = Buffer.from(litellmYaml).toString("base64");
         const keyB64 = Buffer.from(litellmMasterKey).toString("base64");
         await runCommand(runtime, [
@@ -916,17 +1049,17 @@ something that requires the user's attention.`;
       }
 
       // Start LiteLLM sidecar
-      const litellmName = litellmContainerName(result.config);
-      const litellmImage = result.config.litellmImage || LITELLM_IMAGE;
+      const litellmName = litellmContainerName(effectiveConfig);
+      const litellmImage = effectiveConfig.litellmImage || LITELLM_IMAGE;
       const isPodman = runtime === "podman";
 
       if (isPodman) {
-        const pod = podName(result.config);
+        const pod = podName(effectiveConfig);
         await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
         const podPorts = [
           "-p", `${port}:18789`,
           "-p", `${port + 1}:${LITELLM_PORT}`,
-          ...(result.config.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
+          ...(effectiveConfig.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
         ];
         await runCommand(runtime, [
           "pod", "create", "--name", pod,
@@ -974,13 +1107,13 @@ something that requires the user's attention.`;
     }
 
     // Create pod for OTEL sidecars if LiteLLM didn't already create one
-    const useOtelSidecars = shouldUseOtel(result.config);
+    const useOtelSidecars = shouldUseOtel(effectiveConfig);
     if (useOtelSidecars && !useProxy && runtime === "podman") {
-      const pod = podName(result.config);
+      const pod = podName(effectiveConfig);
       await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
       const podPorts = [
         "-p", `${port}:18789`,
-        ...(result.config.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
+        ...(effectiveConfig.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
       ];
       await runCommand(runtime, [
         "pod", "create", "--name", pod, ...podPorts,
@@ -988,30 +1121,30 @@ something that requires the user's attention.`;
     }
 
     // Restart Jaeger sidecar if enabled
-    if (result.config.otelJaeger) {
+    if (effectiveConfig.otelJaeger) {
       await startJaegerSidecar(
-        result.config, runtime, podName(result.config), log, runCommand,
+        effectiveConfig, runtime, podName(effectiveConfig), log, runCommand,
         (rt, nm) => removeContainer(rt as ContainerRuntime, nm),
       );
     }
 
     // Restart OTEL sidecar if enabled
     const otelEnv = await startOtelSidecar(
-      result.config, runtime, vol,
-      (useProxy || useOtelSidecars) ? podName(result.config) : null,
-      useProxy ? litellmContainerName(result.config) : null,
+      effectiveConfig, runtime, vol,
+      (useProxy || useOtelSidecars) ? podName(effectiveConfig) : null,
+      useProxy ? litellmContainerName(effectiveConfig) : null,
       port, image, log, runCommand,
       (rt, nm) => removeContainer(rt as ContainerRuntime, nm),
     );
 
     log(`Starting OpenClaw container: ${name}`);
-    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey, otelEnv);
+    const runArgs = buildRunArgs(effectiveConfig, runtime, name, port, litellmMasterKey, otelEnv);
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to start container");
     }
 
-    await this.saveInstanceInfo(runtime, name, result.config, log);
+    await this.saveInstanceInfo(runtime, name, effectiveConfig, log);
 
     const token = await this.readSavedToken(name);
     const url = `http://localhost:${port}`;
@@ -1099,6 +1232,7 @@ something that requires the user's attention.`;
 
     // Save .env
     try {
+      const encodeEnvValue = (value: string) => Buffer.from(value, "utf8").toString("base64");
       const lines = [
         `# OpenClaw instance: ${name}`,
         `# Generated by openclaw-installer`,
@@ -1166,6 +1300,46 @@ something that requires the user's attention.`;
       if (config.telegramAllowFrom) {
         lines.push(`TELEGRAM_ALLOW_FROM=${config.telegramAllowFrom}`);
       }
+      if (config.sandboxEnabled) {
+        lines.push(`SANDBOX_ENABLED=true`);
+        lines.push(`SANDBOX_BACKEND=${config.sandboxBackend || "ssh"}`);
+        lines.push(`SANDBOX_MODE=${config.sandboxMode || "all"}`);
+        lines.push(`SANDBOX_SCOPE=${config.sandboxScope || "session"}`);
+        lines.push(`SANDBOX_WORKSPACE_ACCESS=${config.sandboxWorkspaceAccess || "rw"}`);
+        lines.push(`SANDBOX_TOOL_POLICY_ENABLED=${config.sandboxToolPolicyEnabled === true}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_FILES=${config.sandboxToolAllowFiles !== false}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_SESSIONS=${config.sandboxToolAllowSessions !== false}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_MEMORY=${config.sandboxToolAllowMemory !== false}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_RUNTIME=${config.sandboxToolAllowRuntime === true}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_BROWSER=${config.sandboxToolAllowBrowser === true}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_AUTOMATION=${config.sandboxToolAllowAutomation === true}`);
+        lines.push(`SANDBOX_TOOL_ALLOW_MESSAGING=${config.sandboxToolAllowMessaging === true}`);
+        if (config.sandboxSshTarget) {
+          lines.push(`SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`);
+        }
+        if (config.sandboxSshWorkspaceRoot) {
+          lines.push(`SANDBOX_SSH_WORKSPACE_ROOT=${config.sandboxSshWorkspaceRoot}`);
+        }
+        if (config.sandboxSshIdentityPath) {
+          lines.push(`SANDBOX_SSH_IDENTITY_PATH=${config.sandboxSshIdentityPath}`);
+        }
+        if (config.sandboxSshCertificatePath) {
+          lines.push(`SANDBOX_SSH_CERTIFICATE_PATH=${config.sandboxSshCertificatePath}`);
+        }
+        if (config.sandboxSshKnownHostsPath) {
+          lines.push(`SANDBOX_SSH_KNOWN_HOSTS_PATH=${config.sandboxSshKnownHostsPath}`);
+        }
+        lines.push(
+          `SANDBOX_SSH_STRICT_HOST_KEY_CHECKING=${config.sandboxSshStrictHostKeyChecking !== false}`,
+        );
+        lines.push(`SANDBOX_SSH_UPDATE_HOST_KEYS=${config.sandboxSshUpdateHostKeys !== false}`);
+        if (config.sandboxSshCertificate) {
+          lines.push(`SANDBOX_SSH_CERTIFICATE_B64=${encodeEnvValue(config.sandboxSshCertificate)}`);
+        }
+        if (config.sandboxSshKnownHosts) {
+          lines.push(`SANDBOX_SSH_KNOWN_HOSTS_B64=${encodeEnvValue(config.sandboxSshKnownHosts)}`);
+        }
+      }
 
       const envPath = join(instanceDir, ".env");
       await writeFile(envPath, lines.join("\n") + "\n", { mode: 0o600 });
@@ -1190,7 +1364,7 @@ something that requires the user's attention.`;
     const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
 
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
-    const agentSourceDir = result.config.agentSourceDir || defaultAgentSourceDir(isContainerized);
+    const agentSourceDir = normalizeHostPath(result.config.agentSourceDir) || defaultAgentSourceDir(isContainerized);
 
     if (!agentSourceDir) {
       log("No agent source directory found at ~/.openclaw/");
@@ -1201,9 +1375,14 @@ something that requires the user's attention.`;
 
     // Copy updated agent files into the volume
     const copyScript = [
-      `if [ -d /tmp/agent-source/workspace-${agentId} ]; then`,
-      `  cp -v /tmp/agent-source/workspace-${agentId}/* '${workspaceDir}/' 2>/dev/null || true`,
-      `fi`,
+      `for d in /tmp/agent-source/workspace-*; do`,
+      `  if [ -d "$d" ]; then`,
+      `    base="$(basename "$d")"`,
+      `    if [ "$base" = "workspace-main" ]; then dest='${workspaceDir}'; else dest="/home/node/.openclaw/$base"; fi`,
+      `    mkdir -p "$dest"`,
+      `    cp -vr "$d"/* "$dest"/ 2>/dev/null || true`,
+      `  fi`,
+      `done`,
       `if [ -d /tmp/agent-source/skills ]; then`,
       `  mkdir -p /home/node/.openclaw/skills`,
       `  cp -rv /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true`,

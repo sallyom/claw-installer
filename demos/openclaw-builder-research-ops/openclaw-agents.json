@@ -1,0 +1,49 @@
+{
+  "mainAgent": {
+    "subagents": {
+      "allowAgents": ["builder", "research", "ops"]
+    },
+    "tools": {
+      "sandbox": {
+        "tools": {
+          "allow": ["group:fs", "group:sessions", "group:memory"]
+        }
+      }
+    }
+  },
+  "agents": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "tools": {
+        "sandbox": {
+          "tools": {
+            "allow": ["group:fs", "group:runtime", "group:memory"]
+          }
+        }
+      }
+    },
+    {
+      "id": "research",
+      "name": "Research",
+      "tools": {
+        "sandbox": {
+          "tools": {
+            "allow": ["group:fs", "group:memory"]
+          }
+        }
+      }
+    },
+    {
+      "id": "ops",
+      "name": "Ops",
+      "tools": {
+        "sandbox": {
+          "tools": {
+            "allow": ["group:fs", "group:memory", "group:automation"]
+          }
+        }
+      }
+    }
+  ]
+}

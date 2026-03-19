@@ -41,11 +41,20 @@ Open `http://localhost:3000`, pick **"This Machine"**, fill in the form, and hit
 1. Pick **"This Machine"**
 2. Fill in an **agent name** (e.g., `myagent`) and optionally an **owner prefix** (defaults to your OS username)
 3. Add your API key if not already detected from the environment
-4. For Vertex AI: upload your GCP service account JSON or provide an absolute path
-5. Hit **Deploy OpenClaw**
-6. Go to the **Instances** tab to manage your deployment — copy the gateway token, view the run command, open the UI, stop/start the container, or delete the data volume
+4. Optional: enable **SSH sandbox backend** if you want sandboxed tool execution on a remote host
+5. For Vertex AI: upload your GCP service account JSON or provide an absolute path
+6. Hit **Deploy OpenClaw**
+7. Go to the **Instances** tab to manage your deployment — copy the gateway token, view the run command, open the UI, stop/start the container, or delete the data volume
 
 The installer pulls the image, provisions your agent with a default identity and security guidelines, starts the container, and streams logs in real time. Your OpenClaw instance will be running at `http://localhost:18789`.
+
+## SSH Sandbox
+
+If you enable **SSH sandbox backend** in the form, the installer writes OpenClaw sandbox config into `openclaw.json` and provisions the SSH material needed by the local container.
+
+See [SANDBOX.md](../SANDBOX.md) for the recommended form values, credential handling, and troubleshooting.
+
+For upstream sandbox behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
 
 ## What the Installer Does
 
@@ -199,3 +208,12 @@ Pass these to `run.sh` or `npm run dev` to set server-side defaults (users can l
 | `MODEL_ENDPOINT` | OpenAI-compatible endpoint for self-hosted models |
 | `OPENCLAW_IMAGE` | Default container image |
 | `OPENCLAW_PREFIX` | Default name prefix |
+
+Starter templates:
+
+- `.env.example` at the repo root for a generic local or Kubernetes setup
+- `demos/openclaw-builder-research-ops/.env.example` for the bundled multi-agent SSH sandbox demo
+
+## Troubleshooting SSH Sandbox
+
+See [SANDBOX.md](../SANDBOX.md#troubleshooting).
