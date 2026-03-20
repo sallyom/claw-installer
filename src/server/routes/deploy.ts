@@ -62,13 +62,25 @@ router.post("/", async (req, res) => {
   if (!config.image && process.env.OPENCLAW_IMAGE) {
     config.image = process.env.OPENCLAW_IMAGE;
   }
-  if (!config.anthropicApiKey && process.env.ANTHROPIC_API_KEY) {
+  if (
+    config.inferenceProvider === "anthropic" &&
+    !config.anthropicApiKey &&
+    process.env.ANTHROPIC_API_KEY
+  ) {
     config.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   }
-  if (!config.openaiApiKey && process.env.OPENAI_API_KEY) {
+  if (
+    (config.inferenceProvider === "openai" || config.inferenceProvider === "custom-endpoint") &&
+    !config.openaiApiKey &&
+    process.env.OPENAI_API_KEY
+  ) {
     config.openaiApiKey = process.env.OPENAI_API_KEY;
   }
-  if (!config.modelEndpoint && process.env.MODEL_ENDPOINT) {
+  if (
+    config.inferenceProvider === "custom-endpoint" &&
+    !config.modelEndpoint &&
+    process.env.MODEL_ENDPOINT
+  ) {
     config.modelEndpoint = process.env.MODEL_ENDPOINT;
   }
   if (config.telegramEnabled) {
@@ -84,6 +96,18 @@ router.post("/", async (req, res) => {
     config.vertexProvider = (process.env.VERTEX_PROVIDER as "google" | "anthropic") || "anthropic";
     config.googleCloudProject = config.googleCloudProject || process.env.GOOGLE_CLOUD_PROJECT || "";
     config.googleCloudLocation = config.googleCloudLocation || process.env.GOOGLE_CLOUD_LOCATION || "";
+  }
+
+  if (!config.inferenceProvider) {
+    if (config.vertexEnabled) {
+      config.inferenceProvider = config.vertexProvider === "google" ? "vertex-google" : "vertex-anthropic";
+    } else if (config.modelEndpoint) {
+      config.inferenceProvider = "custom-endpoint";
+    } else if (config.anthropicApiKey) {
+      config.inferenceProvider = "anthropic";
+    } else if (config.openaiApiKey) {
+      config.inferenceProvider = "openai";
+    }
   }
 
   // Resolve SA JSON from path if provided (and no inline JSON)

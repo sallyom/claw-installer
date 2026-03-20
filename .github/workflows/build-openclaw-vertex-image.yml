@@ -16,7 +16,7 @@ env:
   IMAGE: quay.io/aicatalyst/openclaw
   TAG: vertex-anthropic
   OPENCLAW_REPO: https://github.com/sallyom/openclaw.git
-  OPENCLAW_REF: pi-vertex-testbranch
+  OPENCLAW_REF: pi-vertex
 
 jobs:
   # PR validation: amd64 only, no push
@@ -29,6 +29,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Stage OpenClaw source
+        run: git clone --depth 1 --branch "${OPENCLAW_REF}" "${OPENCLAW_REPO}" openclaw
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -40,8 +43,7 @@ jobs:
           platforms: linux/amd64
           push: false
           build-args: |
-            OPENCLAW_REPO=${{ env.OPENCLAW_REPO }}
-            OPENCLAW_REF=${{ env.OPENCLAW_REF }}
+            OPENCLAW_SOURCE_ROOT=openclaw
           cache-from: type=gha,scope=vertex-amd64
           cache-to: type=gha,mode=max,scope=vertex-amd64
 
@@ -65,6 +67,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Stage OpenClaw source
+        run: git clone --depth 1 --branch "${OPENCLAW_REF}" "${OPENCLAW_REPO}" openclaw
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -83,8 +88,7 @@ jobs:
           file: ./Dockerfile.openclaw
           platforms: ${{ matrix.platform }}
           build-args: |
-            OPENCLAW_REPO=${{ env.OPENCLAW_REPO }}
-            OPENCLAW_REF=${{ env.OPENCLAW_REF }}
+            OPENCLAW_SOURCE_ROOT=openclaw
           outputs: type=image,"name=${{ env.IMAGE }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=vertex-${{ matrix.slug }}
           cache-to: type=gha,mode=max,scope=vertex-${{ matrix.slug }}

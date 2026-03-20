@@ -88,6 +88,12 @@ const PROXY_MODEL_HINTS: Record<string, string> = {
   "vertex-anthropic": "Examples: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5",
   "vertex-google": "Examples: gemini-2.5-pro, gemini-2.5-flash",
 };
+
+function defaultImageForProvider(provider: InferenceProvider): string {
+  return provider === "vertex-anthropic"
+    ? "quay.io/aicatalyst/openclaw:vertex-anthropic"
+    : "quay.io/aicatalyst/openclaw:latest";
+}
 function decodeBase64(value: string | undefined): string {
   if (!value) return "";
   try {
@@ -293,18 +299,29 @@ export default function DeployForm({ onDeployStarted }: Props) {
     // Support both local .env keys (OPENCLAW_PREFIX) and K8s JSON keys (prefix)
     const v = (envKey: string, jsonKey: string) => vars[envKey] || vars[jsonKey] || "";
     const explicitNamespace = v("K8S_NAMESPACE", "namespace");
+    const savedInferenceProvider = v("INFERENCE_PROVIDER", "inferenceProvider");
 
-    // Map VERTEX_ENABLED / VERTEX_PROVIDER to inferenceProvider (both key formats)
-    const vertexEnabled = vars.VERTEX_ENABLED === "true" || vars.vertexEnabled === "true";
-    if (vertexEnabled) {
-      const vp = vars.VERTEX_PROVIDER || vars.vertexProvider || "anthropic";
-      setInferenceProvider(vp === "google" ? "vertex-google" : "vertex-anthropic");
-    } else if (v("MODEL_ENDPOINT", "modelEndpoint")) {
-      setInferenceProvider("custom-endpoint");
-    } else if (v("OPENAI_API_KEY", "openaiApiKey")) {
-      setInferenceProvider("openai");
-    } else if (v("ANTHROPIC_API_KEY", "anthropicApiKey")) {
-      setInferenceProvider("anthropic");
+    if (
+      savedInferenceProvider === "anthropic" ||
+      savedInferenceProvider === "openai" ||
+      savedInferenceProvider === "vertex-anthropic" ||
+      savedInferenceProvider === "vertex-google" ||
+      savedInferenceProvider === "custom-endpoint"
+    ) {
+      setInferenceProvider(savedInferenceProvider);
+    } else {
+      // Map VERTEX_ENABLED / VERTEX_PROVIDER to inferenceProvider (both key formats)
+      const vertexEnabled = vars.VERTEX_ENABLED === "true" || vars.vertexEnabled === "true";
+      if (vertexEnabled) {
+        const vp = vars.VERTEX_PROVIDER || vars.vertexProvider || "anthropic";
+        setInferenceProvider(vp === "google" ? "vertex-google" : "vertex-anthropic");
+      } else if (v("MODEL_ENDPOINT", "modelEndpoint")) {
+        setInferenceProvider("custom-endpoint");
+      } else if (v("ANTHROPIC_API_KEY", "anthropicApiKey")) {
+        setInferenceProvider("anthropic");
+      } else if (v("OPENAI_API_KEY", "openaiApiKey")) {
+        setInferenceProvider("openai");
+      }
     }
 
     setNamespaceManuallyEdited(Boolean(explicitNamespace));
@@ -492,6 +509,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
 
       const body = {
         mode,
+        inferenceProvider,
         prefix: config.prefix,
         agentName: config.agentName,
         agentDisplayName: config.agentDisplayName || config.agentName,
@@ -823,13 +841,15 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Container Image</label>
           <input
             type="text"
-            placeholder="quay.io/aicatalyst/openclaw:latest"
+            placeholder={defaultImageForProvider(inferenceProvider)}
             value={config.image}
             onChange={(e) => update("image", e.target.value)}
           />
           <div className="hint">
-            Leave blank for the default image (quay.io/aicatalyst/openclaw:latest).
-            This image includes Anthropic Vertex AI support not yet available upstream.
+            Leave blank for the default image (<code>{defaultImageForProvider(inferenceProvider)}</code>).
+            {inferenceProvider === "vertex-anthropic"
+              ? " This image includes Anthropic Vertex AI support not yet available upstream."
+              : ""}
           </div>
         </div>
 

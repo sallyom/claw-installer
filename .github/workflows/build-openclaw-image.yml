@@ -7,9 +7,11 @@ on:
     branches: [main]
     paths:
       - 'Dockerfile.openclaw'
+      - '.github/workflows/build-openclaw-image.yml'
   pull_request:
     paths:
       - 'Dockerfile.openclaw'
+      - '.github/workflows/build-openclaw-image.yml'
   workflow_dispatch:
 
 env:
@@ -26,6 +28,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Stage OpenClaw source
+        run: git clone --depth 1 https://github.com/openclaw/openclaw.git openclaw
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -36,6 +41,8 @@ jobs:
           file: ./Dockerfile.openclaw
           platforms: linux/amd64
           push: false
+          build-args: |
+            OPENCLAW_SOURCE_ROOT=openclaw
           cache-from: type=gha,scope=build-amd64
           cache-to: type=gha,mode=max,scope=build-amd64
 
@@ -59,6 +66,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Stage OpenClaw source
+        run: git clone --depth 1 https://github.com/openclaw/openclaw.git openclaw
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -76,6 +86,8 @@ jobs:
           context: .
           file: ./Dockerfile.openclaw
           platforms: ${{ matrix.platform }}
+          build-args: |
+            OPENCLAW_SOURCE_ROOT=openclaw
           outputs: type=image,"name=${{ env.IMAGE }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=build-${{ matrix.slug }}
           cache-to: type=gha,mode=max,scope=build-${{ matrix.slug }}

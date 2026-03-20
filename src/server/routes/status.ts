@@ -108,6 +108,13 @@ router.get("/", async (req, res) => {
               agentDisplayName: displayName.charAt(0).toUpperCase() + displayName.slice(1),
               image: savedVars.OPENCLAW_IMAGE || undefined,
               port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
+              inferenceProvider: savedVars.INFERENCE_PROVIDER as
+                | "anthropic"
+                | "openai"
+                | "vertex-anthropic"
+                | "vertex-google"
+                | "custom-endpoint"
+                | undefined,
               anthropicApiKey: savedVars.ANTHROPIC_API_KEY || undefined,
               openaiApiKey: savedVars.OPENAI_API_KEY || undefined,
               telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
@@ -645,6 +652,13 @@ async function findInstance(name: string): Promise<DeployResult | null> {
           containerRuntime: runtime,
           image: savedVars.OPENCLAW_IMAGE || undefined,
           port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
+          inferenceProvider: savedVars.INFERENCE_PROVIDER as
+            | "anthropic"
+            | "openai"
+            | "vertex-anthropic"
+            | "vertex-google"
+            | "custom-endpoint"
+            | undefined,
           anthropicApiKey: savedVars.ANTHROPIC_API_KEY || undefined,
           openaiApiKey: savedVars.OPENAI_API_KEY || undefined,
           agentModel: savedVars.AGENT_MODEL || undefined,

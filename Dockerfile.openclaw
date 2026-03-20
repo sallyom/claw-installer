@@ -1,62 +1,93 @@
 # syntax=docker/dockerfile:1.7
 
 # OpenClaw Gateway - UBI 9 multi-stage build
-# Clones source from GitHub, builds, and produces a minimal runtime image.
 #
-# Build:
+# This Dockerfile expects an `openclaw/` source tree in the build context.
+# CI stages that checkout/clone step before `docker build`.
+#
+# Build examples:
 #   podman build -t openclaw:latest -f Dockerfile.openclaw .
-#   podman build --build-arg OPENCLAW_REF=v1.2.3 -f Dockerfile.openclaw -t openclaw:v1.2.3 .
 #   podman build --build-arg OPENCLAW_EXTENSIONS="diagnostics-otel" -f Dockerfile.openclaw -t openclaw:latest .
 
-ARG OPENCLAW_REPO=https://github.com/openclaw/openclaw.git
-ARG OPENCLAW_REF=main
 ARG OPENCLAW_EXTENSIONS="diagnostics-otel"
+ARG OPENCLAW_SOURCE_ROOT="."
+ARG OPENCLAW_UBI_NODE_IMAGE="registry.access.redhat.com/ubi9/nodejs-22"
+ARG OPENCLAW_UBI_NODE_MINIMAL_IMAGE="registry.access.redhat.com/ubi9/nodejs-22-minimal"
 
-FROM registry.access.redhat.com/ubi9/nodejs-22 AS ext-deps
+FROM ${OPENCLAW_UBI_NODE_IMAGE} AS ext-deps
 ARG OPENCLAW_EXTENSIONS
+ARG OPENCLAW_SOURCE_ROOT
 WORKDIR /opt/app-root/src
 
-USER 0
-RUN dnf install -y --disablerepo='*' --enablerepo='ubi-*' git && dnf clean all
-USER 1001
+COPY ${OPENCLAW_SOURCE_ROOT}/extensions /tmp/extensions
 
-RUN git clone --depth 1 https://github.com/openclaw/openclaw.git /tmp/openclaw && \
-    mkdir -p /opt/app-root/src/ext-out && \
+RUN mkdir -p /opt/app-root/src/ext-out && \
     for ext in $OPENCLAW_EXTENSIONS; do \
-      if [ -f "/tmp/openclaw/extensions/$ext/package.json" ]; then \
+      if [ -f "/tmp/extensions/$ext/package.json" ]; then \
         mkdir -p "/opt/app-root/src/ext-out/$ext" && \
-        cp "/tmp/openclaw/extensions/$ext/package.json" "/opt/app-root/src/ext-out/$ext/package.json"; \
+        cp "/tmp/extensions/$ext/package.json" "/opt/app-root/src/ext-out/$ext/package.json"; \
       fi; \
-    done && \
-    rm -rf /tmp/openclaw
+    done
 
-FROM registry.access.redhat.com/ubi9/nodejs-22 AS build
-
-ARG OPENCLAW_REPO
-ARG OPENCLAW_REF
+FROM ${OPENCLAW_UBI_NODE_IMAGE} AS build
+ARG OPENCLAW_EXTENSIONS
+ARG OPENCLAW_SOURCE_ROOT
 
 WORKDIR /opt/app-root/src
 
 USER 0
-RUN dnf install -y --disablerepo='*' --enablerepo='ubi-*' git && dnf clean all
+RUN dnf install -y --disablerepo='*' --enablerepo='ubi-*' \
+      cmake \
+      git && \
+    dnf clean all
+
+ENV BUN_INSTALL=/opt/app-root/.bun
+ENV COREPACK_HOME=/opt/app-root/.local/share/corepack
+ENV NPM_CONFIG_CACHE=/opt/app-root/src/.npm
+ENV PATH=/opt/app-root/.bun/bin:${PATH}
+
+RUN mkdir -p "$BUN_INSTALL" "$COREPACK_HOME" "$NPM_CONFIG_CACHE" && \
+    chown -R 1001:0 /opt/app-root
+
 USER 1001
 
-RUN echo "Cloning ${OPENCLAW_REPO} @ ${OPENCLAW_REF}" && \
-    git clone --depth 1 --branch "${OPENCLAW_REF}" "${OPENCLAW_REPO}" /tmp/openclaw && \
-    cp -a /tmp/openclaw/. . && \
-    rm -rf /tmp/openclaw
+# Install Bun (required by upstream build scripts).
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+      if curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://bun.sh/install | bash; then \
+        break; \
+      fi; \
+      if [ "$attempt" -eq 5 ]; then \
+        exit 1; \
+      fi; \
+      sleep $((attempt * 2)); \
+    done
 
-USER 0
-RUN PNPM_VERSION=$(node -p "require('./package.json').packageManager?.split('@')[1] || '10'") && \
-    npm install -g "pnpm@$PNPM_VERSION" && \
-    chown -R 1001:0 /opt/app-root/src/.npm
-USER 1001
-
+COPY ${OPENCLAW_SOURCE_ROOT}/package.json ${OPENCLAW_SOURCE_ROOT}/pnpm-lock.yaml ${OPENCLAW_SOURCE_ROOT}/pnpm-workspace.yaml ${OPENCLAW_SOURCE_ROOT}/.npmrc ./
+COPY ${OPENCLAW_SOURCE_ROOT}/ui/package.json ./ui/package.json
+COPY ${OPENCLAW_SOURCE_ROOT}/patches ./patches
 COPY --from=ext-deps /opt/app-root/src/ext-out/ ./extensions/
 
-RUN --mount=type=cache,id=openclaw-pnpm-store,target=/opt/app-root/src/.pnpm-store,sharing=locked \
+USER 0
+RUN chown -R 1001:0 /opt/app-root/src
+RUN if command -v corepack >/dev/null 2>&1; then \
+      corepack enable && \
+      corepack prepare "$(node -p "require('./package.json').packageManager")" --activate; \
+    else \
+      PNPM_VERSION="$(node -p "require('./package.json').packageManager?.split('@')[1] || '10'")" && \
+      npm install -g "pnpm@${PNPM_VERSION}"; \
+    fi
+
+USER 1001
+RUN --mount=type=cache,id=openclaw-pnpm-store,target=/opt/app-root/.local/share/pnpm/store,sharing=locked \
     NODE_OPTIONS=--max-old-space-size=2048 pnpm install --frozen-lockfile
 
+COPY ${OPENCLAW_SOURCE_ROOT}/. .
+
+USER 0
+RUN chown -R 1001:0 /opt/app-root/src
+
+# Normalize extension paths so copied runtime assets keep safe modes.
 RUN for dir in /opt/app-root/src/extensions /opt/app-root/src/.agent /opt/app-root/src/.agents; do \
       if [ -d "$dir" ]; then \
         find "$dir" -type d -exec chmod 755 {} +; \
@@ -64,6 +95,8 @@ RUN for dir in /opt/app-root/src/extensions /opt/app-root/src/.agent /opt/app-ro
       fi; \
     done
 
+USER 1001
+# Upstream allows the A2UI bundle to stub when cross-arch bundle generation fails.
 RUN pnpm canvas:a2ui:bundle || \
     (echo "A2UI bundle: creating stub (non-fatal)" && \
      mkdir -p src/canvas-host/a2ui && \
@@ -80,7 +113,7 @@ FROM build AS runtime-assets
 RUN CI=true pnpm prune --prod && \
     find dist -type f \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.map' \) -delete
 
-FROM registry.access.redhat.com/ubi9/nodejs-22-minimal
+FROM ${OPENCLAW_UBI_NODE_MINIMAL_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
       org.opencontainers.image.url="https://openclaw.ai" \
@@ -93,9 +126,18 @@ WORKDIR /app
 
 USER 0
 RUN microdnf update -y && \
-    microdnf install -y procps-ng hostname git findutils openssl openssh-clients shadow-utils && \
+    microdnf install -y \
+      procps-ng \
+      hostname \
+      git \
+      findutils \
+      openssl \
+      openssh-clients \
+      shadow-utils && \
     microdnf clean all && \
-    useradd -u 1000 -g 0 -d /home/node -m node && \
+    if ! getent passwd node >/dev/null; then \
+      useradd -u 1000 -g 0 -d /home/node -m node; \
+    fi && \
     chown node:0 /app
 
 COPY --from=runtime-assets --chown=node:0 /opt/app-root/src/dist ./dist
@@ -106,9 +148,42 @@ COPY --from=runtime-assets --chown=node:0 /opt/app-root/src/extensions ./extensi
 COPY --from=runtime-assets --chown=node:0 /opt/app-root/src/skills ./skills
 COPY --from=runtime-assets --chown=node:0 /opt/app-root/src/docs ./docs
 
-RUN find /app/extensions -type d -exec chmod 755 {} + 2>/dev/null; \
-    find /app/extensions -type f -exec chmod 644 {} + 2>/dev/null; \
-    true
+ENV OPENCLAW_BUNDLED_PLUGINS_DIR=/app/extensions
+ENV COREPACK_HOME=/usr/local/share/corepack
+
+RUN install -d -m 0755 "$COREPACK_HOME" && \
+    if command -v corepack >/dev/null 2>&1; then \
+      corepack enable && \
+      for attempt in 1 2 3 4 5; do \
+        if corepack prepare "$(node -p "require('./package.json').packageManager")" --activate; then \
+          break; \
+        fi; \
+        if [ "$attempt" -eq 5 ]; then \
+          exit 1; \
+        fi; \
+        sleep $((attempt * 2)); \
+      done && \
+      chmod -R a+rX "$COREPACK_HOME"; \
+    else \
+      PNPM_VERSION="$(node -p "require('./package.json').packageManager?.split('@')[1] || '10'")" && \
+      npm install -g "pnpm@${PNPM_VERSION}"; \
+    fi
+
+# Optional extra runtime packages.
+# Package names must match UBI/RHEL repositories.
+ARG OPENCLAW_DOCKER_APT_PACKAGES=""
+ARG OPENCLAW_DOCKER_EXTRA_PACKAGES=""
+RUN extra_packages="$OPENCLAW_DOCKER_EXTRA_PACKAGES"; \
+    if [ -z "$extra_packages" ]; then \
+      extra_packages="$OPENCLAW_DOCKER_APT_PACKAGES"; \
+    fi; \
+    if [ -n "$extra_packages" ]; then \
+      microdnf install -y $extra_packages && \
+      microdnf clean all; \
+    fi
+
+RUN find /app/extensions -type d -exec chmod 755 {} + 2>/dev/null && \
+    find /app/extensions -type f -exec chmod 644 {} + 2>/dev/null || true
 
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw && \
     chmod 755 /app/openclaw.mjs
@@ -117,10 +192,10 @@ RUN mkdir -p /home/node/.openclaw && \
     chown -R node:0 /home/node && \
     chmod -R g=u /home/node
 
-USER node
-
 ENV NODE_ENV=production
 ENV HOME=/home/node
+
+USER node
 
 EXPOSE 18789
 
