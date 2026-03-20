@@ -89,11 +89,6 @@ const PROXY_MODEL_HINTS: Record<string, string> = {
   "vertex-google": "Examples: gemini-2.5-pro, gemini-2.5-flash",
 };
 
-function defaultImageForProvider(provider: InferenceProvider): string {
-  return provider === "vertex-anthropic"
-    ? "quay.io/aicatalyst/openclaw:vertex-anthropic"
-    : "quay.io/aicatalyst/openclaw:latest";
-}
 function decodeBase64(value: string | undefined): string {
   if (!value) return "";
   try {
@@ -841,15 +836,12 @@ export default function DeployForm({ onDeployStarted }: Props) {
           <label>Container Image</label>
           <input
             type="text"
-            placeholder={defaultImageForProvider(inferenceProvider)}
+            placeholder="quay.io/aicatalyst/openclaw:latest"
             value={config.image}
             onChange={(e) => update("image", e.target.value)}
           />
           <div className="hint">
-            Leave blank for the default image (<code>{defaultImageForProvider(inferenceProvider)}</code>).
-            {inferenceProvider === "vertex-anthropic"
-              ? " This image includes Anthropic Vertex AI support not yet available upstream."
-              : ""}
+            Leave blank for the default image (<code>quay.io/aicatalyst/openclaw:latest</code>).
           </div>
         </div>
 

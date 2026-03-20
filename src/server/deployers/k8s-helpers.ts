@@ -9,11 +9,9 @@ import { buildSandboxToolPolicy } from "./tool-policy.js";
 import { loadAgentSourceBundle } from "./agent-source.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "quay.io/aicatalyst/openclaw:latest";
-export const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || "quay.io/aicatalyst/openclaw:vertex-anthropic";
-
 export function defaultImage(config: DeployConfig): string {
   if (config.image) return config.image;
-  return config.vertexEnabled ? DEFAULT_VERTEX_IMAGE : DEFAULT_IMAGE;
+  return DEFAULT_IMAGE;
 }
 
 export function tryParseProjectId(saJson: string): string {
