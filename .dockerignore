@@ -6,6 +6,7 @@ dist/
 
 # Git
 .git/
+**/.git/
 .gitignore
 
 # Sensitive data

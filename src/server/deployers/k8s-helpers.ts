@@ -40,8 +40,53 @@ export function generateToken(): string {
   return randomBytes(32).toString("base64");
 }
 
+export function normalizeModelRef(config: DeployConfig, modelRef: string): string {
+  const trimmed = modelRef.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.includes("/")) return trimmed;
+
+  if (config.inferenceProvider === "anthropic") {
+    return `anthropic/${trimmed}`;
+  }
+  if (config.inferenceProvider === "openai" || config.inferenceProvider === "custom-endpoint") {
+    return `openai/${trimmed}`;
+  }
+  if (config.inferenceProvider === "vertex-anthropic") {
+    return `anthropic-vertex/${trimmed}`;
+  }
+  if (config.inferenceProvider === "vertex-google") {
+    return `google-vertex/${trimmed}`;
+  }
+  if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
+    return `litellm/${trimmed}`;
+  }
+  if (config.vertexEnabled) {
+    return `${config.vertexProvider === "anthropic" ? "anthropic-vertex" : "google-vertex"}/${trimmed}`;
+  }
+  if (config.openaiApiKey || config.modelEndpoint) {
+    return `openai/${trimmed}`;
+  }
+  return `anthropic/${trimmed}`;
+}
+
+export function buildDefaultAgentModelCatalog(modelRef: string): Record<string, { alias: string }> {
+  const alias = modelRef.split("/").pop() || modelRef;
+  return {
+    [modelRef]: { alias },
+  };
+}
+
 export function deriveModel(config: DeployConfig): string {
-  if (config.agentModel) return config.agentModel;
+  if (config.agentModel) return normalizeModelRef(config, config.agentModel);
+  if (config.inferenceProvider === "anthropic") return "anthropic/claude-sonnet-4-6";
+  if (config.inferenceProvider === "openai") return "openai/gpt-5.4";
+  if (config.inferenceProvider === "custom-endpoint") return "openai/default";
+  if (config.inferenceProvider === "vertex-anthropic") {
+    return config.litellmProxy ? `litellm/${litellmModelName(config)}` : "anthropic-vertex/claude-sonnet-4-6";
+  }
+  if (config.inferenceProvider === "vertex-google") {
+    return config.litellmProxy ? `litellm/${litellmModelName(config)}` : "google-vertex/gemini-2.5-pro";
+  }
   if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
     return `litellm/${litellmModelName(config)}`;
   }
@@ -52,7 +97,7 @@ export function deriveModel(config: DeployConfig): string {
   }
   if (config.openaiApiKey) return "openai/gpt-5.4";
   if (config.modelEndpoint) return "openai/default";
-  return "claude-sonnet-4-6";
+  return "anthropic/claude-sonnet-4-6";
 }
 
 export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, opts?: { routeUrl?: string }): object {
@@ -103,6 +148,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string, 
       defaults: {
         workspace: "~/.openclaw/workspace",
         model: { primary: model },
+        models: buildDefaultAgentModelCatalog(model),
         ...(buildSandboxConfig(config) ? { sandbox: buildSandboxConfig(config) } : {}),
       },
       list: [

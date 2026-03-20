@@ -32,7 +32,7 @@ import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
 import { startOtelSidecar, stopOtelSidecar, startJaegerSidecar, otelContainerName, jaegerContainerName } from "./local-otel.js";
 import { JAEGER_UI_PORT } from "./otel.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
-import { generateToken } from "./k8s-helpers.js";
+import { buildDefaultAgentModelCatalog, generateToken, normalizeModelRef } from "./k8s-helpers.js";
 import { buildSandboxConfig } from "./sandbox.js";
 import { buildSandboxToolPolicy } from "./tool-policy.js";
 import { loadAgentSourceBundle } from "./agent-source.js";
@@ -116,7 +116,26 @@ function prepareLocalSandboxSshConfig(config: DeployConfig): {
  */
 function deriveModel(config: DeployConfig): string {
   if (config.agentModel) {
-    return config.agentModel;
+    return normalizeModelRef(config, config.agentModel);
+  }
+  if (config.inferenceProvider === "anthropic") {
+    return "anthropic/claude-sonnet-4-6";
+  }
+  if (config.inferenceProvider === "openai") {
+    return "openai/gpt-5.4";
+  }
+  if (config.inferenceProvider === "custom-endpoint") {
+    return "openai/default";
+  }
+  if (config.inferenceProvider === "vertex-anthropic") {
+    return shouldUseLitellmProxy(config)
+      ? `litellm/${litellmModelName(config)}`
+      : "anthropic-vertex/claude-sonnet-4-6";
+  }
+  if (config.inferenceProvider === "vertex-google") {
+    return shouldUseLitellmProxy(config)
+      ? `litellm/${litellmModelName(config)}`
+      : "google-vertex/gemini-2.5-pro";
   }
   if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
     return `litellm/${litellmModelName(config)}`;
@@ -132,7 +151,7 @@ function deriveModel(config: DeployConfig): string {
   if (config.modelEndpoint) {
     return "openai/default";
   }
-  return "claude-sonnet-4-6";
+  return "anthropic/claude-sonnet-4-6";
 }
 
 /**
@@ -183,6 +202,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
       defaults: {
         workspace: "~/.openclaw/workspace",
         model: { primary: model },
+        models: buildDefaultAgentModelCatalog(model),
         ...(buildSandboxConfig(config) ? { sandbox: buildSandboxConfig(config) } : {}),
       },
       list: [
@@ -1245,6 +1265,10 @@ something that requires the user's attention.`;
         `OPENCLAW_CONTAINER=${name}`,
         ``,
       ];
+
+      if (config.inferenceProvider) {
+        lines.push(`INFERENCE_PROVIDER=${config.inferenceProvider}`);
+      }
 
       if (config.anthropicApiKey) {
         lines.push(`ANTHROPIC_API_KEY=${config.anthropicApiKey}`);
