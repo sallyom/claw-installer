@@ -14,7 +14,7 @@ The installer uses the same `~/.openclaw` home layout as native OpenClaw:
 
 ## Prerequisites
 
-- An OpenShift cluster where you can create a namespace (no cluster-admin required)
+- An OpenShift cluster: either permission to **create** namespaces/projects, or a **pre-created** project where you have **admin** (or equivalent). If you only have namespace-scoped access, set the **Namespace** field in the deploy form to that project — the installer skips cluster-level namespace creation when the API returns `Forbidden` on namespace checks.
 - `oc` CLI authenticated (`oc login`) on the machine running the installer
 - An API key or GCP service account for at least one model provider
 
@@ -47,6 +47,7 @@ Open `http://localhost:3000`, pick **Kubernetes**, fill in the form, and hit Dep
 | Field | Example | Notes |
 |-------|---------|-------|
 | **Agent name** | `myagent` | ID for your default agent |
+| **Namespace** | `my-team-openclaw` | Optional. Defaults from prefix + agent name. Use your **existing OpenShift project** name if you cannot create namespaces cluster-wide. |
 | **Owner prefix** | *(optional)* | Defaults to OS username. Combined with agent name: `alice-myagent-openclaw` |
 | **Display name** | `My Agent` | Shown in the UI |
 | **Image** | `quay.io/aicatalyst/openclaw:latest` | Container image |

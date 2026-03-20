@@ -3,7 +3,14 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { v4 as uuid } from "uuid";
-import { coreApi, appsApi, loadKubeConfig, isOpenShift, hasOtelOperator } from "../services/k8s.js";
+import {
+  coreApi,
+  appsApi,
+  loadKubeConfig,
+  isOpenShift,
+  hasOtelOperator,
+  k8sApiHttpCode,
+} from "../services/k8s.js";
 import { cronJobsFile, installerK8sInstanceDir, skillsDir } from "../paths.js";
 import { loadTextTree } from "../state-tree.js";
 import type {
@@ -39,14 +46,39 @@ export { discoverK8sInstances } from "./k8s-discovery.js";
 
 // ── Helper: apply or update a resource ─────────────────────────────
 
+/**
+ * Ensure target namespace exists, or skip cluster-level checks when the caller
+ * cannot read/create Namespace objects (typical namespace-scoped admin).
+ */
 async function applyNamespace(core: k8s.CoreV1Api, ns: string, log: LogCallback): Promise<void> {
   try {
     await core.readNamespace({ name: ns });
     log(`Namespace ${ns} already exists`);
-  } catch {
-    log(`Creating namespace ${ns}...`);
+    return;
+  } catch (e: unknown) {
+    const status = k8sApiHttpCode(e);
+    if (status === 403) {
+      log(
+        `Cannot verify Namespace "${ns}" at cluster scope (forbidden) — using it as the deploy target. Ensure the namespace exists and you have admin/edit there.`,
+      );
+      return;
+    }
+    if (status !== 404) {
+      throw e;
+    }
+  }
+
+  log(`Creating namespace ${ns}...`);
+  try {
     await core.createNamespace({ body: namespaceManifest(ns) });
     log(`Namespace ${ns} created`);
+  } catch (e: unknown) {
+    if (k8sApiHttpCode(e) === 403) {
+      throw new Error(
+        `Cannot create namespace "${ns}": forbidden. Create the project/namespace first (e.g. oc new-project ${ns}) and set it in the deploy form, or ask a cluster admin.`,
+      );
+    }
+    throw e;
   }
 }
 

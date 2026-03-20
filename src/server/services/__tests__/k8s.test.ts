@@ -47,3 +47,13 @@ describe("isClusterReachable", () => {
     await expect(mod.isClusterReachable()).resolves.toBe(false);
   });
 });
+
+describe("k8sApiHttpCode", () => {
+  it("returns HTTP status from client-node ApiException-shaped errors", async () => {
+    const mod = await import("../k8s.js");
+    expect(mod.k8sApiHttpCode({ code: 403, message: "Forbidden" })).toBe(403);
+    expect(mod.k8sApiHttpCode({ code: 404 })).toBe(404);
+    expect(mod.k8sApiHttpCode(new Error("nope"))).toBeUndefined();
+    expect(mod.k8sApiHttpCode(null)).toBeUndefined();
+  });
+});
