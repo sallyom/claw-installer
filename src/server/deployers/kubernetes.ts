@@ -76,6 +76,7 @@ async function applyNamespace(core: k8s.CoreV1Api, ns: string, log: LogCallback)
     if (k8sApiHttpCode(e) === 403) {
       throw new Error(
         `Cannot create namespace "${ns}": forbidden. Create the project/namespace first (e.g. oc new-project ${ns}) and set it in the deploy form, or ask a cluster admin.`,
+        { cause: e },
       );
     }
     throw e;
