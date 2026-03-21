@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 type Mode = "local" | "kubernetes" | "ssh";
 type InferenceProvider = "anthropic" | "openai" | "vertex-anthropic" | "vertex-google" | "custom-endpoint";
@@ -17,6 +17,7 @@ interface ServerDefaults {
   image: string;
   k8sAvailable?: boolean;
   k8sContext?: string;
+  k8sNamespace?: string;
   isOpenShift?: boolean;
 }
 
@@ -233,6 +234,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
           ...(data.defaults || {}),
           k8sAvailable: data.k8sAvailable,
           k8sContext: data.k8sContext,
+          k8sNamespace: data.k8sNamespace,
           isOpenShift: data.isOpenShift,
         };
         setDefaults(d);
@@ -427,13 +429,22 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const [namespaceManuallyEdited, setNamespaceManuallyEdited] = useState(false);
   const derivedNamespace = deriveNamespace(config.prefix || defaults?.prefix || "", config.agentName);
 
+  /** What we put in the namespace field (and deploy payload fallback) when the user has not overridden it. */
+  const suggestedNamespace = useMemo(() => {
+    const ctxNs = defaults?.k8sNamespace?.trim();
+    if (defaults?.isOpenShift && ctxNs) {
+      return ctxNs;
+    }
+    return derivedNamespace;
+  }, [defaults?.isOpenShift, defaults?.k8sNamespace, derivedNamespace]);
+
   useEffect(() => {
     if (namespaceManuallyEdited) return;
     setConfig((prev) => {
-      if (prev.namespace === derivedNamespace) return prev;
-      return { ...prev, namespace: derivedNamespace };
+      if (prev.namespace === suggestedNamespace) return prev;
+      return { ...prev, namespace: suggestedNamespace };
     });
-  }, [derivedNamespace, namespaceManuallyEdited]);
+  }, [suggestedNamespace, namespaceManuallyEdited]);
 
   const update = (field: string, value: string) => {
     if (field === "agentName") {
@@ -559,7 +570,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         gcpServiceAccountJson: vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
         gcpServiceAccountPath: vertexEnabled ? config.gcpServiceAccountPath || undefined : undefined,
         litellmProxy: vertexEnabled ? config.litellmProxy : undefined,
-        namespace: (config.namespace || derivedNamespace) || undefined,
+        namespace: (config.namespace || suggestedNamespace) || undefined,
         sshHost: config.sshHost || undefined,
         sshUser: config.sshUser || undefined,
         agentSourceDir: config.agentSourceDir || undefined,
@@ -640,7 +651,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
       `OTEL_ENDPOINT=${config.otelEndpoint}`,
       `OTEL_EXPERIMENT_ID=${config.otelExperimentId}`,
       "",
-      `K8S_NAMESPACE=${config.namespace}`,
+      `K8S_NAMESPACE=${config.namespace || suggestedNamespace}`,
     ];
 
     if (config.sandboxSshCertificate && !config.sandboxSshCertificatePath) {
@@ -1115,14 +1126,40 @@ export default function DeployForm({ onDeployStarted }: Props) {
               type="text"
               aria-label="Project / Namespace"
               autoComplete="off"
-              placeholder={derivedNamespace}
+              placeholder={suggestedNamespace}
               value={config.namespace || ""}
               onChange={(e) => update("namespace", e.target.value)}
             />
             <div className="hint">
-              Auto-filled from owner prefix and agent name. Edit it if your OpenShift project or Kubernetes namespace is pre-created.
-              Default: <code>{derivedNamespace}</code>
+              {defaults?.isOpenShift && defaults.k8sNamespace ? (
+                <>
+                  Defaults to your current <code>oc</code> project: <code>{defaults.k8sNamespace}</code>.
+                  Name-only pattern if you create namespaces yourself:{" "}
+                  <code>{derivedNamespace}</code>.
+                </>
+              ) : (
+                <>
+                  Auto-filled from owner prefix and agent name: <code>{derivedNamespace}</code>.
+                </>
+              )}
             </div>
+            {defaults?.isOpenShift && defaults.k8sNamespace ? (
+              <div className="hint" style={{ marginTop: "0.35rem" }}>
+                Prefer the generated name{" "}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: "0.15rem 0.5rem", fontSize: "0.85rem" }}
+                  onClick={() => {
+                    setNamespaceManuallyEdited(true);
+                    setConfig((prev) => ({ ...prev, namespace: derivedNamespace }));
+                  }}
+                >
+                  Use <code>{derivedNamespace}</code>
+                </button>
+                {" "}(only if you can create that project).
+              </div>
+            ) : null}
           </div>
         )}
 

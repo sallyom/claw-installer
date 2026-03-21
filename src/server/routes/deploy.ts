@@ -6,6 +6,8 @@ import type { DeployConfig } from "../deployers/types.js";
 import { detectGcpDefaults, defaultVertexLocation } from "../services/gcp.js";
 import { LocalDeployer } from "../deployers/local.js";
 import { KubernetesDeployer } from "../deployers/kubernetes.js";
+import { namespaceName } from "../deployers/k8s-helpers.js";
+import { k8sApiHttpCode } from "../services/k8s.js";
 import { createLogCallback, sendStatus } from "../ws.js";
 
 const router = Router();
@@ -187,7 +189,11 @@ router.post("/", async (req, res) => {
     sendStatus(deployId, "running");
     log("Deployment complete!");
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    let message = err instanceof Error ? err.message : String(err);
+    if (config.mode === "kubernetes" && k8sApiHttpCode(err) === 403) {
+      const ns = namespaceName(config);
+      message += ` If you only have access to a pre-created OpenShift project, set "Project / Namespace" to that exact name. This deploy used namespace "${ns}" (from the form, or <owner prefix>-<agent name>-openclaw when the field is empty).`;
+    }
     log(`ERROR: ${message}`);
     sendStatus(deployId, "failed");
   }

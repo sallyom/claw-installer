@@ -88,3 +88,26 @@ export function currentContext(): string {
     return "";
   }
 }
+
+/** Namespace from the current kube context (e.g. `oc project -q`), if set. */
+export function currentNamespace(): string {
+  try {
+    const kc = loadKubeConfig();
+    const ctxName = kc.getCurrentContext();
+    if (!ctxName) return "";
+    const ctx = kc.getContextObject(ctxName);
+    const ns = ctx?.namespace?.trim();
+    return ns || "";
+  } catch {
+    return "";
+  }
+}
+
+/** HTTP status from @kubernetes/client-node `ApiException` (and similar). */
+export function k8sApiHttpCode(err: unknown): number | undefined {
+  if (err && typeof err === "object" && "code" in err) {
+    const c = (err as { code: unknown }).code;
+    return typeof c === "number" ? c : undefined;
+  }
+  return undefined;
+}
