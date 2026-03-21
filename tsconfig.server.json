@@ -1,9 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "jsx": "preserve",
-    "outDir": "dist"
-  },
-  "include": ["src/server/**/*", "src/shared/**/*"],
-  "exclude": ["src/server/**/*.test.ts", "src/server/**/__tests__/**"]
-}
