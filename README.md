@@ -27,7 +27,20 @@ That keeps local, Kubernetes, and native OpenClaw agent files in one place witho
 | Target | Guide | What it does |
 |--------|-------|-------------|
 | **Kubernetes** | [deploy-kubernetes.md](docs/deploy-kubernetes.md) | Creates namespace, PVC, ConfigMaps, Secrets, Service, and Deployment via the Kubernetes API. The Instances tab can start a managed port-forward and open the UI with the gateway token. |
+| **OpenShift** | [deploy-openshift.md](provider-plugins/openshift/docs/deploy-openshift.md) | Extends Kubernetes with OAuth proxy sidecar, Route, and ServiceAccount. Auto-detected on OpenShift clusters. |
 | **Local (podman / docker)** | [deploy-local.md](docs/deploy-local.md) | Pulls the image, provisions your agent, starts a container on localhost. Works on macOS and Linux. |
+
+## Provider Plugins
+
+Provider plugins live in `provider-plugins/` and are loaded automatically at startup -- no extra install steps needed. They extend the installer with platform-specific deployers.
+
+| Plugin | Directory | Description |
+|--------|-----------|-------------|
+| **OpenShift** | [`provider-plugins/openshift/`](provider-plugins/openshift/) | OAuth proxy, Routes, and ServiceAccounts for OpenShift clusters. Auto-detected when logged into an OpenShift cluster (`oc login`). |
+
+To deploy on OpenShift, just log in with `oc login` before starting the installer. The OpenShift option will appear automatically in the deploy form.
+
+Third-party plugins can also be installed as npm packages named `openclaw-installer-*`. See [ADR 0001](adr/0001-deployer-plugin-system.md) for the plugin system design.
 
 ## Why not Helm or kustomize?
 
@@ -150,6 +163,11 @@ Environment templates are included too:
 openclaw-installer/
 ├── run.sh                        # Launcher script
 ├── Dockerfile                    # Multi-stage build
+├── provider-plugins/
+│   └── openshift/                # OpenShift deployer plugin
+│       ├── src/                  # Plugin source (auto-loaded)
+│       ├── templates/            # OAuth proxy YAML templates
+│       └── docs/                 # OpenShift deployment guide
 ├── docs/
 │   ├── deploy-local.md           # Local deployment guide
 │   ├── deploy-kubernetes.md      # Kubernetes deployment guide

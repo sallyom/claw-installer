@@ -31,7 +31,7 @@
   },
   "scripts": {
     "dev": "concurrently \"tsx watch src/server/index.ts\" \"vite\"",
-    "build": "vite build && tsc -p tsconfig.server.json",
+    "build": "vite build && tsc -p tsconfig.server.json && tsc -p tsconfig.provider-plugins.json",
     "lint": "eslint .",
     "start": "node dist/server/index.js",
     "preview": "vite build && node dist/server/index.js",
@@ -42,6 +42,7 @@
     "@openclaw/installer": "file:.",
     "@kubernetes/client-node": "^1.4.0",
     "express": "^4.21.0",
+    "js-yaml": "^4.1.0",
     "uuid": "^10.0.0",
     "ws": "^8.18.0"
   },
@@ -51,6 +52,7 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",

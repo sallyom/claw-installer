@@ -1,0 +1,55 @@
+name: oauth-proxy
+image: quay.io/openshift/origin-oauth-proxy:4.14
+args:
+  - --http-address=:8443
+  - --https-address=
+  - --provider=openshift
+  - --upstream=http://localhost:18789
+  - --client-id=__CLIENT_ID__
+  - --client-secret-file=/etc/oauth/config/client-secret
+  - --cookie-secret-file=/etc/oauth/config/cookie_secret
+  - --cookie-expire=23h0m0s
+  - --pass-access-token
+  # user:info = any authenticated OpenShift user can access (no cluster-admin needed).
+  # To restrict to namespace members, use --openshift-sar instead:
+  #   --scope=user:full
+  #   --openshift-sar={"namespace":"__NAMESPACE__","resource":"pods","verb":"get"}
+  # Note: --openshift-sar and --openshift-delegate-urls require a ClusterRoleBinding
+  # granting system:auth-delegator to the SA (needs cluster-admin to create).
+  - --scope=user:info
+  - --skip-auth-regex=^/(metrics|api)
+ports:
+  - containerPort: 8443
+    name: oauth-ui
+volumeMounts:
+  - name: oauth-config
+    mountPath: /etc/oauth/config
+  - name: proxy-tls
+    mountPath: /etc/tls/private
+livenessProbe:
+  httpGet:
+    path: /oauth/healthz
+    port: oauth-ui
+    scheme: HTTP
+  initialDelaySeconds: 30
+  periodSeconds: 5
+readinessProbe:
+  httpGet:
+    path: /oauth/healthz
+    port: oauth-ui
+    scheme: HTTP
+  initialDelaySeconds: 5
+  periodSeconds: 5
+resources:
+  requests:
+    memory: 64Mi
+    cpu: 50m
+  limits:
+    memory: 128Mi
+    cpu: 200m
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

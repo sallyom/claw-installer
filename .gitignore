@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 .env.*
+provider-plugins/*/src/*.js
+provider-plugins/*/src/*.js.map

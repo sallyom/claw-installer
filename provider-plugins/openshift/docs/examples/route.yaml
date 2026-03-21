@@ -1,0 +1,22 @@
+# OpenShift only -- exposes the instance via the cluster's wildcard domain.
+# Traffic goes to the oauth-proxy port (oauth-ui), not directly to the gateway.
+# The 30m timeout accommodates long-running agent sessions.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: openclaw
+  namespace: alice-myagent-openclaw
+  labels:
+    app: openclaw
+  annotations:
+    haproxy.router.openshift.io/timeout: "30m"
+spec:
+  to:
+    kind: Service
+    name: openclaw
+    weight: 100
+  port:
+    targetPort: oauth-ui
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

@@ -32,9 +32,12 @@ We add a deployer plugin system that allows external npm packages to register ne
 - `detect` — optional async function that returns true if the platform is available
 - `priority` — numeric priority for auto-selection when multiple deployers detect availability
 
-**Plugin discovery** (`src/server/plugins/loader.ts`) — at startup, the installer scans for:
-1. npm packages matching `openclaw-installer-*` in node_modules
-2. Entries in `~/.openclaw/installer/plugins.json` (for local development)
+**Provider plugins directory** — platform-specific deployers live in `provider-plugins/<name>/` within the installer repo itself. Each subdirectory is a self-contained plugin with its own source, templates, and documentation. This keeps platform-specific code isolated from the core while avoiding the coordination overhead of separate repositories.
+
+**Plugin discovery** (`src/server/plugins/loader.ts`) — at startup, the installer loads plugins from:
+1. `provider-plugins/*/` directories in the installer repo (the primary mechanism)
+2. npm packages matching `openclaw-installer-*` in node_modules (for third-party plugins)
+3. Entries in `~/.openclaw/installer/plugins.json` (for development or custom plugins)
 
 **Dynamic frontend** — the `DeployForm` component no longer hardcodes available modes. It fetches the list of registered deployers from `/api/health` and renders mode cards dynamically. The highest-priority detected deployer is auto-selected.
 
@@ -55,16 +58,17 @@ We add a deployer plugin system that allows external npm packages to register ne
 
 ### Positive
 
-- New deployment platforms can be added without modifying the core installer.
-- Platform-specific code lives in separate packages with independent release cycles.
-- The core installer remains vendor-neutral and focused on shared functionality.
+- New deployment platforms can be added without modifying the core installer logic.
+- Platform-specific code is isolated in `provider-plugins/` directories, keeping the core vendor-neutral.
+- First-party plugins ship with the installer and benefit from shared CI, versioning, and review — no separate repo coordination needed.
+- Third-party plugins can still be distributed as npm packages for platforms the project doesn't maintain directly.
 - Plugin authors only need to implement the `Deployer` interface and a `register` function.
 - The auto-detection mechanism lets plugins automatically activate when their platform is detected.
 
 ### Negative
 
-- The `Deployer` interface and exported helpers become a public API surface. Breaking changes require coordination with plugin authors.
-- Plugin loading adds a small amount of startup time (scanning node_modules).
+- The `Deployer` interface and exported helpers become a public API surface. Breaking changes require coordination with third-party plugin authors (first-party plugins in `provider-plugins/` can be updated in the same commit).
+- Plugin loading adds a small amount of startup time (scanning directories and node_modules).
 - Plugins that wrap `KubernetesDeployer` are coupled to its internal behavior, which isn't formally versioned beyond semver on the package.
 
 ### Risks
