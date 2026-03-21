@@ -53,6 +53,7 @@ describe("k8sApiHttpCode", () => {
     const mod = await import("../k8s.js");
     expect(mod.k8sApiHttpCode({ code: 403, message: "Forbidden" })).toBe(403);
     expect(mod.k8sApiHttpCode({ code: 404 })).toBe(404);
+    expect(mod.k8sApiHttpCode(new Error("wrapped", { cause: { code: 403 } }))).toBe(403);
     expect(mod.k8sApiHttpCode(new Error("nope"))).toBeUndefined();
     expect(mod.k8sApiHttpCode(null)).toBeUndefined();
   });
