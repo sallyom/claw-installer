@@ -18,8 +18,29 @@ function normalizeSshMaterial(value: string): string {
   return normalizedNewlines.endsWith("\n") ? normalizedNewlines : `${normalizedNewlines}\n`;
 }
 
+function trimOptional(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 router.post("/", async (req, res) => {
   const config = req.body as DeployConfig;
+
+  config.image = trimOptional(config.image);
+  config.modelEndpoint = trimOptional(config.modelEndpoint);
+  config.googleCloudProject = trimOptional(config.googleCloudProject);
+  config.googleCloudLocation = trimOptional(config.googleCloudLocation);
+  config.gcpServiceAccountJson = trimOptional(config.gcpServiceAccountJson);
+  config.gcpServiceAccountPath = trimOptional(config.gcpServiceAccountPath);
+  config.telegramBotToken = trimOptional(config.telegramBotToken);
+  config.telegramAllowFrom = trimOptional(config.telegramAllowFrom);
+  config.namespace = trimOptional(config.namespace);
+  config.sshHost = trimOptional(config.sshHost);
+  config.sshUser = trimOptional(config.sshUser);
+  config.agentSourceDir = trimOptional(config.agentSourceDir);
+  config.otelEndpoint = trimOptional(config.otelEndpoint);
+  config.otelExperimentId = trimOptional(config.otelExperimentId);
 
   if (!config.mode || !config.agentName) {
     res.status(400).json({

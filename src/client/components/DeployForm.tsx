@@ -103,6 +103,11 @@ function encodeBase64(value: string): string {
   return window.btoa(value);
 }
 
+function trimToUndefined(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function inferAgentNameFromPath(value: string): string {
   const trimmed = value.trim().replace(/[\\/]+$/, "");
   if (!trimmed) return "";
@@ -547,7 +552,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
         prefix: config.prefix,
         agentName: config.agentName,
         agentDisplayName: config.agentDisplayName || config.agentName,
-        image: config.image || undefined,
+        image: trimToUndefined(config.image),
         sandboxEnabled: config.sandboxEnabled || undefined,
         sandboxBackend: config.sandboxEnabled ? "ssh" : undefined,
         sandboxMode: config.sandboxEnabled ? config.sandboxMode : undefined,
@@ -589,26 +594,26 @@ export default function DeployForm({ onDeployStarted }: Props) {
         anthropicApiKey: inferenceProvider === "anthropic" ? config.anthropicApiKey || undefined : undefined,
         openaiApiKey: (inferenceProvider === "openai" || inferenceProvider === "custom-endpoint") ? config.openaiApiKey || undefined : undefined,
         agentModel: config.agentModel || undefined,
-        modelEndpoint: inferenceProvider === "custom-endpoint" ? config.modelEndpoint || undefined : undefined,
+        modelEndpoint: inferenceProvider === "custom-endpoint" ? trimToUndefined(config.modelEndpoint) : undefined,
         port: parseInt(config.port, 10) || 18789,
         vertexEnabled: vertexEnabled || undefined,
         vertexProvider: vertexEnabled ? vertexProvider : undefined,
-        googleCloudProject: vertexEnabled ? config.googleCloudProject : undefined,
-        googleCloudLocation: vertexEnabled ? config.googleCloudLocation : undefined,
-        gcpServiceAccountJson: vertexEnabled ? config.gcpServiceAccountJson || undefined : undefined,
-        gcpServiceAccountPath: vertexEnabled ? config.gcpServiceAccountPath || undefined : undefined,
+        googleCloudProject: vertexEnabled ? trimToUndefined(config.googleCloudProject) : undefined,
+        googleCloudLocation: vertexEnabled ? trimToUndefined(config.googleCloudLocation) : undefined,
+        gcpServiceAccountJson: vertexEnabled ? trimToUndefined(config.gcpServiceAccountJson) : undefined,
+        gcpServiceAccountPath: vertexEnabled ? trimToUndefined(config.gcpServiceAccountPath) : undefined,
         litellmProxy: vertexEnabled ? config.litellmProxy : undefined,
-        namespace: (config.namespace || suggestedNamespace) || undefined,
-        sshHost: config.sshHost || undefined,
-        sshUser: config.sshUser || undefined,
-        agentSourceDir: config.agentSourceDir || undefined,
+        namespace: trimToUndefined(config.namespace) || suggestedNamespace || undefined,
+        sshHost: trimToUndefined(config.sshHost),
+        sshUser: trimToUndefined(config.sshUser),
+        agentSourceDir: trimToUndefined(config.agentSourceDir),
         telegramEnabled: config.telegramEnabled || undefined,
-        telegramBotToken: config.telegramEnabled ? config.telegramBotToken || undefined : undefined,
-        telegramAllowFrom: config.telegramEnabled ? config.telegramAllowFrom || undefined : undefined,
+        telegramBotToken: config.telegramEnabled ? trimToUndefined(config.telegramBotToken) : undefined,
+        telegramAllowFrom: config.telegramEnabled ? trimToUndefined(config.telegramAllowFrom) : undefined,
         otelEnabled: config.otelEnabled || undefined,
         otelJaeger: config.otelEnabled ? config.otelJaeger || undefined : undefined,
-        otelEndpoint: config.otelEnabled ? config.otelEndpoint || undefined : undefined,
-        otelExperimentId: config.otelEnabled ? config.otelExperimentId || undefined : undefined,
+        otelEndpoint: config.otelEnabled ? trimToUndefined(config.otelEndpoint) : undefined,
+        otelExperimentId: config.otelEnabled ? trimToUndefined(config.otelExperimentId) : undefined,
       };
 
       const res = await fetch("/api/deploy", {
