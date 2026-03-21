@@ -9,7 +9,7 @@ The local deployer runs OpenClaw as a single container on your machine. It works
 On Linux with podman or docker, you can run the installer directly from its container image:
 
 ```bash
-curl -fsSLo run.sh https://raw.githubusercontent.com/sallyom/claw-installer/main/run.sh
+curl -fsSLo run.sh https://raw.githubusercontent.com/sallyom/openclaw-installer/main/run.sh
 chmod +x run.sh
 ./run.sh
 ```
@@ -27,8 +27,8 @@ The installer uses the native OpenClaw home layout:
 ### From source
 
 ```bash
-git clone https://github.com/sallyom/claw-installer.git
-cd claw-installer
+git clone https://github.com/sallyom/openclaw-installer.git
+cd openclaw-installer
 npm install && npm run build && npm run dev
 ```
 
@@ -52,7 +52,7 @@ The installer pulls the image, provisions your agent with a default identity and
 
 If you enable **SSH sandbox backend** in the form, the installer writes OpenClaw sandbox config into `openclaw.json` and provisions the SSH material needed by the local container.
 
-See [SANDBOX.md](../SANDBOX.md) for the recommended form values, credential handling, and troubleshooting.
+See [SANDBOX.md](SANDBOX.md) for the recommended form values, credential handling, and troubleshooting.
 
 For upstream sandbox behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
 
@@ -216,4 +216,4 @@ Starter templates:
 
 ## Troubleshooting SSH Sandbox
 
-See [SANDBOX.md](../SANDBOX.md#troubleshooting).
+See [SANDBOX.md](SANDBOX.md#troubleshooting).

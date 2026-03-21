@@ -30,16 +30,6 @@ Useful variants:
 
 `run.sh` now prefers `OPENCLAW_INSTALLER_IMAGE`, while still accepting the older `CLAW_INSTALLER_IMAGE`.
 
-## Native Layout
-
-`openclaw-installer` uses the same home directory layout as a native OpenClaw install:
-
-- `~/.openclaw/workspace-*` for agent workspaces
-- `~/.openclaw/skills` for shared skills
-- `~/.openclaw/installer` for installer-only metadata
-
-That keeps local, Kubernetes, and native OpenClaw agent files in one place without introducing a separate installer-specific home.
-
 ## Deploy Targets
 
 | Target | Guide | What it does |
@@ -102,20 +92,6 @@ That keeps the installer startup generic. Users start the same installer, and th
 
 See [ADR 0001](adr/0001-deployer-plugin-system.md) for the plugin system design.
 
-## Why not Helm or kustomize?
-
-OpenClaw is a single-container deployment. The Kubernetes resources are straightforward — the real complexity is in the *content* the installer generates and manages:
-
-- **Agent workspace files** — `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, and other markdown files that define the agent's personality, security rules, and operational behavior. These get packed into a ConfigMap and copied to the PVC by the init container.
-- **`openclaw.json` configuration** — generated from the deploy form with gateway settings, model selection, and agent definitions.
-- **Subagents, jobs, and skills** (coming soon) — markdown files and JSON that need to be woven into the OpenClaw config, not separate Kubernetes resources. A Helm values file can't express "add this SKILL.md to the agent workspace and register it in the gateway config."
-
-The installer builds every Kubernetes resource as a TypeScript object and applies it via the `@kubernetes/client-node` SDK. The deploy form, the resource definitions, and the agent provisioning logic all live in the same codebase. Adding a new skill or subagent means updating the config and workspace files together — something a template engine can't coordinate.
-
-For the ~10 Kubernetes resources involved, this is simpler than maintaining a chart with `values.yaml`, templates, and a separate release lifecycle. The tradeoff is that you need the installer to deploy rather than `helm install`, but you get a UI, real-time logs, instance management, and agent customization in return.
-
-See [`docs/examples/`](docs/examples/) for annotated YAMLs showing the generated Kubernetes resources.
-
 ## Model Providers
 
 | Provider | Default Model | What you need |
@@ -131,40 +107,9 @@ For Vertex AI, upload your GCP service account JSON file (or provide an absolute
 
 The installer supports OpenClaw's `ssh` sandbox backend for local and Kubernetes deployments.
 
-For the installer-specific setup, credential handling, and troubleshooting, see [SANDBOX.md](SANDBOX.md).
+For the installer-specific setup, credential handling, and troubleshooting, see [SANDBOX.md](docs/SANDBOX.md).
 
 For upstream sandbox concepts and backend behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
-
-## Customizing Your Agent
-
-After the first deploy, agent files are saved to `~/.openclaw/workspace-<id>/` on the host:
-
-```
-AGENTS.md       # Agent identity, instructions, security rules
-agent.json      # Metadata (name, description, capabilities)
-SOUL.md         # Personality and communication style
-IDENTITY.md     # Who the agent is
-TOOLS.md        # Environment and tool usage notes
-USER.md         # Instance owner info
-HEARTBEAT.md    # Health check behavior
-MEMORY.md       # Learned preferences (populated over time)
-```
-
-Edit these files locally, then push the changes to your running instance:
-
-| Deploy target | How to update agent files |
-|---------------|--------------------------|
-| **Local (podman/docker)** | Edit files in `~/.openclaw/workspace-<id>/`, then **Stop** and **Start** the container from the Instances tab. The installer copies your local files into the volume on every Start. |
-| **Kubernetes** | Edit files in `~/.openclaw/workspace-<id>/`, then click **Re-deploy** from the Instances tab. This updates the ConfigMap from your local files and restarts the pod. A plain Stop/Start only scales replicas — it does *not* sync files from the host. |
-
-The installer uses your local files when they exist, falling back to generated defaults for anything missing.
-
-Current sync model is intentionally one-way by default: host files in `~/.openclaw` are the source of truth, and changes are pushed into the running instance on Local Start or Kubernetes Re-deploy. If an agent or user edits files inside the running OpenClaw UI, those changes affect the live instance immediately but do not sync back to local files yet, so they may not survive a restart or re-deploy.
-
-Planned next steps:
-
-- explicit `Pull running changes to local` sync for local and Kubernetes instances
-- optional GitOps-backed sync, so `~/.openclaw` can be treated as a tracked working tree and re-deploys can follow git state
 
 ## Demo Bundles
 
@@ -191,71 +136,14 @@ Environment templates are included too:
 - `.env.example` for a generic installer setup
 - `demos/openclaw-builder-research-ops/.env.example` for the bundled sandbox demo
 
-## Architecture
+## Agent Workspaces
 
-```
-┌─────────────────────────────────────────┐
-│           Browser (React + Vite)        │
-│  ┌────────────┬──────────┬───────────┐  │
-│  │ DeployForm │ LogStream│ Instances │  │
-│  └─────┬──────┴────┬─────┴─────┬─────┘  │
-│        │ REST      │ WebSocket │ REST   │
-└────────┼───────────┼───────────┼────────┘
-         ▼           ▼           ▼
-┌─────────────────────────────────────────┐
-│        Express + WebSocket Server       │
-│  ┌──────────────┐  ┌────────────────┐   │
-│  │  Deployers   │  │  Services      │   │
-│  │   local      │  │  container     │   │
-│  │   kubernetes │  │  discovery     │   │
-│  └──────────────┘  └────────────────┘   │
-└─────────────────────────────────────────┘
-         │                   │
-   ┌─────┴─────┐      ┌──────┴──────┐
-   │ K8s API   │      │ podman /    │
-   │           │      │ docker sock │
-   └───────────┘      └─────────────┘
-```
+After the first deploy, agent files live under `~/.openclaw/workspace-*` on the host. Edit those files locally, then:
 
-## Project Structure
+- for Local deployments, stop and start the instance
+- for Kubernetes/OpenShift deployments, use Re-deploy
 
-```
-openclaw-installer/
-├── run.sh                        # Launcher script
-├── Dockerfile                    # Multi-stage build
-├── provider-plugins/
-│   └── openshift/                # OpenShift deployer plugin
-│       ├── src/                  # Plugin source (auto-loaded)
-│       ├── templates/            # OAuth proxy YAML templates
-│       └── docs/                 # OpenShift deployment guide
-├── docs/
-│   ├── deploy-local.md           # Local deployment guide
-│   ├── deploy-kubernetes.md      # Kubernetes deployment guide
-│   └── examples/                 # Annotated YAMLs for every K8s resource
-├── src/
-│   ├── server/
-│   │   ├── index.ts              # Express + WS server
-│   │   ├── ws.ts                 # WebSocket log streaming
-│   │   ├── routes/
-│   │   │   ├── deploy.ts         # POST /api/deploy
-│   │   │   ├── status.ts         # Instance discovery and lifecycle
-│   │   │   └── agents.ts         # Agent browsing
-│   │   ├── deployers/
-│   │   │   ├── types.ts          # Deployer interface
-│   │   │   ├── local.ts          # Podman/docker deployer
-│   │   │   ├── kubernetes.ts     # Kubernetes deployer
-│   │   └── services/
-│   │       ├── container.ts      # Runtime detection, container discovery
-│   │       └── k8s.ts            # Kubeconfig helpers
-│   └── client/
-│       ├── App.tsx               # Tabs: Deploy | Instances | Agents
-│       └── components/
-│           ├── DeployForm.tsx     # Config form + credential upload
-│           ├── LogStream.tsx      # Real-time deploy output
-│           ├── InstanceList.tsx   # Manage running instances
-│           └── AgentBrowser.tsx   # Browse agents
-└── package.json
-```
+The installer treats the host files as the source of truth and pushes them into the running instance.
 
 ## API
 

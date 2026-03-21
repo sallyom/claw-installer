@@ -25,14 +25,17 @@ data:
       "agents": {
         "defaults": {
           "workspace": "~/.openclaw/workspace",
-          "model": { "primary": "claude-sonnet-4-6" }
+          "model": { "primary": "anthropic/claude-sonnet-4-6" },
+          "models": {
+            "anthropic/claude-sonnet-4-6": { "alias": "claude-sonnet-4-6" }
+          }
         },
         "list": [
           {
             "id": "alice_myagent",
             "name": "My Agent",
             "workspace": "~/.openclaw/workspace-alice_myagent",
-            "model": { "primary": "claude-sonnet-4-6" },
+            "model": { "primary": "anthropic/claude-sonnet-4-6" },
             "subagents": { "allowAgents": ["*"] }
           }
         ]

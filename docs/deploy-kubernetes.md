@@ -53,7 +53,7 @@ Then visit `http://localhost:18789`.
 
 For Kubernetes deployments, the installer stores SSH sandbox material in the generated `openclaw-secrets` Secret and passes it to the gateway container.
 
-See [SANDBOX.md](../SANDBOX.md) for the recommended form values, secret handling, and troubleshooting.
+See [SANDBOX.md](SANDBOX.md) for the recommended form values, secret handling, and troubleshooting.
 
 For upstream sandbox behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
 
