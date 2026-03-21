@@ -109,5 +109,8 @@ export function k8sApiHttpCode(err: unknown): number | undefined {
     const c = (err as { code: unknown }).code;
     return typeof c === "number" ? c : undefined;
   }
+  if (err && typeof err === "object" && "cause" in err) {
+    return k8sApiHttpCode((err as { cause: unknown }).cause);
+  }
   return undefined;
 }
