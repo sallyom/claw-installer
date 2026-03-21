@@ -125,9 +125,20 @@ export interface DiscoveredContainer {
   createdAt: string;
 }
 
+function isOpenClawRuntimeImage(image: string): boolean {
+  const normalized = image.trim().toLowerCase();
+  if (!normalized) return false;
+
+  const withoutDigest = normalized.split("@")[0];
+  const lastSegment = withoutDigest.split("/").pop() || withoutDigest;
+  const repoName = lastSegment.split(":")[0];
+
+  return repoName === "openclaw";
+}
+
 /**
  * Discover all OpenClaw containers — both installer-managed (by label)
- * and manually launched (by image name containing "openclaw").
+ * and manually launched runtime containers (by image repo name "openclaw").
  */
 export async function discoverContainers(
   runtime: ContainerRuntime,
@@ -172,9 +183,10 @@ export async function discoverContainers(
       const ports = c.Ports || c.ports || "";
       const portsStr = Array.isArray(ports) ? JSON.stringify(ports) : String(ports);
 
-      // Match by label OR by image name
+      // Match by installer label OR by the OpenClaw runtime image name.
+      // Exclude installer images like openclaw-installer from local instances.
       const hasLabel = labels["openclaw.managed"] === "true";
-      const hasImage = image.toLowerCase().includes("openclaw");
+      const hasImage = isOpenClawRuntimeImage(image);
 
       if (!hasLabel && !hasImage) continue;
 
