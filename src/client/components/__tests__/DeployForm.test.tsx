@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import DeployForm from "../DeployForm";
 
 // Stub fetch for /api/health to return deployer data
@@ -87,6 +87,57 @@ describe("DeployForm deployer visibility (issue #10)", () => {
     const input = await screen.findByLabelText("Project / Namespace") as HTMLInputElement;
     await waitFor(() => {
       expect(input.value).not.toBe("default");
+    });
+  });
+});
+
+describe("DeployForm agent name validation (issue #7)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("disables deploy button when agent name is empty", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    const buttons = await screen.findAllByRole("button", { name: /deploy openclaw/i });
+    const deployButton = buttons[buttons.length - 1];
+    expect(deployButton.disabled).toBe(true);
+  });
+
+  it("disables deploy button when agent name contains underscores", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    const buttons = await screen.findAllByRole("button", { name: /deploy openclaw/i });
+    const deployButton = buttons[buttons.length - 1];
+
+    const agentInput = screen.getAllByPlaceholderText("e.g., lynx")[0];
+    fireEvent.change(agentInput, { target: { value: "a_0" } });
+
+    expect(deployButton.disabled).toBe(true);
+  });
+
+  it("shows validation error when agent name contains underscores", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    await screen.findAllByRole("button", { name: /deploy openclaw/i });
+
+    const agentInput = screen.getAllByPlaceholderText("e.g., lynx")[0];
+    fireEvent.change(agentInput, { target: { value: "a_0" } });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Agent name can only contain lowercase letters, numbers, and hyphens").length).toBeGreaterThan(0);
     });
   });
 });

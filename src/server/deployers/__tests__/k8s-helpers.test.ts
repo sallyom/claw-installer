@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOpenClawConfig, deriveModel, namespaceName, normalizeModelRef } from "../k8s-helpers.js";
+import { buildOpenClawConfig, deriveModel, namespaceName, normalizeModelRef, sanitizeForRfc1123 } from "../k8s-helpers.js";
 import type { DeployConfig } from "../types.js";
 
 function makeConfig(overrides: Partial<DeployConfig> = {}): DeployConfig {
@@ -115,5 +115,50 @@ describe("model config generation", () => {
 
     expect(normalizeModelRef(config, "litellm/my-model")).toBe("litellm/my-model");
     expect(normalizeModelRef(config, "anthropic-vertex/my-model")).toBe("anthropic-vertex/my-model");
+  });
+});
+
+// Regression tests for #7: agent names with underscores must produce valid namespaces
+describe("sanitizeForRfc1123", () => {
+  it("replaces underscores with hyphens", () => {
+    expect(sanitizeForRfc1123("a_0")).toBe("a-0");
+  });
+
+  it("collapses consecutive hyphens", () => {
+    expect(sanitizeForRfc1123("a__b")).toBe("a-b");
+  });
+
+  it("removes leading and trailing hyphens", () => {
+    expect(sanitizeForRfc1123("_hello_")).toBe("hello");
+  });
+
+  it("lowercases input", () => {
+    expect(sanitizeForRfc1123("MyAgent")).toBe("myagent");
+  });
+
+  it("passes through already-valid names", () => {
+    expect(sanitizeForRfc1123("my-agent-01")).toBe("my-agent-01");
+  });
+});
+
+describe("namespaceName", () => {
+  it("sanitizes agent names with underscores (issue #7)", () => {
+    const config = makeConfig({ agentName: "a_0", prefix: "bmurdock" });
+    expect(namespaceName(config)).toBe("bmurdock-a-0-openclaw");
+  });
+
+  it("produces RFC 1123-valid namespaces for normal names", () => {
+    const config = makeConfig({ agentName: "demo", prefix: "user" });
+    expect(namespaceName(config)).toBe("user-demo-openclaw");
+  });
+
+  it("uses explicit namespace when provided", () => {
+    const config = makeConfig({ agentName: "demo", namespace: "Custom-NS" });
+    expect(namespaceName(config)).toBe("custom-ns");
+  });
+
+  it("falls back to 'agent' when agent name sanitizes to empty", () => {
+    const config = makeConfig({ agentName: "___", prefix: "user" });
+    expect(namespaceName(config)).toBe("user-agent-openclaw");
   });
 });

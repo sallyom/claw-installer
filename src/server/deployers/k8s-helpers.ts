@@ -24,13 +24,21 @@ export function tryParseProjectId(saJson: string): string {
   }
 }
 
+export function sanitizeForRfc1123(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export function namespaceName(config: DeployConfig): string {
   const prefix = config.prefix || "openclaw";
   const explicitNamespace = config.namespace?.trim().toLowerCase();
-  const ns = explicitNamespace && explicitNamespace !== "default"
-    ? explicitNamespace
-    : `${prefix}-${config.agentName}-openclaw`;
-  return ns.toLowerCase();
+  if (explicitNamespace && explicitNamespace !== "default") return explicitNamespace;
+  const sanitizedAgent = sanitizeForRfc1123(config.agentName) || "agent";
+  const sanitizedPrefix = sanitizeForRfc1123(prefix);
+  return `${sanitizedPrefix}-${sanitizedAgent}-openclaw`;
 }
 
 export function agentId(config: DeployConfig): string {

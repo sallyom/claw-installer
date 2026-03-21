@@ -1664,7 +1664,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
           )}
           <button
             className="btn btn-primary"
-            disabled={deploying}
+            disabled={deploying || !isValid}
             onClick={handleDeploy}
           >
             {deploying ? "Deploying..." : "Deploy OpenClaw"}
