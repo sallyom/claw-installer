@@ -463,13 +463,18 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const [agentNameManuallyEdited, setAgentNameManuallyEdited] = useState(false);
   const [namespaceManuallyEdited, setNamespaceManuallyEdited] = useState(false);
   const derivedNamespace = deriveNamespace(config.prefix || defaults?.prefix || "", config.agentName);
+  const currentClusterNamespace = defaults?.k8sNamespace?.trim() || "";
+  const hasNonDefaultCurrentProject = Boolean(
+    defaults?.isOpenShift
+    && currentClusterNamespace
+    && currentClusterNamespace.toLowerCase() !== "default",
+  );
   const suggestedNamespace = useMemo(() => {
-    const ctxNs = defaults?.k8sNamespace?.trim();
-    if (defaults?.isOpenShift && ctxNs && ctxNs.toLowerCase() !== "default") {
-      return ctxNs;
+    if (hasNonDefaultCurrentProject) {
+      return currentClusterNamespace;
     }
     return derivedNamespace;
-  }, [defaults?.isOpenShift, defaults?.k8sNamespace, derivedNamespace]);
+  }, [currentClusterNamespace, derivedNamespace, hasNonDefaultCurrentProject]);
 
   useEffect(() => {
     if (namespaceManuallyEdited) return;
@@ -1176,10 +1181,10 @@ export default function DeployForm({ onDeployStarted }: Props) {
               onChange={(e) => update("namespace", e.target.value)}
             />
             <div className="hint">
-              {defaults?.isOpenShift && defaults.k8sNamespace ? (
+              {hasNonDefaultCurrentProject ? (
                 <>
-                  Defaults to your current <code>oc</code> project: <code>{defaults.k8sNamespace}</code>.
-                  Name-only pattern if you create namespaces yourself: <code>{derivedNamespace}</code>.
+                  Defaults to your current <code>oc</code> project: <code>{currentClusterNamespace}</code>.
+                  Generated project name if you create namespaces yourself: <code>{derivedNamespace}</code>.
                 </>
               ) : (
                 <>
@@ -1187,7 +1192,7 @@ export default function DeployForm({ onDeployStarted }: Props) {
                 </>
               )}
             </div>
-            {defaults?.isOpenShift && defaults.k8sNamespace ? (
+            {hasNonDefaultCurrentProject ? (
               <div className="hint" style={{ marginTop: "0.35rem" }}>
                 Prefer the generated name{" "}
                 <button
