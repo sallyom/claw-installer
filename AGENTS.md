@@ -33,3 +33,12 @@ npm run test:watch    # Watch mode
 ```
 
 Tests mock external dependencies (fetch, K8s API). See `src/server/deployers/__tests__/registry.test.ts` for conventions.
+
+## Stopping the Dev Server
+
+Do **not** use `lsof -i :port -t | xargs kill` to stop the dev server — this kills every process with a connection on that port, including the user's browser. Instead, target only node processes:
+
+```bash
+lsof -i :3000 -t -c node | xargs kill 2>/dev/null
+lsof -i :3001 -t -c node | xargs kill 2>/dev/null
+```
