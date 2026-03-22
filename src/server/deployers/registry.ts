@@ -1,6 +1,8 @@
 import console from "node:console";
 import type { Deployer } from "./types.js";
 
+export type PluginSource = "built-in" | "provider-plugin" | "npm" | "config";
+
 export interface DeployerRegistration {
   mode: string;
   title: string;
@@ -10,6 +12,12 @@ export interface DeployerRegistration {
   unavailableReason?: string;
   priority?: number;
   builtIn?: boolean;
+  source?: PluginSource;
+}
+
+export interface PluginLoadError {
+  pluginId: string;
+  error: string;
 }
 
 export interface InstallerPlugin {
@@ -18,12 +26,16 @@ export interface InstallerPlugin {
 
 export class DeployerRegistry {
   private registrations = new Map<string, DeployerRegistration>();
+  private _loadErrors: PluginLoadError[] = [];
+
+  /** Set before calling plugin.register() so that source is auto-applied. */
+  currentSource: PluginSource = "built-in";
 
   register(reg: DeployerRegistration): void {
     if (this.registrations.has(reg.mode)) {
       console.warn(`DeployerRegistry: overwriting existing registration for mode "${reg.mode}"`);
     }
-    this.registrations.set(reg.mode, reg);
+    this.registrations.set(reg.mode, { ...reg, source: reg.source ?? this.currentSource });
   }
 
   get(mode: string): Deployer | null {
@@ -32,6 +44,14 @@ export class DeployerRegistry {
 
   list(): DeployerRegistration[] {
     return Array.from(this.registrations.values());
+  }
+
+  addLoadError(err: PluginLoadError): void {
+    this._loadErrors.push(err);
+  }
+
+  loadErrors(): PluginLoadError[] {
+    return [...this._loadErrors];
   }
 
   async detect(): Promise<DeployerRegistration[]> {

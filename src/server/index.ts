@@ -6,6 +6,7 @@ import { setupWebSocket } from "./ws.js";
 import deployRoutes from "./routes/deploy.js";
 import statusRoutes from "./routes/status.js";
 import agentsRoutes from "./routes/agents.js";
+import pluginsRoutes from "./routes/plugins.js";
 import { detectRuntime } from "./services/container.js";
 import { isClusterReachable, currentContext, currentNamespace, resetKubeConfig } from "./services/k8s.js";
 import { stopAllK8sPortForwards } from "./services/k8s-port-forward.js";
@@ -16,7 +17,7 @@ import { installerDataDir } from "./paths.js";
 import { registry } from "./deployers/registry.js";
 import { LocalDeployer } from "./deployers/local.js";
 import { KubernetesDeployer } from "./deployers/kubernetes.js";
-import { loadPlugins } from "./plugins/loader.js";
+import { loadPlugins, getDisabledModes } from "./plugins/loader.js";
 
 // Register built-in deployers
 registry.register({
@@ -55,6 +56,7 @@ app.use(express.json());
 app.use("/api/deploy", deployRoutes);
 app.use("/api/instances", statusRoutes);
 app.use("/api/agents", agentsRoutes);
+app.use("/api/plugins", pluginsRoutes);
 
 // Health check + environment defaults for the frontend
 app.get("/api/health", async (_req, res) => {
@@ -62,6 +64,7 @@ app.get("/api/health", async (_req, res) => {
   const runtime = await detectRuntime();
   const k8sReachable = await isClusterReachable();
   const detected = await registry.detect();
+  const disabledModes = new Set(await getDisabledModes());
 
   res.json({
     status: "ok",
@@ -81,6 +84,7 @@ app.get("/api/health", async (_req, res) => {
         unavailableReason: !available ? (reg.unavailableReason || "") : "",
         priority: reg.priority ?? 0,
         builtIn: reg.builtIn ?? false,
+        enabled: !disabledModes.has(reg.mode),
       };
     }),
     defaults: {

@@ -3,7 +3,7 @@ import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/re
 import DeployForm from "../DeployForm";
 
 // Stub fetch for /api/health to return deployer data
-function mockHealthResponse(deployers: Array<{ mode: string; title: string; description: string; available: boolean; priority: number; builtIn: boolean }>, overrides: Record<string, unknown> = {}) {
+function mockHealthResponse(deployers: Array<{ mode: string; title: string; description: string; available: boolean; priority: number; builtIn: boolean; enabled?: boolean }>, overrides: Record<string, unknown> = {}) {
   return vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
@@ -71,6 +71,23 @@ describe("DeployForm deployer visibility (issue #10)", () => {
 
     // Available plugin deployer should be visible
     expect(screen.getByText("OpenShift")).toBeTruthy();
+  });
+
+  it("hides disabled plugin deployers from mode selector", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true, enabled: true },
+      { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false, enabled: false },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    // Wait for deployers to render
+    await waitFor(() => {
+      expect(screen.getAllByText("This Machine").length).toBeGreaterThan(0);
+    });
+
+    // Disabled plugin deployer should be hidden
+    expect(screen.queryByText("OpenShift")).toBeNull();
   });
 
   it("does not auto-fill the default cluster namespace into the form", async () => {

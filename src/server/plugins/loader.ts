@@ -1,5 +1,5 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { join, dirname, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
@@ -10,8 +10,58 @@ const PLUGIN_PREFIX = "openclaw-installer-";
 const CONFIG_PATH = join(homedir(), ".openclaw", "installer", "plugins.json");
 const BUILT_RUNTIME_SEGMENT = `${sep}dist${sep}`;
 
+export interface PluginConfig {
+  plugins?: string[];
+  disabled?: string[];
+}
+
 function isBuiltRuntime(): boolean {
   return import.meta.dirname.includes(BUILT_RUNTIME_SEGMENT);
+}
+
+async function readPluginConfig(): Promise<PluginConfig> {
+  if (!existsSync(CONFIG_PATH)) return {};
+
+  try {
+    const content = await readFile(CONFIG_PATH, "utf8");
+    return JSON.parse(content) as PluginConfig;
+  } catch {
+    return {};
+  }
+}
+
+async function writePluginConfig(config: PluginConfig): Promise<void> {
+  const dir = dirname(CONFIG_PATH);
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
+  }
+  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+}
+
+export async function getDisabledModes(): Promise<string[]> {
+  const config = await readPluginConfig();
+  if (Array.isArray(config.disabled)) {
+    return config.disabled.filter((m): m is string => typeof m === "string");
+  }
+  return [];
+}
+
+export async function setModeDisabled(mode: string, disabled: boolean): Promise<void> {
+  const config = await readPluginConfig();
+  const current = new Set(
+    Array.isArray(config.disabled)
+      ? config.disabled.filter((m): m is string => typeof m === "string")
+      : [],
+  );
+
+  if (disabled) {
+    current.add(mode);
+  } else {
+    current.delete(mode);
+  }
+
+  config.disabled = [...current];
+  await writePluginConfig(config);
 }
 
 async function discoverProviderPlugins(registry: DeployerRegistry): Promise<void> {
@@ -31,6 +81,8 @@ async function discoverProviderPlugins(registry: DeployerRegistry): Promise<void
     return;
   }
 
+  registry.currentSource = "provider-plugin";
+
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
@@ -49,6 +101,7 @@ async function discoverProviderPlugins(registry: DeployerRegistry): Promise<void
 
       if (typeof plugin?.register !== "function") {
         console.warn(`Provider plugin "${name}" does not export a register function, skipping`);
+        registry.addLoadError({ pluginId: name, error: "Does not export a register function" });
         continue;
       }
 
@@ -56,6 +109,7 @@ async function discoverProviderPlugins(registry: DeployerRegistry): Promise<void
       console.log(`Loaded provider plugin: ${name}`);
     } catch (err) {
       console.warn(`Failed to load provider plugin "${name}":`, err);
+      registry.addLoadError({ pluginId: name, error: String(err) });
     }
   }
 }
@@ -98,29 +152,23 @@ async function discoverNpmPlugins(): Promise<string[]> {
 }
 
 async function loadConfigPlugins(): Promise<string[]> {
-  if (!existsSync(CONFIG_PATH)) return [];
-
-  try {
-    const content = await readFile(CONFIG_PATH, "utf8");
-    const config = JSON.parse(content);
-    if (Array.isArray(config.plugins)) {
-      return config.plugins.filter((p: unknown) => typeof p === "string");
-    }
-  } catch (err) {
-    console.warn(`Failed to read plugin config at ${CONFIG_PATH}:`, err);
+  const config = await readPluginConfig();
+  if (Array.isArray(config.plugins)) {
+    return config.plugins.filter((p: unknown) => typeof p === "string");
   }
-
   return [];
 }
 
-async function loadPlugin(registry: DeployerRegistry, moduleId: string): Promise<void> {
+async function loadPlugin(registry: DeployerRegistry, moduleId: string, source: "npm" | "config"): Promise<void> {
   console.log(`Attempting to load plugin: ${moduleId}`);
+  registry.currentSource = source;
   try {
     const mod = await import(moduleId);
     const plugin: InstallerPlugin | undefined = mod.default ?? mod;
 
     if (typeof plugin?.register !== "function") {
       console.warn(`Plugin "${moduleId}" does not export a register function, skipping`);
+      registry.addLoadError({ pluginId: moduleId, error: "Does not export a register function" });
       return;
     }
 
@@ -128,6 +176,7 @@ async function loadPlugin(registry: DeployerRegistry, moduleId: string): Promise
     console.log(`Loaded plugin: ${moduleId}`);
   } catch (err) {
     console.warn(`Failed to load plugin "${moduleId}":`, err);
+    registry.addLoadError({ pluginId: moduleId, error: String(err) });
   }
 }
 
@@ -138,11 +187,17 @@ export async function loadPlugins(registry: DeployerRegistry): Promise<void> {
   const npmPlugins = await discoverNpmPlugins();
   const configPlugins = await loadConfigPlugins();
 
+  // Determine source for each plugin (npm takes precedence for duplicates)
+  const npmSet = new Set(npmPlugins);
   const allPlugins = [...new Set([...npmPlugins, ...configPlugins])];
 
   if (allPlugins.length === 0) return;
 
   for (const pluginId of allPlugins) {
-    await loadPlugin(registry, pluginId);
+    const source = npmSet.has(pluginId) ? "npm" as const : "config" as const;
+    await loadPlugin(registry, pluginId, source);
   }
+
+  // Reset source to built-in as default
+  registry.currentSource = "built-in";
 }

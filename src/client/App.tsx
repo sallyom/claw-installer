@@ -2,8 +2,9 @@ import React, { useState } from "react";
 import DeployForm from "./components/DeployForm";
 import InstanceList from "./components/InstanceList";
 import LogStream from "./components/LogStream";
+import PluginList from "./components/PluginList";
 
-type Tab = "deploy" | "instances";
+type Tab = "deploy" | "instances" | "plugins";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("deploy");
@@ -29,6 +30,12 @@ export default function App() {
         >
           Instances
         </button>
+        <button
+          className={`tab ${tab === "plugins" ? "active" : ""}`}
+          onClick={() => setTab("plugins")}
+        >
+          Plugins
+        </button>
       </div>
 
       <div style={{ display: tab === "deploy" ? "block" : "none" }}>
@@ -42,6 +49,10 @@ export default function App() {
 
       <div style={{ display: tab === "instances" ? "block" : "none" }}>
         <InstanceList />
+      </div>
+
+      <div style={{ display: tab === "plugins" ? "block" : "none" }}>
+        <PluginList />
       </div>
     </div>
   );

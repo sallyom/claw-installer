@@ -18,6 +18,7 @@ interface DeployerInfo {
   unavailableReason?: string;
   priority: number;
   builtIn: boolean;
+  enabled: boolean;
 }
 
 interface Props {
@@ -263,11 +264,17 @@ export default function DeployForm({ onDeployStarted }: Props) {
   const displayedDeployers = useMemo(
     () => {
       // Hide unavailable plugin deployers (issue #10) — only built-in
-      // deployers should appear as disabled; plugin deployers are hidden
-      // entirely so we don't promote commercial offerings to users who
-      // aren't already using them.
-      const visible = deployers.filter((d) => d.builtIn || d.available);
-      return defaults?.isOpenShift
+      // deployers should appear as disabled; plugin deployers are hidden entirely.
+      // Also hide deployers that have been disabled via the Plugins tab.
+      const visible = deployers.filter((d) =>
+        d.enabled !== false && (d.builtIn || d.available),
+      );
+      // Only hide Kubernetes when OpenShift is both available and enabled,
+      // so disabling the OpenShift plugin falls back to the Kubernetes deployer.
+      const openshiftActive = visible.some(
+        (d) => d.mode === "openshift" && d.available,
+      );
+      return defaults?.isOpenShift && openshiftActive
         ? visible.filter((d) => d.mode !== "kubernetes")
         : visible;
     },

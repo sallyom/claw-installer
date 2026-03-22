@@ -108,4 +108,47 @@ describe("DeployerRegistry", () => {
     expect(core?.builtIn).toBe(true);
     expect(plugin?.builtIn).toBeUndefined();
   });
+
+  it("applies currentSource to registrations", () => {
+    const reg = new DeployerRegistry();
+    reg.currentSource = "built-in";
+    reg.register({ mode: "local", title: "Local", description: "Local deploy", deployer: stubDeployer() });
+
+    reg.currentSource = "provider-plugin";
+    reg.register({ mode: "openshift", title: "OpenShift", description: "OpenShift deploy", deployer: stubDeployer() });
+
+    const list = reg.list();
+    expect(list.find((r) => r.mode === "local")?.source).toBe("built-in");
+    expect(list.find((r) => r.mode === "openshift")?.source).toBe("provider-plugin");
+  });
+
+  it("explicit source in registration overrides currentSource", () => {
+    const reg = new DeployerRegistry();
+    reg.currentSource = "npm";
+    reg.register({ mode: "custom", title: "Custom", description: "Custom", deployer: stubDeployer(), source: "config" });
+
+    expect(reg.list()[0].source).toBe("config");
+  });
+
+  it("tracks load errors", () => {
+    const reg = new DeployerRegistry();
+    expect(reg.loadErrors()).toHaveLength(0);
+
+    reg.addLoadError({ pluginId: "bad-plugin", error: "Missing register function" });
+    reg.addLoadError({ pluginId: "broken-plugin", error: "Import failed" });
+
+    const errors = reg.loadErrors();
+    expect(errors).toHaveLength(2);
+    expect(errors[0].pluginId).toBe("bad-plugin");
+    expect(errors[1].error).toBe("Import failed");
+  });
+
+  it("loadErrors returns a copy", () => {
+    const reg = new DeployerRegistry();
+    reg.addLoadError({ pluginId: "test", error: "err" });
+    const a = reg.loadErrors();
+    const b = reg.loadErrors();
+    expect(a).not.toBe(b);
+    expect(a).toEqual(b);
+  });
 });
