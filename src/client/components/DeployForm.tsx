@@ -1474,9 +1474,9 @@ export default function DeployForm({ onDeployStarted }: Props) {
                       color: "var(--text-secondary)",
                     }}>
                       The first deployment will pull both the OpenClaw image and the LiteLLM proxy
-                      image (<code>ghcr.io/berriai/litellm:main-latest</code>, ~1.5 GB).
+                      image (<code>ghcr.io/berriai/litellm:v1.82.3-stable.patch.2</code>, ~1.5 GB).
                       This may take several minutes. You can pre-pull
-                      with: <code>{mode === "kubernetes" ? "crictl pull" : "podman pull"} ghcr.io/berriai/litellm:main-latest</code>
+                      with: <code>{mode === "kubernetes" ? "crictl pull" : "podman pull"} ghcr.io/berriai/litellm:v1.82.3-stable.patch.2</code>
                     </div>
                   )}
                 </div>

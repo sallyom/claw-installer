@@ -144,14 +144,14 @@ API to Vertex AI.
 
 ### LiteLLM container image
 
-The proxy uses `ghcr.io/berriai/litellm:main-latest` (~1.5 GB). The first
+The proxy uses `ghcr.io/berriai/litellm:v1.82.3-stable.patch.2` (~1.5 GB). The first
 deployment will take extra time while this image is pulled. You can
 pre-pull it to speed things up:
 
 ```bash
-podman pull ghcr.io/berriai/litellm:main-latest
+podman pull ghcr.io/berriai/litellm:v1.82.3-stable.patch.2
 # or
-docker pull ghcr.io/berriai/litellm:main-latest
+docker pull ghcr.io/berriai/litellm:v1.82.3-stable.patch.2
 ```
 
 ### Disabling the proxy
@@ -211,6 +211,6 @@ deployment/openclaw -c litellm`. Common issues include an invalid
 credentials file or a missing project/location in the config.
 
 **First deployment is very slow?**
-The LiteLLM image (`ghcr.io/berriai/litellm:main-latest`) is ~1.5 GB.
+The LiteLLM image (`ghcr.io/berriai/litellm:v1.82.3-stable.patch.2`) is ~1.5 GB.
 Pre-pull it before deploying:
-`podman pull ghcr.io/berriai/litellm:main-latest`
+`podman pull ghcr.io/berriai/litellm:v1.82.3-stable.patch.2`

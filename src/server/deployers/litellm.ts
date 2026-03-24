@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { DeployConfig } from "./types.js";
 
-export const LITELLM_IMAGE = "ghcr.io/berriai/litellm:main-latest";
+export const LITELLM_IMAGE = "ghcr.io/berriai/litellm:v1.82.3-stable.patch.2";
 export const LITELLM_PORT = 4000;
 
 export function generateLitellmMasterKey(): string {
