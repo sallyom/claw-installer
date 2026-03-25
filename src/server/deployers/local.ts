@@ -739,6 +739,9 @@ export class LocalDeployer implements Deployer {
 
     // Check for port conflicts before attempting to create containers (Fix for #12)
     await checkPortAvailable(port, runtime);
+    if (shouldUseLitellmProxy(config)) {
+      await checkPortAvailable(port + 1, runtime);
+    }
 
     // Remove existing container with same name (in case --rm didn't fire)
     await removeContainer(runtime, name);
@@ -1289,6 +1292,9 @@ something that requires the user's attention.`;
 
     // Check for port conflicts before attempting to create containers (Fix for #12)
     await checkPortAvailable(port, runtime);
+    if (shouldUseLitellmProxy(effectiveConfig)) {
+      await checkPortAvailable(port + 1, runtime);
+    }
 
     // Remove old container if it exists (stop may not have fully cleaned up)
     await removeContainer(runtime, name);
