@@ -19,6 +19,15 @@ npm run lint     # ESLint checks
 - `tsx watch` for dev, `tsc` for production builds
 - Provider plugins use relative imports back to `src/server/` (not `@openclaw/installer/*`)
 
+## Scope Guard
+
+The installer handles **Day 1 deployment only**. Features that can be performed
+after deployment using the OpenClaw CLI (`openclaw <command>`) or the OpenClaw UI
+must not be added to the installer. Before proposing a feature, ask: "Is this
+needed on first launch?" If not, it belongs upstream. See
+[ADR 0003](adr/0003-day-1-scope-boundary.md) for the full rationale and decision
+framework.
+
 ## Build Configuration
 
 - `tsconfig.server.json` -- compiles `src/server/` to `dist/`
