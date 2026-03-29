@@ -225,11 +225,25 @@ describe("DeployForm agent name validation (issue #7)", () => {
 
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
 
-    fireEvent.click(screen.getByText("Additional Providers & Fallbacks"));
-
-    expect(await screen.findByText("OpenAI API Key")).toBeTruthy();
+    // Verify the primary card shows anthropic fields by default
+    expect(screen.getByText("Anthropic API Key")).toBeTruthy();
     expect(screen.getByText("Anthropic Model")).toBeTruthy();
+
+    // Check that add provider button exists
+    const addBtn = screen.getByRole("button", { name: /Add Provider/i });
+    expect(addBtn).toBeTruthy();
+
+    // Switch primary to openai to verify provider-specific fields change
+    // The primary provider select is the one with value="anthropic"
+    const primarySelect = screen.getByDisplayValue("Anthropic");
+    fireEvent.change(primarySelect, { target: { value: "openai" } });
+
+    expect(screen.getByText("OpenAI API Key")).toBeTruthy();
     expect(screen.getByText("OpenAI Model")).toBeTruthy();
+
+    // Switch primary to custom-endpoint
+    fireEvent.change(primarySelect, { target: { value: "custom-endpoint" } });
+
     expect(screen.getByText("OpenAI-Compatible Model Endpoint")).toBeTruthy();
     expect(screen.getByText("OpenAI-Compatible Model Name")).toBeTruthy();
     expect(screen.getByText("OpenAI-Compatible Endpoint API Key (`MODEL_ENDPOINT_API_KEY`)")).toBeTruthy();
@@ -280,16 +294,25 @@ describe("DeployForm agent name validation (issue #7)", () => {
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
 
     fireEvent.change(screen.getAllByPlaceholderText("e.g., lynx")[0], { target: { value: "lynx" } });
+
+    // Primary is anthropic — fill its fields
     fireEvent.change(screen.getByPlaceholderText("sk-ant-..."), { target: { value: "sk-ant-demo" } });
-    fireEvent.change(screen.getByPlaceholderText("sk-..."), { target: { value: "sk-openai-demo" } });
     fireEvent.change(
       screen.getByPlaceholderText("e.g., claude-sonnet-4-6"),
       { target: { value: "claude-sonnet-4-6" } },
     );
+
+    // Switch primary to openai, fill its fields, then switch back
+    const primarySelect = screen.getByDisplayValue("Anthropic");
+    fireEvent.change(primarySelect, { target: { value: "openai" } });
+    fireEvent.change(screen.getByPlaceholderText("sk-..."), { target: { value: "sk-openai-demo" } });
     fireEvent.change(
       screen.getByPlaceholderText("e.g., gpt-5"),
       { target: { value: "gpt-5" } },
     );
+
+    // Switch primary to custom-endpoint, fill its fields, then switch back
+    fireEvent.change(screen.getByDisplayValue("OpenAI"), { target: { value: "custom-endpoint" } });
     fireEvent.change(
       screen.getByPlaceholderText("http://vllm.openclaw-llms.svc.cluster.local/v1"),
       { target: { value: "http://localhost:8000/v1" } },
@@ -302,6 +325,9 @@ describe("DeployForm agent name validation (issue #7)", () => {
       screen.getByPlaceholderText("API key for the OpenAI-compatible endpoint"),
       { target: { value: "endpoint-token" } },
     );
+
+    // Switch back to anthropic as primary
+    fireEvent.change(screen.getByDisplayValue("Model Endpoint"), { target: { value: "anthropic" } });
 
     fireEvent.click(screen.getAllByRole("button", { name: /deploy openclaw/i }).at(-1)!);
 
@@ -502,6 +528,10 @@ describe("DeployForm agent name validation (issue #7)", () => {
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
 
     fireEvent.change(screen.getAllByPlaceholderText("e.g., lynx")[0], { target: { value: "lynx" } });
+
+    // Switch primary to custom-endpoint to access endpoint fields
+    fireEvent.change(screen.getByDisplayValue("Anthropic"), { target: { value: "custom-endpoint" } });
+
     fireEvent.change(
       screen.getByPlaceholderText("http://vllm.openclaw-llms.svc.cluster.local/v1"),
       { target: { value: "https://example.com/v1" } },
@@ -574,6 +604,9 @@ describe("DeployForm agent name validation (issue #7)", () => {
     render(<DeployForm onDeployStarted={() => {}} />);
 
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
+
+    // Switch primary to custom-endpoint to access endpoint fields
+    fireEvent.change(screen.getByDisplayValue("Anthropic"), { target: { value: "custom-endpoint" } });
 
     const endpointInput = screen.getByPlaceholderText("http://vllm.openclaw-llms.svc.cluster.local/v1");
     fireEvent.change(endpointInput, { target: { value: "https://example.com/v1" } });
