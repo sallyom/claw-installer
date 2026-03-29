@@ -1,31 +1,37 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import DeployForm from "../DeployForm";
 
+type DeployerStub = { mode: string; title: string; description: string; available: boolean; priority: number; builtIn: boolean; enabled?: boolean };
+
+function healthJson(deployers: DeployerStub[], overrides: Record<string, unknown> = {}) {
+  return {
+    status: "ok",
+    containerRuntime: "podman",
+    k8sAvailable: false,
+    k8sContext: "",
+    k8sNamespace: "",
+    isOpenShift: false,
+    version: "0.1.0",
+    deployers,
+    defaults: {
+      hasAnthropicKey: true,
+      hasOpenaiKey: false,
+      hasTelegramToken: false,
+      telegramAllowFrom: "",
+      modelEndpoint: "",
+      prefix: "testuser",
+      image: "",
+    },
+    ...overrides,
+  };
+}
+
 // Stub fetch for /api/health to return deployer data
-function mockHealthResponse(deployers: Array<{ mode: string; title: string; description: string; available: boolean; priority: number; builtIn: boolean; enabled?: boolean }>, overrides: Record<string, unknown> = {}) {
+function mockHealthResponse(deployers: DeployerStub[], overrides: Record<string, unknown> = {}) {
   return vi.fn().mockResolvedValue({
     ok: true,
-    json: async () => ({
-      status: "ok",
-      containerRuntime: "podman",
-      k8sAvailable: false,
-      k8sContext: "",
-      k8sNamespace: "",
-      isOpenShift: false,
-      version: "0.1.0",
-      deployers,
-      defaults: {
-        hasAnthropicKey: true,
-        hasOpenaiKey: false,
-        hasTelegramToken: false,
-        telegramAllowFrom: "",
-        modelEndpoint: "",
-        prefix: "testuser",
-        image: "",
-      },
-      ...overrides,
-    }),
+    json: async () => healthJson(deployers, overrides),
   });
 }
 
@@ -581,6 +587,208 @@ describe("DeployForm agent name validation (issue #7)", () => {
       expect(
         screen.queryByRole("option", { name: "Llama 4 Scout 17B (llama-4-scout-17b-16e-w4a16)" }),
       ).toBeNull();
+    });
+  });
+});
+
+const LOCAL: DeployerStub = { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true };
+const K8S_AVAIL: DeployerStub = { mode: "kubernetes", title: "Kubernetes", description: "Deploy to K8s", available: true, priority: 0, builtIn: true };
+const K8S_UNAVAIL: DeployerStub = { mode: "kubernetes", title: "Kubernetes", description: "Deploy to K8s", available: false, priority: 0, builtIn: true };
+const OCP_AVAIL: DeployerStub = { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false };
+
+describe("DeployForm auto-switch (issue #38)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("auto-switches when current mode becomes unavailable on refresh", async () => {
+    // Initial: local + kubernetes available; kubernetes has higher priority so it's auto-selected
+    const k8sHighPri = { ...K8S_AVAIL, priority: 5 };
+    const initialData = healthJson([LOCAL, k8sHighPri], { k8sAvailable: true });
+    // After refresh: kubernetes unavailable
+    const refreshData = healthJson([LOCAL, K8S_UNAVAIL], { k8sAvailable: false });
+
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/configs")) {
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }
+      callCount++;
+      const data = callCount <= 1 ? initialData : refreshData;
+      return Promise.resolve({ ok: true, json: async () => data });
+    });
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    // Wait for initial render — should show kubernetes as available
+    await screen.findByText("This Machine");
+    await waitFor(() => {
+      expect(screen.getByText("Kubernetes")).toBeTruthy();
+    });
+
+    // Simulate tab focus / refresh by triggering visibilitychange
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Should show auto-switch notification
+    await waitFor(() => {
+      expect(screen.queryByText(/is no longer available/)).toBeTruthy();
+    });
+  });
+
+  it("auto-switches to higher-priority deployer when it becomes available", async () => {
+    // Initial: only local available
+    const initialData = healthJson([LOCAL, K8S_UNAVAIL]);
+    // After refresh: OpenShift becomes available (priority 10)
+    const refreshData = healthJson([LOCAL, K8S_AVAIL, OCP_AVAIL], {
+      k8sAvailable: true,
+      isOpenShift: true,
+    });
+
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/configs")) {
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }
+      callCount++;
+      const data = callCount <= 1 ? initialData : refreshData;
+      return Promise.resolve({ ok: true, json: async () => data });
+    });
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    // Wait for initial render — local should be auto-selected
+    await screen.findByText("This Machine");
+
+    // Trigger refresh
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Should show auto-switch notification for OpenShift
+    await waitFor(() => {
+      expect(screen.queryByText(/Switched to OpenShift/)).toBeTruthy();
+    });
+  });
+
+  it("does not auto-switch when user manually selected a mode", async () => {
+    // Initial: local + kubernetes available
+    const initialData = healthJson([LOCAL, K8S_AVAIL], { k8sAvailable: true });
+    // After refresh: OpenShift becomes available (higher priority)
+    const refreshData = healthJson([LOCAL, K8S_AVAIL, OCP_AVAIL], {
+      k8sAvailable: true,
+      isOpenShift: true,
+    });
+
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/configs")) {
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }
+      callCount++;
+      const data = callCount <= 1 ? initialData : refreshData;
+      return Promise.resolve({ ok: true, json: async () => data });
+    });
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    // Wait for initial render
+    const localCard = await screen.findByText("This Machine");
+
+    // Manually click "This Machine" to mark as manually selected
+    fireEvent.click(localCard.closest(".mode-card")!);
+
+    // Trigger refresh
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Should NOT show auto-switch notification — user manually selected local
+    await vi.advanceTimersByTimeAsync(100);
+    expect(screen.queryByText(/Switched to/)).toBeNull();
+  });
+
+  it("auto-switches even with manual selection when current mode is unavailable", async () => {
+    // Initial: local + kubernetes available
+    const initialData = healthJson([LOCAL, K8S_AVAIL], { k8sAvailable: true });
+    // After refresh: kubernetes unavailable
+    const refreshData = healthJson([LOCAL, K8S_UNAVAIL], { k8sAvailable: false });
+
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/configs")) {
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }
+      callCount++;
+      const data = callCount <= 1 ? initialData : refreshData;
+      return Promise.resolve({ ok: true, json: async () => data });
+    });
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    // Wait for initial render
+    const k8sCard = await screen.findByText("Kubernetes");
+
+    // Manually click Kubernetes
+    fireEvent.click(k8sCard.closest(".mode-card")!);
+
+    // Trigger refresh — kubernetes becomes unavailable
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Should auto-switch to local even though user manually selected kubernetes
+    await waitFor(() => {
+      expect(screen.queryByText(/is no longer available/)).toBeTruthy();
+    });
+  });
+
+  it("dismisses auto-switch notification after timeout", async () => {
+    const k8sHighPri = { ...K8S_AVAIL, priority: 5 };
+    const initialData = healthJson([LOCAL, k8sHighPri], { k8sAvailable: true });
+    const refreshData = healthJson([LOCAL, K8S_UNAVAIL], { k8sAvailable: false });
+
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/api/configs")) {
+        return Promise.resolve({ ok: true, json: async () => [] });
+      }
+      callCount++;
+      const data = callCount <= 1 ? initialData : refreshData;
+      return Promise.resolve({ ok: true, json: async () => data });
+    });
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+    await screen.findByText("This Machine");
+
+    // Trigger refresh
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/is no longer available/)).toBeTruthy();
+    });
+
+    // Advance past the 8-second dismiss timer
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/is no longer available/)).toBeNull();
     });
   });
 });

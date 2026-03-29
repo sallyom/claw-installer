@@ -28,14 +28,37 @@ export function appsApi(): k8s.AppsV1Api {
 }
 
 /**
- * Check if we can connect to a K8s cluster at all.
+ * Check if we can connect to a K8s cluster AND the user is authenticated.
+ *
+ * The version endpoint (getCode) doesn't require authentication on most
+ * clusters, so it can't detect `oc logout`. We follow up with a lightweight
+ * authenticated call (SelfSubjectRulesReview) that fails after logout.
  */
 export async function isClusterReachable(): Promise<boolean> {
   try {
-    const client = loadKubeConfig().makeApiClient(k8s.VersionApi);
-    await client.getCode();
+    const kc = loadKubeConfig();
+
+    // 1. Quick connectivity check — can we reach the API server at all?
+    const versionClient = kc.makeApiClient(k8s.VersionApi);
+    await versionClient.getCode();
+
+    // 2. Authentication check — try a lightweight authn-required call.
+    //    SelfSubjectRulesReview is available to every authenticated user and
+    //    doesn't need list-namespace permissions.
+    const authClient = kc.makeApiClient(k8s.AuthorizationV1Api);
+    await authClient.createSelfSubjectRulesReview({
+      body: {
+        apiVersion: "authorization.k8s.io/v1",
+        kind: "SelfSubjectRulesReview",
+        spec: { namespace: "default" },
+      },
+    });
     return true;
-  } catch {
+  } catch (err) {
+    // 401/403 from the auth check means the cluster is reachable but the
+    // user is logged out or the token expired.
+    // Connection-level errors (ECONNREFUSED, DNS) mean no cluster at all.
+    // In both cases we return false — there is no usable cluster session.
     return false;
   }
 }

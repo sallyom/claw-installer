@@ -42,6 +42,13 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   const [loadedConfigLabel, setLoadedConfigLabel] = useState<string | null>(null);
   const [autoLoadedEnvDir, setAutoLoadedEnvDir] = useState<string | null>(null);
   const [inferenceProvider, setInferenceProvider] = useState<InferenceProvider>("anthropic");
+  const [modeManuallySelected, setModeManuallySelected] = useState(false);
+  const [autoSwitchMessage, setAutoSwitchMessage] = useState<string | null>(null);
+  // Refs so refreshEnvironment can read latest values without re-creating the callback
+  const modeManualRef = useRef(false);
+  const deployingRef = useRef(false);
+  modeManualRef.current = modeManuallySelected;
+  deployingRef.current = deploying;
   const [config, setConfig] = useState<DeployFormConfig>(createInitialDeployFormConfig);
 
   const [gcpDefaults, setGcpDefaults] = useState<GcpDefaults | null>(null);
@@ -112,9 +119,46 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
             return (b.priority ?? 0) - (a.priority ?? 0);
           });
           setDeployers(sorted);
-          // Only auto-select mode on first load
-          if (isInitial && sorted.length > 0 && sorted[0].available) {
-            setMode(sorted[0].mode);
+
+          if (isInitial) {
+            // Auto-select best deployer on first load
+            if (sorted.length > 0 && sorted[0].available) {
+              setMode(sorted[0].mode);
+            }
+          } else if (!deployingRef.current) {
+            // Auto-switch logic on subsequent refreshes (tab focus, manual refresh).
+            // Never switch while a deploy is in progress.
+            setMode((currentMode) => {
+              const enabledSorted = sorted.filter((dd) => dd.enabled !== false);
+              const currentDeployer = enabledSorted.find((dd) => dd.mode === currentMode);
+              const bestAvailable = enabledSorted.find((dd) => dd.available);
+
+              if (!bestAvailable) return currentMode;
+
+              // Rule 1: Current mode became unavailable — always switch.
+              if (!currentDeployer?.available) {
+                setAutoSwitchMessage(
+                  `Switched to ${bestAvailable.title} — ${currentMode} is no longer available`,
+                );
+                setModeManuallySelected(false);
+                return bestAvailable.mode;
+              }
+
+              // Rule 2: A higher-priority deployer became newly available.
+              // Only auto-switch if the user hasn't manually picked a mode.
+              if (
+                !modeManualRef.current
+                && bestAvailable.mode !== currentMode
+                && (bestAvailable.priority ?? 0) > (currentDeployer.priority ?? 0)
+              ) {
+                setAutoSwitchMessage(
+                  `Switched to ${bestAvailable.title} — detected ${bestAvailable.title} cluster`,
+                );
+                return bestAvailable.mode;
+              }
+
+              return currentMode;
+            });
           }
         }
 
@@ -161,11 +205,12 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [refreshEnvironment]);
 
+  // Auto-dismiss the auto-switch notification after 8 seconds
   useEffect(() => {
-    if (defaults?.isOpenShift && mode === "kubernetes") {
-      setMode("openshift");
-    }
-  }, [defaults?.isOpenShift, mode]);
+    if (!autoSwitchMessage) return;
+    const timer = globalThis.setTimeout(() => setAutoSwitchMessage(null), 8000);
+    return () => globalThis.clearTimeout(timer);
+  }, [autoSwitchMessage]);
 
   useEffect(() => {
     try {
@@ -512,7 +557,13 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
             <div
               key={m.mode}
               className={`mode-card ${isSelected ? "selected" : ""} ${!m.available ? "disabled" : ""}`}
-              onClick={() => m.available && setMode(m.mode)}
+              onClick={() => {
+                if (m.available) {
+                  setMode(m.mode);
+                  setModeManuallySelected(true);
+                  setAutoSwitchMessage(null);
+                }
+              }}
               style={!m.available ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
             >
               <div className="mode-radio">
@@ -529,6 +580,41 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           );
         })}
       </div>
+
+      {autoSwitchMessage && (
+        <div
+          style={{
+            marginBottom: "1rem",
+            padding: "0.6rem 1rem",
+            background: "rgba(52, 152, 219, 0.1)",
+            border: "1px solid rgba(52, 152, 219, 0.3)",
+            borderRadius: "var(--radius-sm)",
+            fontSize: "0.85rem",
+            color: "var(--text-secondary)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span>{autoSwitchMessage}</span>
+          <button
+            type="button"
+            onClick={() => setAutoSwitchMessage(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: "1rem",
+              padding: "0 0.25rem",
+              lineHeight: 1,
+            }}
+            aria-label="Dismiss"
+          >
+            {"\u00D7"}
+          </button>
+        </div>
+      )}
 
       {isClusterMode && (
         <div className="card" style={{ marginBottom: "1rem", padding: "0.75rem 1rem" }}>

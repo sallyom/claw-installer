@@ -38,7 +38,7 @@ registry.register({
   deployer: new KubernetesDeployer(),
   detect: async () => isClusterReachable(),
   unavailableReason: "No Kubernetes cluster detected. Configure kubectl and ensure you are logged in.",
-  priority: 0,
+  priority: 5,
   builtIn: true,
 });
 
