@@ -1022,6 +1022,8 @@ Use this table to track verified peer OpenClaw instances.
         : []),
       // Create workspace directory
       `mkdir -p '${workspaceDir}'`,
+      // Create .env file for heartbeat (same fix as bootstrap path)
+      `touch '${workspaceDir}/.env'`,
       // Create skills directory
       `mkdir -p /home/node/.openclaw/skills`,
       // Write AGENTS.md (always update — lets user change agent name/display on re-deploy)
