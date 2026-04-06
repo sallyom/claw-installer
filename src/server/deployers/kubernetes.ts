@@ -120,15 +120,12 @@ async function applyResource<T>(
 
 function checkGatewayReady(url: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const req = http.get(url, { timeout: 3000 }, (res) => {
+    const req = http.get(url, { timeout: 1000 }, (res) => {
       res.resume();
       resolve(res.statusCode !== undefined && res.statusCode < 500);
     });
     req.on("error", () => resolve(false));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve(false);
-    });
+    req.on("timeout", () => req.destroy()); // fires 'error', which resolves
   });
 }
 

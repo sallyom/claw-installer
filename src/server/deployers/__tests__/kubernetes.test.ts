@@ -72,13 +72,13 @@ function mockPods(pods: Array<{
 }
 
 function mockGatewayReady(statusCode: number) {
-  const res = {
-    statusCode,
-    resume: vi.fn(),
-  };
+  const res = { statusCode, resume: vi.fn() };
   vi.mocked(http.get).mockImplementation((_url: any, _opts: any, cb: any) => {
     cb(res);
-    return { on: vi.fn() } as any;
+    const req = {
+      on: vi.fn(() => req),
+    };
+    return req as any;
   });
 }
 
@@ -89,6 +89,7 @@ function mockGatewayError() {
         if (event === "error") handler();
         return req;
       }),
+      destroy: vi.fn(),
     };
     return req as any;
   });
@@ -179,7 +180,10 @@ describe("KubernetesDeployer.status", () => {
 
   it("returns deploying when pod is in ContainerCreating state", async () => {
     mockDeployment(1, 0);
-    mockPods([{ phase: "Pending", ready: false, state: { waiting: { reason: "ContainerCreating" } } }]);
+    mockPods([{
+      phase: "Pending", ready: false,
+      state: { waiting: { reason: "ContainerCreating" } },
+    }]);
 
     const deployer = new KubernetesDeployer();
     const result = await deployer.status(baseResult);
@@ -202,7 +206,10 @@ describe("KubernetesDeployer.status", () => {
 
   it("returns error when pod is in CrashLoopBackOff", async () => {
     mockDeployment(1, 0);
-    mockPods([{ phase: "Running", ready: false, state: { waiting: { reason: "CrashLoopBackOff", message: "back-off restarting" } } }]);
+    mockPods([{
+      phase: "Running", ready: false,
+      state: { waiting: { reason: "CrashLoopBackOff", message: "back-off restarting" } },
+    }]);
 
     const deployer = new KubernetesDeployer();
     const result = await deployer.status(baseResult);
