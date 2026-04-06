@@ -58,14 +58,19 @@ export function usesDefaultEnvSecretRef(ref?: DeploySecretRef): ref is DeploySec
 export function normalizeModelRef(config: DeployConfig, modelRef: string): string {
   const trimmed = modelRef.trim();
   if (!trimmed) return trimmed;
+
+  // Fix for #93: custom-endpoint model IDs may contain '/' (e.g. 'google/gemma-4-26B-A4B-it')
+  // which must be prefixed with 'endpoint/' so the gateway routes to the endpoint provider
+  // instead of treating the first segment as a provider name.
+  if (config.inferenceProvider === "custom-endpoint") {
+    return trimmed.startsWith(`${CUSTOM_ENDPOINT_PROVIDER}/`) ? trimmed : `${CUSTOM_ENDPOINT_PROVIDER}/${trimmed}`;
+  }
+
   if (trimmed.includes("/")) return trimmed;
 
   if (config.inferenceProvider === "anthropic") return `anthropic/${trimmed}`;
   if (config.inferenceProvider === "openai") {
     return `openai/${trimmed}`;
-  }
-  if (config.inferenceProvider === "custom-endpoint") {
-    return `${CUSTOM_ENDPOINT_PROVIDER}/${trimmed}`;
   }
   // Fix for #1: check litellm proxy before falling back to direct vertex providers
   if (config.inferenceProvider === "vertex-anthropic") {
@@ -93,6 +98,11 @@ function normalizeProviderModelRef(provider: string, modelRef?: string): string 
   const trimmed = modelRef?.trim();
   if (!trimmed) {
     return undefined;
+  }
+  // Fix for #93: always prefix with the provider, even when the model ID
+  // contains '/' (e.g. 'google/gemma-4-26B-A4B-it' for the 'endpoint' provider).
+  if (provider === CUSTOM_ENDPOINT_PROVIDER) {
+    return trimmed.startsWith(`${CUSTOM_ENDPOINT_PROVIDER}/`) ? trimmed : `${CUSTOM_ENDPOINT_PROVIDER}/${trimmed}`;
   }
   return trimmed.includes("/") ? trimmed : `${provider}/${trimmed}`;
 }

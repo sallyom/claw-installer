@@ -232,6 +232,64 @@ describe("model config generation", () => {
     expect(normalizeModelRef(config, "anthropic-vertex/my-model")).toBe("anthropic-vertex/my-model");
   });
 
+  // Regression tests for #93: custom-endpoint model IDs containing '/' must be
+  // prefixed with 'endpoint/' so the gateway routes to the endpoint provider.
+  it("prefixes custom-endpoint model IDs that contain a slash", () => {
+    const config = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "https://vllm.example.com/v1",
+      modelEndpointModel: "google/gemma-4-26B-A4B-it",
+    });
+
+    expect(normalizeModelRef(config, "google/gemma-4-26B-A4B-it")).toBe("endpoint/google/gemma-4-26B-A4B-it");
+    expect(deriveModel(config)).toBe("endpoint/google/gemma-4-26B-A4B-it");
+  });
+
+  it("does not double-prefix custom-endpoint model IDs already starting with endpoint/", () => {
+    const config = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "https://vllm.example.com/v1",
+    });
+
+    expect(normalizeModelRef(config, "endpoint/google/gemma-4-26B-A4B-it")).toBe("endpoint/google/gemma-4-26B-A4B-it");
+  });
+
+  it("generates correct openclaw.json model refs for custom-endpoint with slashed model IDs", () => {
+    const config = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "https://vllm.example.com/v1",
+      modelEndpointModel: "google/gemma-4-26B-A4B-it",
+      modelEndpointModelLabel: "Gemma 4 26B",
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      agents?: {
+        defaults?: {
+          model?: { primary?: string };
+          models?: Record<string, { alias?: string }>;
+        };
+        list?: Array<{
+          model?: { primary?: string };
+        }>;
+      };
+      models?: {
+        providers?: Record<string, { models?: Array<{ id?: string; name?: string }> }>;
+      };
+    };
+
+    // Agent model refs must use 'endpoint/' prefix
+    expect(rendered.agents?.defaults?.model?.primary).toBe("endpoint/google/gemma-4-26B-A4B-it");
+    expect(rendered.agents?.defaults?.models?.["endpoint/google/gemma-4-26B-A4B-it"]).toBeDefined();
+    expect(rendered.agents?.list?.[0]?.model?.primary).toBe("endpoint/google/gemma-4-26B-A4B-it");
+
+    // The provider's own models[].id should keep the raw model ID
+    expect(rendered.models?.providers?.endpoint?.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "google/gemma-4-26B-A4B-it" }),
+      ]),
+    );
+  });
+
   it("writes external secret provider config without emitting an invalid plain OpenAI provider stub", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
