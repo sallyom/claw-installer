@@ -120,18 +120,28 @@ async function applyResource<T>(
 
 function checkGatewayReady(url: string): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
     const req = http.get(url, { timeout: 1000 }, (res) => {
+      if (settled) return;
+      settled = true;
       res.resume();
       resolve(res.statusCode !== undefined && res.statusCode < 500);
     });
-    req.on("error", () => resolve(false));
-    req.on("timeout", () => req.destroy()); // fires 'error', which resolves
+    req.on("error", () => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    });
+    req.on("timeout", () => req.destroy());
   });
 }
 
 // ── Deployer implementation ────────────────────────────────────────
 
 export class KubernetesDeployer implements Deployer {
+  /** Tracks namespaces whose gateway has been confirmed healthy. */
+  private gatewayHealthy = new Map<string, { readyReplicas: number }>();
+
   async deploy(config: DeployConfig, log: LogCallback): Promise<DeployResult> {
     const id = uuid();
     const ns = namespaceName(config);
@@ -525,7 +535,10 @@ export class KubernetesDeployer implements Deployer {
       const replicas = dep.spec?.replicas ?? 1;
       const readyReplicas = dep.status?.readyReplicas ?? 0;
 
-      if (replicas === 0) return { ...result, status: "stopped" };
+      if (replicas === 0) {
+        this.gatewayHealthy.delete(ns);
+        return { ...result, status: "stopped" };
+      }
 
       // Fetch pods for accurate status derivation
       const podList = await core.listNamespacedPod({
@@ -535,21 +548,30 @@ export class KubernetesDeployer implements Deployer {
       const pods = podList.items.map(derivePodInfo);
       const { status, statusDetail } = deriveInstanceStatus(replicas, readyReplicas, pods);
 
-      if (status === "running") {
-        try {
-          const { url } = await ensureK8sPortForward(ns);
-          // Verify the gateway is actually accepting HTTP connections
-          const ready = await checkGatewayReady(url);
-          if (ready) {
-            return { ...result, status: "running", url, statusDetail, pods };
-          }
-          return { ...result, status: "deploying", statusDetail: "Gateway starting...", url: undefined, pods };
-        } catch {
-          return { ...result, status: "running", statusDetail, pods };
-        }
+      if (status !== "running") {
+        this.gatewayHealthy.delete(ns);
+        return { ...result, status, statusDetail, url: undefined, pods };
       }
 
-      return { ...result, status, statusDetail, url: undefined, pods };
+      try {
+        const { url } = await ensureK8sPortForward(ns);
+
+        // Skip the HTTP probe if gateway was already confirmed healthy
+        // and readyReplicas hasn't dropped (e.g. pod restart).
+        const cached = this.gatewayHealthy.get(ns);
+        if (cached && readyReplicas >= cached.readyReplicas) {
+          return { ...result, status: "running", url, statusDetail, pods };
+        }
+
+        const ready = await checkGatewayReady(url);
+        if (ready) {
+          this.gatewayHealthy.set(ns, { readyReplicas });
+          return { ...result, status: "running", url, statusDetail, pods };
+        }
+        return { ...result, status: "deploying", statusDetail: "Gateway starting...", url: undefined, pods };
+      } catch {
+        return { ...result, status: "running", statusDetail: "Running (port-forward unavailable)", pods };
+      }
     } catch {
       return { ...result, status: "unknown" };
     }
