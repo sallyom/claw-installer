@@ -680,6 +680,16 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
       ? { source: "env", provider: "default", id: "OPENAI_API_KEY" as const }
       : undefined
     : undefined;
+  const inferredModelEndpointApiKeyRef = (
+    config.modelEndpoint.trim() && !config.modelEndpointApiKey.trim()
+      ? undefined
+      : (
+        podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "MODEL_ENDPOINT_API_KEY")
+          || Boolean(config.modelEndpointApiKey.trim())
+      )
+        ? { source: "env", provider: "default", id: "MODEL_ENDPOINT_API_KEY" as const }
+        : undefined
+  );
   const agentNameError = validateAgentName(config.agentName);
   const validationErrors: string[] = [];
   if (!config.agentName.trim()) {
@@ -1289,8 +1299,10 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           mode={mode}
           effectiveAnthropicApiKeyRef={anthropicApiKeyRef || inferredAnthropicApiKeyRef}
           effectiveOpenaiApiKeyRef={openaiApiKeyRef || inferredOpenaiApiKeyRef}
+          effectiveModelEndpointApiKeyRef={inferredModelEndpointApiKeyRef}
           anthropicApiKeyRefIsInferred={!anthropicApiKeyRef && Boolean(inferredAnthropicApiKeyRef)}
           openaiApiKeyRefIsInferred={!openaiApiKeyRef && Boolean(inferredOpenaiApiKeyRef)}
+          modelEndpointApiKeyRefIsInferred={Boolean(inferredModelEndpointApiKeyRef)}
         />
 
         <ExternalSecretProvidersSection

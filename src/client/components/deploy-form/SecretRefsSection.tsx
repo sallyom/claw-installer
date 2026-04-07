@@ -7,8 +7,10 @@ interface SecretRefsSectionProps {
   mode: string;
   effectiveAnthropicApiKeyRef?: SecretRefValue;
   effectiveOpenaiApiKeyRef?: SecretRefValue;
+  effectiveModelEndpointApiKeyRef?: SecretRefValue;
   anthropicApiKeyRefIsInferred?: boolean;
   openaiApiKeyRefIsInferred?: boolean;
+  modelEndpointApiKeyRefIsInferred?: boolean;
 }
 
 function formatSecretRef(ref?: SecretRefValue): string {
@@ -21,8 +23,10 @@ export function SecretRefsSection({
   mode,
   effectiveAnthropicApiKeyRef,
   effectiveOpenaiApiKeyRef,
+  effectiveModelEndpointApiKeyRef,
   anthropicApiKeyRefIsInferred = false,
   openaiApiKeyRefIsInferred = false,
+  modelEndpointApiKeyRefIsInferred = false,
 }: SecretRefsSectionProps) {
   const isLocal = mode === "local";
   const isCluster = mode === "kubernetes" || mode === "openshift";
@@ -42,6 +46,14 @@ export function SecretRefsSection({
         ? "Currently inferred from the installer-managed openclaw-secrets Secret."
         : "Currently inferred from the deploy form."
     : "Optional override. Leave blank to use the installer-managed SecretRef automatically.";
+
+  const modelEndpointHint = modelEndpointApiKeyRefIsInferred
+    ? isLocal
+      ? "Currently inferred from local Podman secret mappings or the local endpoint API key field."
+      : isCluster
+        ? "Currently inferred from the installer-managed openclaw-secrets Secret."
+        : "Currently inferred from the deploy form."
+    : "This endpoint API key SecretRef is inferred automatically when the model endpoint key is configured.";
 
   return (
     <details style={{ marginTop: "1.5rem" }}>
@@ -129,6 +141,16 @@ export function SecretRefsSection({
               onChange={(e) => update("openaiApiKeyRefId", e.target.value)}
             />
             <div className="hint">{openaiHint}</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ marginBottom: "1rem" }}>
+          <div className="hint" style={{ marginBottom: "0.75rem" }}>
+            Effective Model Endpoint API Key SecretRef: <code>{formatSecretRef(effectiveModelEndpointApiKeyRef)}</code>
+            {modelEndpointApiKeyRefIsInferred ? " (inferred)" : ""}
+          </div>
+          <div className="hint">
+            {modelEndpointHint}
           </div>
         </div>
 
