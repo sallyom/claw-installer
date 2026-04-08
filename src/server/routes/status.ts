@@ -189,7 +189,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
   };
 }
 
-// List all instances: running containers + stopped volumes (no container due to --rm) + K8s
+// List all instances: running containers + stopped local volumes + K8s
 router.get("/", async (req, res) => {
   const instances: DeployResult[] = [];
   const includeK8s = req.query.includeK8s === "1";
@@ -312,7 +312,7 @@ router.get("/:id", async (req, res) => {
   res.json(containerToInstance(c));
 });
 
-// Start instance (re-creates container with --rm, volume has the state)
+// Start instance (re-creates the gateway container, volume has the state)
 router.post("/:id/start", async (req, res) => {
   const instance = await findInstance(req.params.id);
   if (!instance) {
@@ -337,7 +337,7 @@ router.post("/:id/start", async (req, res) => {
   }
 });
 
-// Stop instance (--rm auto-removes container, volume stays)
+// Stop instance (volume stays)
 router.post("/:id/stop", async (req, res) => {
   const instance = await findInstance(req.params.id);
   if (!instance) {
@@ -655,7 +655,7 @@ router.get("/:id/command", async (req, res) => {
     const config = info.Config || {};
     const hostConfig = info.HostConfig || {};
 
-    const parts = [runtime, "run", "-d", "--rm"];
+    const parts = [runtime, "run", "-d", "--restart=unless-stopped"];
     parts.push("--name", containerName);
 
     if (hostConfig.NetworkMode === "host") {

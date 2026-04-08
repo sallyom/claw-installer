@@ -1083,6 +1083,7 @@ function buildRunArgs(
   const runArgs = [
     "run",
     "-d",
+    "--restart=unless-stopped",
     // For mutable tags (:latest/untagged), check for newer image at startup (Fix for #28)
     ...(shouldAlwaysPull(image) ? ["--pull=newer"] : []),
     "--name",
@@ -1216,7 +1217,7 @@ export class LocalDeployer implements Deployer {
       await checkPortAvailable(port + 1, runtime);
     }
 
-    // Remove existing container with same name (in case --rm didn't fire)
+    // Remove existing container with same name before a fresh deploy.
     await removeContainer(runtime, name);
 
       const image = resolveImage(config);
@@ -2095,7 +2096,7 @@ Use this table to track verified peer OpenClaw instances.
       throw new Error("Failed to copy agent files to volume");
     }
 
-    // Restart the container: stop (--rm removes it), then start fresh
+    // Restart the container: stop it, then recreate it from the saved config.
     log("Restarting container...");
     try {
       await runCommand(runtime, ["stop", name], log);
@@ -2161,7 +2162,7 @@ Use this table to track verified peer OpenClaw instances.
       }
     }
 
-    log("Containers stopped and removed. Data volume preserved.");
+    log("Container stopped. Data volume preserved.");
   }
 
   async teardown(result: DeployResult, log: LogCallback): Promise<void> {
