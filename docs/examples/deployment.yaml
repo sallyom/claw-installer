@@ -61,7 +61,7 @@ spec:
       containers:
         - name: gateway
           image: ghcr.io/openclaw/openclaw:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           command:
             - node
             - dist/index.js

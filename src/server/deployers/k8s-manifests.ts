@@ -451,7 +451,7 @@ export function deploymentManifest(
             {
               name: "gateway",
               image,
-              imagePullPolicy: "Always",
+              imagePullPolicy: "IfNotPresent",
               command: [
                 "node", "dist/index.js", "gateway", "run",
                 "--bind", "lan", "--port", "18789",

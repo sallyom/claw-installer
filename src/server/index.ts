@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { setupWebSocket } from "./ws.js";
 import deployRoutes from "./routes/deploy.js";
 import statusRoutes from "./routes/status.js";
-import agentsRoutes from "./routes/agents.js";
 import pluginsRoutes from "./routes/plugins.js";
 import { detectRuntime } from "./services/container.js";
 import { isClusterReachable, currentContext, currentNamespace, resetKubeConfig } from "./services/k8s.js";
@@ -20,6 +19,12 @@ import { registry } from "./deployers/registry.js";
 import { LocalDeployer } from "./deployers/local.js";
 import { KubernetesDeployer } from "./deployers/kubernetes.js";
 import { loadPlugins, getDisabledModes } from "./plugins/loader.js";
+import {
+  installerBindHost,
+  installerDisplayHost,
+  sanitizeSavedConfigVars,
+  validateUserSuppliedPath,
+} from "./security.js";
 
 // Register built-in deployers
 registry.register({
@@ -51,13 +56,13 @@ console.log(`Plugins loaded. Registered deployers: ${registry.list().map(r => r.
 const app = express();
 const server = createServer(app);
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const BIND_HOST = installerBindHost();
 
 app.use(express.json());
 
 // API routes
 app.use("/api/deploy", deployRoutes);
 app.use("/api/instances", statusRoutes);
-app.use("/api/agents", agentsRoutes);
 app.use("/api/plugins", pluginsRoutes);
 
 // Health check + environment defaults for the frontend
@@ -119,7 +124,7 @@ app.get("/api/configs/gcp-defaults", async (_req, res) => {
 // and ~/.openclaw/installer/k8s/*/deploy-config.json
 app.get("/api/configs", async (_req, res) => {
   const baseDir = installerDataDir();
-  const configs: Array<{ name: string; type: string; vars: Record<string, string> }> = [];
+  const configs: Array<{ name: string; type: string; vars: Record<string, unknown> }> = [];
 
   // Local instances (.env files)
   try {
@@ -137,7 +142,7 @@ app.get("/api/configs", async (_req, res) => {
           if (eqIdx < 0) continue;
           vars[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
         }
-        configs.push({ name: entry.name, type: "local", vars });
+        configs.push({ name: entry.name, type: "local", vars: sanitizeSavedConfigVars(vars) });
       } catch {
         // No .env in this directory, skip
       }
@@ -154,8 +159,8 @@ app.get("/api/configs", async (_req, res) => {
       if (!entry.isDirectory()) continue;
       try {
         const configContent = await readFile(join(k8sDir, entry.name, "deploy-config.json"), "utf8");
-        const vars = JSON.parse(configContent);
-        configs.push({ name: entry.name, type: "k8s", vars });
+        const vars = JSON.parse(configContent) as Record<string, unknown>;
+        configs.push({ name: entry.name, type: "k8s", vars: sanitizeSavedConfigVars(vars) });
       } catch {
         // No deploy-config.json in this directory, skip
       }
@@ -168,9 +173,17 @@ app.get("/api/configs", async (_req, res) => {
 });
 
 app.post("/api/configs/source-env", async (req, res) => {
-  const agentSourceDir = String(req.body?.agentSourceDir || "").trim();
-  if (!agentSourceDir) {
+  const rawAgentSourceDir = String(req.body?.agentSourceDir || "").trim();
+  if (!rawAgentSourceDir) {
     res.status(400).json({ error: "agentSourceDir is required" });
+    return;
+  }
+
+  let agentSourceDir: string;
+  try {
+    agentSourceDir = validateUserSuppliedPath(rawAgentSourceDir, "agentSourceDir");
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     return;
   }
 
@@ -303,6 +316,6 @@ process.once("SIGTERM", () => {
   process.exit(0);
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`OpenClaw Installer running at http://0.0.0.0:${PORT}`);
+server.listen(PORT, BIND_HOST, () => {
+  console.log(`OpenClaw Installer running at http://${installerDisplayHost(BIND_HOST)}:${PORT}`);
 });

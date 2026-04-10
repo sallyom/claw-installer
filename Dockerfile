@@ -34,6 +34,7 @@ COPY --chmod=755 run.sh ./
 ENV NODE_ENV=production
 ENV HOME=/home/node
 ENV CONTAINER_HOST=unix:///run/podman/podman.sock
+ENV OPENCLAW_INSTALLER_BIND_HOST=0.0.0.0
 
 USER node
 

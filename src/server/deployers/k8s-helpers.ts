@@ -669,12 +669,15 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   controlUi.allowedOrigins = ["http://localhost:18789"];
   const useOtel = shouldUseOtel(config);
   const ocConfig: Record<string, unknown> = {
+    plugins: {
+      ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
+      entries: {
+        acpx: { enabled: false },
+        ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
+      },
+    },
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces
     ...(useOtel ? {
-      plugins: {
-        allow: pluginAllowlist,
-        entries: { "diagnostics-otel": { enabled: true } },
-      },
       diagnostics: {
         enabled: true,
         otel: {

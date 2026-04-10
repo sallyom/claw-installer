@@ -11,6 +11,7 @@ import { namespaceName } from "../deployers/k8s-helpers.js";
 import { registry } from "../deployers/registry.js";
 import { k8sApiHttpCode } from "../services/k8s.js";
 import { createLogCallback, sendStatus } from "../ws.js";
+import { validateUserSuppliedPath } from "../security.js";
 
 const router = Router();
 
@@ -218,17 +219,33 @@ router.post("/", async (req, res) => {
   }
 
   const resolveTextFile = (filePath: string, label: string): string | null => {
-    if (!existsSync(filePath)) {
-      res.status(400).json({ error: `${label} file not found: ${filePath}` });
+    let validatedPath: string;
+    try {
+      validatedPath = validateUserSuppliedPath(filePath, label);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
       return null;
     }
-    return readFileSync(filePath, "utf-8");
+    if (!existsSync(validatedPath)) {
+      res.status(400).json({ error: `${label} file not found: ${validatedPath}` });
+      return null;
+    }
+    return readFileSync(validatedPath, "utf-8");
   };
 
   const agentNameError = validateAgentName(config.agentName);
   if (agentNameError) {
     res.status(400).json({ error: `Invalid agent name: ${agentNameError}` });
     return;
+  }
+
+  if (config.agentSourceDir) {
+    try {
+      config.agentSourceDir = validateUserSuppliedPath(config.agentSourceDir, "agentSourceDir");
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
   }
 
   // Default prefix to OS username
@@ -257,11 +274,18 @@ router.post("/", async (req, res) => {
 
   // Resolve SA JSON from path if provided (and no inline JSON)
   if (!config.gcpServiceAccountJson && config.gcpServiceAccountPath) {
-    const saPath = config.gcpServiceAccountPath;
+    let saPath: string;
+    try {
+      saPath = validateUserSuppliedPath(config.gcpServiceAccountPath, "GCP SA JSON file");
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
     if (!existsSync(saPath)) {
       res.status(400).json({ error: `GCP SA JSON file not found: ${saPath}` });
       return;
     }
+    config.gcpServiceAccountPath = saPath;
     config.gcpServiceAccountJson = readFileSync(saPath, "utf-8");
   }
 

@@ -16,6 +16,7 @@ import { parseContainerRunArgs } from "../deployers/local.js";
 import { createLogCallback, sendStatus } from "../ws.js";
 import type { DeployResult, DeploySecretRef } from "../deployers/types.js";
 import type { PodmanSecretMapping } from "../../shared/podman-secrets.js";
+import { sanitizeDeployResult } from "../security.js";
 
 const router = Router();
 
@@ -281,7 +282,7 @@ router.get("/", async (req, res) => {
       }
     }
 
-    res.json(instances);
+    res.json(instances.map(sanitizeDeployResult));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
@@ -302,14 +303,14 @@ router.get("/:id", async (req, res) => {
     // Check if there's a volume for it (stopped instance)
     const instance = await findInstance(req.params.id);
     if (instance) {
-      res.json(instance);
+      res.json(sanitizeDeployResult(instance));
       return;
     }
     res.status(404).json({ error: "Instance not found" });
     return;
   }
 
-  res.json(containerToInstance(c));
+  res.json(sanitizeDeployResult(containerToInstance(c)));
 });
 
 // Start instance (re-creates the gateway container, volume has the state)

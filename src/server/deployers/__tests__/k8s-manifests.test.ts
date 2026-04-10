@@ -23,6 +23,13 @@ function gatewayEnvNames(deployment: k8s.V1Deployment): string[] {
 describe("k8s state sync manifests", () => {
   const config: DeployConfig = makeConfig();
 
+  it("uses IfNotPresent for the gateway container image pull policy", () => {
+    const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
+    const gatewayContainer = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+
+    expect(gatewayContainer?.imagePullPolicy).toBe("IfNotPresent");
+  });
+
   it("renders skill and cron ConfigMaps from host state entries", () => {
     const skillsCm = fileTreeConfigMapManifest("openclaw-alpha-openclaw", "openclaw-skills", [
       { key: "f0", path: "briefing-bot/SKILL.md", content: "# Briefing Bot" },
