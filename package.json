@@ -30,7 +30,7 @@
     }
   },
   "scripts": {
-    "dev": "concurrently \"tsx watch src/server/index.ts\" \"vite\"",
+    "dev": "concurrently --kill-others-on-fail --names server,client \"tsx watch src/server/index.ts\" \"vite --strictPort\"",
     "build": "vite build && tsc -p tsconfig.server.json && tsc -p tsconfig.provider-plugins.json && node scripts/prepare-dist-runtime.mjs",
     "lint": "eslint .",
     "start": "node dist/server/index.js",
