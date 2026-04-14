@@ -11,6 +11,7 @@ import {
 import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
 import { shouldUseOtel, OTEL_COLLECTOR_IMAGE, OTEL_GRPC_PORT, OTEL_HTTP_PORT, otelAgentEnv } from "./otel.js";
+import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumAgentEnv } from "./chromium.js";
 import type { TreeEntry } from "../state-tree.js";
 import { loadAgentSourceBundle, mainWorkspaceShellCondition } from "./agent-source.js";
 import {
@@ -324,6 +325,7 @@ export function deploymentManifest(
   const withA2a = Boolean(config.withA2a);
   // Direct sidecar only when OTEL is enabled and operator is NOT handling it
   const useOtelDirect = useOtel && !otelViaOperator;
+  const useChromium = shouldUseChromiumSidecar(config);
 
   const optionalKeys = [
     // Gateway always gets provider API keys so it can route to OpenAI/Anthropic
@@ -351,6 +353,13 @@ export function deploymentManifest(
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtel) {
     for (const [key, val] of Object.entries(otelAgentEnv())) {
+      envVars.push({ name: key, value: val });
+    }
+  }
+
+  // Chromium CDP env var (tell the agent where to connect to the browser)
+  if (useChromium) {
+    for (const [key, val] of Object.entries(chromiumAgentEnv())) {
       envVars.push({ name: key, value: val });
     }
   }
@@ -561,6 +570,34 @@ export function deploymentManifest(
                 capabilities: { drop: ["ALL"] },
               },
             }] : []),
+            // Chromium browser sidecar: headless browser for web browsing via CDP
+            ...(useChromium ? [{
+              name: "chromium",
+              image: config.chromiumImage || CHROMIUM_IMAGE,
+              imagePullPolicy: "IfNotPresent" as const,
+              ports: [
+                { name: "cdp", containerPort: CHROMIUM_CDP_PORT, protocol: "TCP" as const },
+              ],
+              volumeMounts: [
+                { name: "chromium-shm", mountPath: "/dev/shm" },
+                { name: "chromium-tmp", mountPath: "/tmp" },
+              ],
+              resources: {
+                requests: { memory: "512Mi", cpu: "100m" },
+                limits: { memory: "1Gi", cpu: "500m" },
+              },
+              securityContext: {
+                allowPrivilegeEscalation: false,
+                runAsNonRoot: true,
+                capabilities: { drop: ["ALL"] },
+              },
+              readinessProbe: {
+                httpGet: { path: "/json/version", port: CHROMIUM_CDP_PORT as unknown as k8s.IntOrString },
+                initialDelaySeconds: 5,
+                periodSeconds: 10,
+                timeoutSeconds: 5,
+              },
+            }] : []),
             ...(withA2a ? [{
               name: "agent-card",
               image: "registry.redhat.io/ubi9:latest",
@@ -639,6 +676,12 @@ export function deploymentManifest(
               : []),
             ...(useOtelDirect
               ? [{ name: "otel-config", configMap: { name: "otel-collector-config" } }]
+              : []),
+            ...(useChromium
+              ? [
+                  { name: "chromium-shm", emptyDir: { medium: "Memory", sizeLimit: "256Mi" } },
+                  { name: "chromium-tmp", emptyDir: {} },
+                ]
               : []),
             ...(withA2a
               ? [

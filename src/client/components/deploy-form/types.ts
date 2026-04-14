@@ -166,5 +166,7 @@ export interface DeployFormConfig {
   otelJaeger: boolean;
   otelEndpoint: string;
   otelExperimentId: string;
+  chromiumSidecar: boolean;
+  chromiumImage: string;
   podmanSecretMappings?: PodmanSecretMapping[];
 }

@@ -35,6 +35,7 @@ import {
 import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
 import { startOtelSidecar, stopOtelSidecar, startJaegerSidecar, otelContainerName, jaegerContainerName } from "./local-otel.js";
 import { JAEGER_UI_PORT } from "./otel.js";
+import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumContainerName, chromiumAgentEnv } from "./chromium.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import {
   buildConfiguredAgentModelCatalog,
@@ -304,6 +305,12 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     }
     if (config.otelImage) {
       lines.push(`OTEL_IMAGE=${config.otelImage}`);
+    }
+  }
+  if (config.chromiumSidecar) {
+    lines.push(`CHROMIUM_SIDECAR=true`);
+    if (config.chromiumImage) {
+      lines.push(`CHROMIUM_IMAGE=${config.chromiumImage}`);
     }
   }
   if (config.telegramBotToken && (!config.telegramBotTokenRef || usesDefaultEnvSecretRef(config.telegramBotTokenRef))) {
@@ -1080,7 +1087,8 @@ function buildRunArgs(
   const image = resolveImage(effectiveConfig);
   const useProxy = shouldUseLitellmProxy(effectiveConfig) && !!litellmMasterKey;
   const useOtelSidecar = shouldUseOtel(effectiveConfig) && !!otelEnvVars;
-  const hasSidecars = useProxy || useOtelSidecar;
+  const useChromium = shouldUseChromiumSidecar(effectiveConfig);
+  const hasSidecars = useProxy || useOtelSidecar || useChromium;
   const isPodman = runtime === "podman";
 
   const runArgs = [
@@ -1100,7 +1108,9 @@ function buildRunArgs(
     // Docker: share the first sidecar's network namespace
     const networkContainer = useProxy
       ? litellmContainerName(effectiveConfig)
-      : otelContainerName(effectiveConfig);
+      : useOtelSidecar
+        ? otelContainerName(effectiveConfig)
+        : chromiumContainerName(effectiveConfig);
     runArgs.push("--network", `container:${networkContainer}`);
   } else {
     runArgs.push("-p", `${port}:18789`);
@@ -1181,6 +1191,11 @@ function buildRunArgs(
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtelSidecar && otelEnvVars) {
     Object.assign(env, otelEnvVars);
+  }
+
+  // Chromium CDP env var (tell the agent where to connect to the browser)
+  if (useChromium) {
+    Object.assign(env, chromiumAgentEnv());
   }
 
   for (const [key, val] of Object.entries(env)) {
@@ -1627,6 +1642,80 @@ Use this table to track verified peer OpenClaw instances.
       (rt, nm) => removeContainer(rt as ContainerRuntime, nm),
     );
 
+    // Create pod for Chromium sidecar if it's the only sidecar
+    const useChromium = shouldUseChromiumSidecar(config);
+    if (useChromium && !useProxy && !useOtelSidecars && runtime === "podman") {
+      const pod = podName(config);
+      await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+      const podPorts = ["-p", `${port}:18789`];
+      await runCommand(runtime, [
+        "pod", "create", "--name", pod, ...podPorts,
+      ], log);
+    }
+
+    // Start Chromium browser sidecar if enabled
+    if (useChromium) {
+      const chromiumImage = config.chromiumImage || CHROMIUM_IMAGE;
+      const chromiumName = chromiumContainerName(config);
+      const isPodman = runtime === "podman";
+
+      try {
+        await execFileAsync(runtime, ["image", "exists", chromiumImage]);
+        log(`Using local Chromium image: ${chromiumImage}`);
+      } catch {
+        log(`Pulling Chromium image ${chromiumImage}...`);
+        const pull = await runCommand(runtime, ["pull", chromiumImage], log);
+        if (pull.code !== 0) {
+          throw new Error("Failed to pull Chromium image");
+        }
+      }
+
+      await removeContainer(runtime, chromiumName);
+
+      const chromiumRunArgs = [
+        "run", "-d",
+        "--name", chromiumName,
+        "--shm-size=256m",
+        "--init",
+      ];
+
+      if (isPodman) {
+        chromiumRunArgs.push("--pod", podName(config));
+      } else if (useProxy) {
+        chromiumRunArgs.push("--network", `container:${litellmContainerName(config)}`);
+      } else if (useOtelSidecars) {
+        chromiumRunArgs.push("--network", `container:${otelContainerName(config)}`);
+      } else {
+        // Chromium is the only sidecar — publish gateway port
+        chromiumRunArgs.push("-p", `${port}:18789`);
+      }
+
+      chromiumRunArgs.push(chromiumImage);
+
+      const chromiumResult = await runCommand(runtime, chromiumRunArgs, log);
+      if (chromiumResult.code !== 0) {
+        throw new Error("Failed to start Chromium sidecar");
+      }
+
+      log("Waiting for Chromium browser to be ready...");
+      for (let i = 0; i < 15; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const { stdout } = await execFileAsync(runtime, [
+            "exec", chromiumName, "wget", "-q", "-O-", `http://localhost:${CHROMIUM_CDP_PORT}/json/version`,
+          ]);
+          if (stdout.includes("webSocketDebuggerUrl") || stdout.includes("WebSocket")) {
+            log("Chromium browser is ready");
+            break;
+          }
+        } catch {
+          if (i === 14) {
+            log("WARNING: Chromium readiness check timed out — proceeding anyway");
+          }
+        }
+      }
+    }
+
     const runArgs = buildRunArgs(activeConfig, runtime, name, port, litellmMasterKey, otelEnv);
 
     log(`Starting OpenClaw container: ${name}`);
@@ -1637,7 +1726,7 @@ Use this table to track verified peer OpenClaw instances.
 
     log("");
     log("=== Container Info ===");
-    const hasSidecars = useProxy || !!otelEnv;
+    const hasSidecars = useProxy || !!otelEnv || useChromium;
     if (hasSidecars) {
       const isPodman = runtime === "podman";
       if (isPodman) {
@@ -1647,6 +1736,7 @@ Use this table to track verified peer OpenClaw instances.
       if (useProxy) log(`LiteLLM container: ${litellmContainerName(config)}`);
       if (otelEnv) log(`OTEL container:    ${otelContainerName(config)}`);
       if (config.otelJaeger) log(`Jaeger container:  ${jaegerContainerName(config)}`);
+      if (useChromium) log(`Chromium container: ${chromiumContainerName(config)}`);
       log("");
       if (config.otelJaeger) log(`Jaeger UI: http://localhost:${JAEGER_UI_PORT}`);
       log("");
@@ -1658,6 +1748,7 @@ Use this table to track verified peer OpenClaw instances.
       if (useProxy) log(`  ${runtime} logs ${litellmContainerName(config)}  # LiteLLM proxy logs`);
       if (otelEnv) log(`  ${runtime} logs ${otelContainerName(config)}  # OTEL collector logs`);
       if (config.otelJaeger) log(`  ${runtime} logs ${jaegerContainerName(config)}  # Jaeger logs`);
+      if (useChromium) log(`  ${runtime} logs ${chromiumContainerName(config)}  # Chromium browser logs`);
     } else {
       log(`Container: ${name}`);
       log("");
@@ -1916,6 +2007,17 @@ Use this table to track verified peer OpenClaw instances.
       ], log);
     }
 
+    // Create pod for Chromium sidecar if it's the only sidecar
+    const useChromiumSidecar = shouldUseChromiumSidecar(effectiveConfig);
+    if (useChromiumSidecar && !useProxy && !useOtelSidecars && runtime === "podman") {
+      const pod = podName(effectiveConfig);
+      await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
+      const podPorts = ["-p", `${port}:18789`];
+      await runCommand(runtime, [
+        "pod", "create", "--name", pod, ...podPorts,
+      ], log);
+    }
+
     // Restart Jaeger sidecar if enabled
     if (effectiveConfig.otelJaeger) {
       await startJaegerSidecar(
@@ -1932,6 +2034,36 @@ Use this table to track verified peer OpenClaw instances.
       port, image, log, runCommand,
       (rt, nm) => removeContainer(rt as ContainerRuntime, nm),
     );
+
+    // Restart Chromium sidecar if enabled
+    if (useChromiumSidecar) {
+      const chromiumImage = effectiveConfig.chromiumImage || CHROMIUM_IMAGE;
+      const chromiumName = chromiumContainerName(effectiveConfig);
+      const isPodman = runtime === "podman";
+
+      await removeContainer(runtime, chromiumName);
+
+      const chromiumRunArgs = [
+        "run", "-d",
+        "--name", chromiumName,
+        "--shm-size=256m",
+        "--init",
+      ];
+
+      if (isPodman) {
+        chromiumRunArgs.push("--pod", podName(effectiveConfig));
+      } else if (useProxy) {
+        chromiumRunArgs.push("--network", `container:${litellmContainerName(effectiveConfig)}`);
+      } else if (useOtelSidecars) {
+        chromiumRunArgs.push("--network", `container:${otelContainerName(effectiveConfig)}`);
+      } else {
+        chromiumRunArgs.push("-p", `${port}:18789`);
+      }
+
+      chromiumRunArgs.push(chromiumImage);
+
+      await runCommand(runtime, chromiumRunArgs, log);
+    }
 
     log(`Starting OpenClaw container: ${name}`);
     const runArgs = buildRunArgs(effectiveConfig, runtime, name, port, litellmMasterKey, otelEnv);
@@ -2154,6 +2286,16 @@ Use this table to track verified peer OpenClaw instances.
     // Stop OTEL sidecar if it exists
     await stopOtelSidecar(result.config, runtime, log, runCommand);
 
+    // Stop Chromium sidecar if it exists
+    const chromiumName = chromiumContainerName(result.config);
+    try {
+      await execFileAsync(runtime, ["inspect", chromiumName]);
+      log(`Stopping Chromium sidecar: ${chromiumName}`);
+      await runCommand(runtime, ["stop", chromiumName], log);
+    } catch {
+      // No sidecar running
+    }
+
     // Remove podman pod if it exists
     if (isPodman) {
       const pod = podName(result.config);
@@ -2181,6 +2323,7 @@ Use this table to track verified peer OpenClaw instances.
     await removeContainer(runtime, litellmName);
     await removeContainer(runtime, otelContainerName(result.config));
     await removeContainer(runtime, jaegerContainerName(result.config));
+    await removeContainer(runtime, chromiumContainerName(result.config));
 
     // Remove podman pod if it exists
     if (isPodman) {

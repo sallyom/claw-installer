@@ -110,6 +110,8 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     otelJaeger: false,
     otelEndpoint: "",
     otelExperimentId: "",
+    chromiumSidecar: false,
+    chromiumImage: "",
   };
 }
 
@@ -407,6 +409,9 @@ export function applySavedVarsToConfig(
       otelEndpoint: getStringVar(vars, "OTEL_ENDPOINT", "otelEndpoint") || prev.otelEndpoint,
       otelExperimentId:
         getStringVar(vars, "OTEL_EXPERIMENT_ID", "otelExperimentId") || prev.otelExperimentId,
+      chromiumSidecar:
+        vars.CHROMIUM_SIDECAR === "true" || vars.chromiumSidecar === "true" || prev.chromiumSidecar,
+      chromiumImage: getStringVar(vars, "CHROMIUM_IMAGE", "chromiumImage") || prev.chromiumImage,
       otelImage: prev.otelImage,
       cronEnabled: vars.cronEnabled === "true" ? true : prev.cronEnabled,
       subagentPolicy:
@@ -537,6 +542,8 @@ export function buildDeployRequestBody(params: {
     otelJaeger: config.otelEnabled ? config.otelJaeger || undefined : undefined,
     otelEndpoint: config.otelEnabled ? trimToUndefined(config.otelEndpoint) : undefined,
     otelExperimentId: config.otelEnabled ? trimToUndefined(config.otelExperimentId) : undefined,
+    chromiumSidecar: config.chromiumSidecar || undefined,
+    chromiumImage: config.chromiumSidecar ? trimToUndefined(config.chromiumImage) : undefined,
     cronEnabled: config.cronEnabled || undefined,
     subagentPolicy: config.subagentPolicy !== "none" ? config.subagentPolicy : undefined,
   };
@@ -638,6 +645,8 @@ export function buildEnvFileContent(params: {
     `OTEL_JAEGER=${config.otelJaeger}`,
     `OTEL_ENDPOINT=${config.otelEndpoint}`,
     `OTEL_EXPERIMENT_ID=${config.otelExperimentId}`,
+    `CHROMIUM_SIDECAR=${config.chromiumSidecar}`,
+    `CHROMIUM_IMAGE=${config.chromiumImage}`,
     "",
     `K8S_NAMESPACE=${config.namespace || suggestedNamespace}`,
     `WITH_A2A=${config.withA2a}`,

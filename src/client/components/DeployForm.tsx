@@ -1343,6 +1343,41 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           </>
         )}
 
+        <h3 style={{ marginTop: "1.5rem" }}>Browser</h3>
+
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="checkbox"
+              checked={config.chromiumSidecar}
+              onChange={(e) =>
+                setConfig((prev) => ({ ...prev, chromiumSidecar: e.target.checked }))
+              }
+              style={{ width: "auto" }}
+            />
+            Enable browser sidecar (headless Chromium)
+          </label>
+          <div className="hint">
+            Runs a headless Chromium container alongside the agent so it can browse the web,
+            fill forms, and take screenshots.
+          </div>
+        </div>
+
+        {config.chromiumSidecar && (
+          <div className="form-group">
+            <label>Chromium Image (optional)</label>
+            <input
+              type="text"
+              placeholder="chromedp/headless-shell:stable"
+              value={config.chromiumImage}
+              onChange={(e) => update("chromiumImage", e.target.value)}
+            />
+            <div className="hint">
+              Leave blank for the default. Use ghcr.io/browserless/chromium for advanced features like session queueing and token auth.
+            </div>
+          </div>
+        )}
+
         <SandboxSection
           config={config}
           update={update}

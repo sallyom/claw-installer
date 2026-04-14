@@ -104,6 +104,9 @@ export interface DeployConfig {
   otelExperimentId?: string;   // MLflow experiment ID (optional, for MLflow endpoints)
   otelImage?: string;
   otelJaeger?: boolean;        // Run Jaeger all-in-one as a sidecar (UI on port 16686)
+  // Chromium browser sidecar (headless browser for web browsing)
+  chromiumSidecar?: boolean;
+  chromiumImage?: string;
   // Agent security
   cronEnabled?: boolean; // default: false (opt-in)
   subagentPolicy?: "none" | "self" | "unrestricted"; // default: "none"
