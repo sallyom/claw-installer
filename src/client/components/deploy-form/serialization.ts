@@ -420,12 +420,21 @@ export function applySavedVarsToConfig(
   };
 }
 
+function isProviderSelected(
+  provider: InferenceProvider,
+  selectedProviders: InferenceProvider[] | undefined,
+): boolean {
+  if (!selectedProviders) return true;
+  return selectedProviders.includes(provider);
+}
+
 export function buildDeployRequestBody(params: {
   mode: string;
   inferenceProvider: InferenceProvider;
   config: DeployFormConfig;
   isVertex: boolean;
   suggestedNamespace: string;
+  selectedProviders?: InferenceProvider[];
   anthropicApiKeyRef?: SecretRefValue;
   openaiApiKeyRef?: SecretRefValue;
   googleApiKeyRef?: SecretRefValue;
@@ -439,6 +448,7 @@ export function buildDeployRequestBody(params: {
     config,
     isVertex,
     suggestedNamespace,
+    selectedProviders,
     anthropicApiKeyRef,
     openaiApiKeyRef,
     googleApiKeyRef,
@@ -448,6 +458,8 @@ export function buildDeployRequestBody(params: {
   } = params;
   const vertexProvider = inferenceProvider === "vertex-google" ? "google" : "anthropic";
   const podmanSecretMappings = parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings;
+  const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
+  const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
 
   return {
     mode,
@@ -459,11 +471,11 @@ export function buildDeployRequestBody(params: {
     containerRunArgs: mode === "local" ? trimToUndefined(config.containerRunArgs) : undefined,
     podmanSecretMappings: mode === "local" && podmanSecretMappings.length > 0 ? podmanSecretMappings : undefined,
     secretsProvidersJson: trimToUndefined(config.secretsProvidersJson),
-    anthropicApiKeyRef,
-    openaiApiKeyRef,
-    googleApiKeyRef,
-    openrouterApiKeyRef,
-    modelEndpointApiKeyRef,
+    anthropicApiKeyRef: sel("anthropic") ? anthropicApiKeyRef : undefined,
+    openaiApiKeyRef: sel("openai") ? openaiApiKeyRef : undefined,
+    googleApiKeyRef: sel("google") ? googleApiKeyRef : undefined,
+    openrouterApiKeyRef: sel("openrouter") ? openrouterApiKeyRef : undefined,
+    modelEndpointApiKeyRef: sel("custom-endpoint") ? modelEndpointApiKeyRef : undefined,
     telegramBotTokenRef: config.telegramEnabled ? telegramBotTokenRef : undefined,
     sandboxEnabled: config.sandboxEnabled || undefined,
     sandboxBackend: config.sandboxEnabled ? "ssh" : undefined,
@@ -496,37 +508,37 @@ export function buildDeployRequestBody(params: {
       config.sandboxEnabled ? config.sandboxSshCertificate || undefined : undefined,
     sandboxSshKnownHosts:
       config.sandboxEnabled ? config.sandboxSshKnownHosts || undefined : undefined,
-    anthropicApiKey: !anthropicApiKeyRef ? trimToUndefined(config.anthropicApiKey) : undefined,
-    openaiApiKey: !openaiApiKeyRef ? trimToUndefined(config.openaiApiKey) : undefined,
-    googleApiKey: !googleApiKeyRef ? trimToUndefined(config.googleApiKey) : undefined,
-    openrouterApiKey: !openrouterApiKeyRef ? trimToUndefined(config.openrouterApiKey) : undefined,
-    anthropicModel: trimToUndefined(config.anthropicModel),
-    anthropicModels: config.anthropicModels.length > 0 ? config.anthropicModels : undefined,
-    openaiModel: trimToUndefined(config.openaiModel),
-    openaiModels: config.openaiModels.length > 0 ? config.openaiModels : undefined,
-    googleModel: trimToUndefined(config.googleModel),
-    googleModels: config.googleModels.length > 0 ? config.googleModels : undefined,
-    openrouterModel: trimToUndefined(config.openrouterModel),
-    openrouterModels: config.openrouterModels.length > 0 ? config.openrouterModels : undefined,
+    anthropicApiKey: sel("anthropic") && !anthropicApiKeyRef ? trimToUndefined(config.anthropicApiKey) : undefined,
+    openaiApiKey: sel("openai") && !openaiApiKeyRef ? trimToUndefined(config.openaiApiKey) : undefined,
+    googleApiKey: sel("google") && !googleApiKeyRef ? trimToUndefined(config.googleApiKey) : undefined,
+    openrouterApiKey: sel("openrouter") && !openrouterApiKeyRef ? trimToUndefined(config.openrouterApiKey) : undefined,
+    anthropicModel: sel("anthropic") ? trimToUndefined(config.anthropicModel) : undefined,
+    anthropicModels: sel("anthropic") && config.anthropicModels.length > 0 ? config.anthropicModels : undefined,
+    openaiModel: sel("openai") ? trimToUndefined(config.openaiModel) : undefined,
+    openaiModels: sel("openai") && config.openaiModels.length > 0 ? config.openaiModels : undefined,
+    googleModel: sel("google") ? trimToUndefined(config.googleModel) : undefined,
+    googleModels: sel("google") && config.googleModels.length > 0 ? config.googleModels : undefined,
+    openrouterModel: sel("openrouter") ? trimToUndefined(config.openrouterModel) : undefined,
+    openrouterModels: sel("openrouter") && config.openrouterModels.length > 0 ? config.openrouterModels : undefined,
     agentModel: config.agentModel || undefined,
-    vertexAnthropicModel: trimToUndefined(config.vertexAnthropicModel),
-    vertexAnthropicModels: config.vertexAnthropicModels.length > 0 ? config.vertexAnthropicModels : undefined,
-    vertexGoogleModel: trimToUndefined(config.vertexGoogleModel),
-    vertexGoogleModels: config.vertexGoogleModels.length > 0 ? config.vertexGoogleModels : undefined,
+    vertexAnthropicModel: sel("vertex-anthropic") ? trimToUndefined(config.vertexAnthropicModel) : undefined,
+    vertexAnthropicModels: sel("vertex-anthropic") && config.vertexAnthropicModels.length > 0 ? config.vertexAnthropicModels : undefined,
+    vertexGoogleModel: sel("vertex-google") ? trimToUndefined(config.vertexGoogleModel) : undefined,
+    vertexGoogleModels: sel("vertex-google") && config.vertexGoogleModels.length > 0 ? config.vertexGoogleModels : undefined,
     openaiCompatibleEndpointsEnabled: config.openaiCompatibleEndpointsEnabled,
-    modelEndpoint: trimToUndefined(config.modelEndpoint),
-    modelEndpointApiKey: !modelEndpointApiKeyRef ? trimToUndefined(config.modelEndpointApiKey) : undefined,
-    modelEndpointModel: trimToUndefined(config.modelEndpointModel),
-    modelEndpointModelLabel: trimToUndefined(config.modelEndpointModelLabel),
-    modelEndpointModels: config.modelEndpointModels.length > 0 ? config.modelEndpointModels : undefined,
+    modelEndpoint: sel("custom-endpoint") ? trimToUndefined(config.modelEndpoint) : undefined,
+    modelEndpointApiKey: sel("custom-endpoint") && !modelEndpointApiKeyRef ? trimToUndefined(config.modelEndpointApiKey) : undefined,
+    modelEndpointModel: sel("custom-endpoint") ? trimToUndefined(config.modelEndpointModel) : undefined,
+    modelEndpointModelLabel: sel("custom-endpoint") ? trimToUndefined(config.modelEndpointModelLabel) : undefined,
+    modelEndpointModels: sel("custom-endpoint") && config.modelEndpointModels.length > 0 ? config.modelEndpointModels : undefined,
     port: parseInt(config.port, 10) || 18789,
-    vertexEnabled: isVertex || undefined,
-    vertexProvider: isVertex ? vertexProvider : undefined,
-    googleCloudProject: isVertex ? trimToUndefined(config.googleCloudProject) : undefined,
-    googleCloudLocation: isVertex ? trimToUndefined(config.googleCloudLocation) : undefined,
-    gcpServiceAccountJson: isVertex ? trimToUndefined(config.gcpServiceAccountJson) : undefined,
-    gcpServiceAccountPath: isVertex ? trimToUndefined(config.gcpServiceAccountPath) : undefined,
-    litellmProxy: isVertex ? config.litellmProxy : undefined,
+    vertexEnabled: anyVertexSelected || undefined,
+    vertexProvider: anyVertexSelected ? vertexProvider : undefined,
+    googleCloudProject: anyVertexSelected ? trimToUndefined(config.googleCloudProject) : undefined,
+    googleCloudLocation: anyVertexSelected ? trimToUndefined(config.googleCloudLocation) : undefined,
+    gcpServiceAccountJson: anyVertexSelected ? trimToUndefined(config.gcpServiceAccountJson) : undefined,
+    gcpServiceAccountPath: anyVertexSelected ? trimToUndefined(config.gcpServiceAccountPath) : undefined,
+    litellmProxy: anyVertexSelected ? config.litellmProxy : undefined,
     namespace: trimToUndefined(config.namespace) || suggestedNamespace || undefined,
     withA2a: config.withA2a || undefined,
     a2aRealm: config.withA2a ? trimToUndefined(config.a2aRealm) : undefined,
@@ -554,6 +566,7 @@ export function buildEnvFileContent(params: {
   inferenceProvider: InferenceProvider;
   isVertex: boolean;
   suggestedNamespace: string;
+  selectedProviders?: InferenceProvider[];
   anthropicApiKeyRef?: SecretRefValue;
   openaiApiKeyRef?: SecretRefValue;
   googleApiKeyRef?: SecretRefValue;
@@ -566,6 +579,7 @@ export function buildEnvFileContent(params: {
     inferenceProvider,
     isVertex,
     suggestedNamespace,
+    selectedProviders,
     anthropicApiKeyRef,
     openaiApiKeyRef,
     googleApiKeyRef,
@@ -573,6 +587,8 @@ export function buildEnvFileContent(params: {
     modelEndpointApiKeyRef,
     telegramBotTokenRef,
   } = params;
+  const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
+  const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
 
   const lines = [
     "# OpenClaw installer config",
@@ -586,31 +602,31 @@ export function buildEnvFileContent(params: {
     `AGENT_SOURCE_DIR=${config.agentSourceDir}`,
     "",
     `INFERENCE_PROVIDER=${inferenceProvider}`,
-    `ANTHROPIC_API_KEY=${anthropicApiKeyRef ? "" : config.anthropicApiKey}`,
-    `OPENAI_API_KEY=${openaiApiKeyRef ? "" : config.openaiApiKey}`,
-    `GEMINI_API_KEY=${googleApiKeyRef ? "" : config.googleApiKey}`,
-    `OPENROUTER_API_KEY=${openrouterApiKeyRef ? "" : config.openrouterApiKey}`,
-    `ANTHROPIC_MODEL=${config.anthropicModel}`,
-    `ANTHROPIC_MODELS_B64=${encodeBase64(JSON.stringify(config.anthropicModels))}`,
-    `OPENAI_MODEL=${config.openaiModel}`,
-    `OPENAI_MODELS_B64=${encodeBase64(JSON.stringify(config.openaiModels))}`,
-    `GOOGLE_MODEL=${config.googleModel}`,
-    `GOOGLE_MODELS_B64=${encodeBase64(JSON.stringify(config.googleModels))}`,
-    `OPENROUTER_MODEL=${config.openrouterModel}`,
-    `OPENROUTER_MODELS_B64=${encodeBase64(JSON.stringify(config.openrouterModels))}`,
+    `ANTHROPIC_API_KEY=${sel("anthropic") && !anthropicApiKeyRef ? config.anthropicApiKey : ""}`,
+    `OPENAI_API_KEY=${sel("openai") && !openaiApiKeyRef ? config.openaiApiKey : ""}`,
+    `GEMINI_API_KEY=${sel("google") && !googleApiKeyRef ? config.googleApiKey : ""}`,
+    `OPENROUTER_API_KEY=${sel("openrouter") && !openrouterApiKeyRef ? config.openrouterApiKey : ""}`,
+    `ANTHROPIC_MODEL=${sel("anthropic") ? config.anthropicModel : ""}`,
+    `ANTHROPIC_MODELS_B64=${encodeBase64(JSON.stringify(sel("anthropic") ? config.anthropicModels : []))}`,
+    `OPENAI_MODEL=${sel("openai") ? config.openaiModel : ""}`,
+    `OPENAI_MODELS_B64=${encodeBase64(JSON.stringify(sel("openai") ? config.openaiModels : []))}`,
+    `GOOGLE_MODEL=${sel("google") ? config.googleModel : ""}`,
+    `GOOGLE_MODELS_B64=${encodeBase64(JSON.stringify(sel("google") ? config.googleModels : []))}`,
+    `OPENROUTER_MODEL=${sel("openrouter") ? config.openrouterModel : ""}`,
+    `OPENROUTER_MODELS_B64=${encodeBase64(JSON.stringify(sel("openrouter") ? config.openrouterModels : []))}`,
     `OPENAI_COMPATIBLE_ENDPOINTS_ENABLED=${config.openaiCompatibleEndpointsEnabled}`,
-    `MODEL_ENDPOINT=${config.modelEndpoint}`,
-    `MODEL_ENDPOINT_API_KEY=${modelEndpointApiKeyRef ? "" : config.modelEndpointApiKey}`,
-    `MODEL_ENDPOINT_MODEL=${config.modelEndpointModel}`,
-    `MODEL_ENDPOINT_MODEL_LABEL=${config.modelEndpointModelLabel}`,
-    `MODEL_ENDPOINT_MODELS_B64=${encodeBase64(JSON.stringify(config.modelEndpointModels))}`,
+    `MODEL_ENDPOINT=${sel("custom-endpoint") ? config.modelEndpoint : ""}`,
+    `MODEL_ENDPOINT_API_KEY=${sel("custom-endpoint") && !modelEndpointApiKeyRef ? config.modelEndpointApiKey : ""}`,
+    `MODEL_ENDPOINT_MODEL=${sel("custom-endpoint") ? config.modelEndpointModel : ""}`,
+    `MODEL_ENDPOINT_MODEL_LABEL=${sel("custom-endpoint") ? config.modelEndpointModelLabel : ""}`,
+    `MODEL_ENDPOINT_MODELS_B64=${encodeBase64(JSON.stringify(sel("custom-endpoint") ? config.modelEndpointModels : []))}`,
     `AGENT_MODEL=${config.agentModel}`,
-    `VERTEX_ANTHROPIC_MODEL=${config.vertexAnthropicModel}`,
-    `VERTEX_ANTHROPIC_MODELS_B64=${encodeBase64(JSON.stringify(config.vertexAnthropicModels))}`,
-    `VERTEX_GOOGLE_MODEL=${config.vertexGoogleModel}`,
-    `VERTEX_GOOGLE_MODELS_B64=${encodeBase64(JSON.stringify(config.vertexGoogleModels))}`,
+    `VERTEX_ANTHROPIC_MODEL=${sel("vertex-anthropic") ? config.vertexAnthropicModel : ""}`,
+    `VERTEX_ANTHROPIC_MODELS_B64=${encodeBase64(JSON.stringify(sel("vertex-anthropic") ? config.vertexAnthropicModels : []))}`,
+    `VERTEX_GOOGLE_MODEL=${sel("vertex-google") ? config.vertexGoogleModel : ""}`,
+    `VERTEX_GOOGLE_MODELS_B64=${encodeBase64(JSON.stringify(sel("vertex-google") ? config.vertexGoogleModels : []))}`,
     "",
-    `VERTEX_ENABLED=${isVertex}`,
+    `VERTEX_ENABLED=${anyVertexSelected}`,
     `VERTEX_PROVIDER=${inferenceProvider === "vertex-google" ? "google" : "anthropic"}`,
     `GOOGLE_CLOUD_PROJECT=${config.googleCloudProject}`,
     `GOOGLE_CLOUD_LOCATION=${config.googleCloudLocation}`,
@@ -663,19 +679,19 @@ export function buildEnvFileContent(params: {
   if (config.secretsProvidersJson.trim()) {
     lines.push(`SECRETS_PROVIDERS_JSON_B64=${encodeBase64(config.secretsProvidersJson)}`);
   }
-  if (anthropicApiKeyRef) {
+  if (sel("anthropic") && anthropicApiKeyRef) {
     lines.push(`ANTHROPIC_API_KEY_REF_B64=${encodeBase64(JSON.stringify(anthropicApiKeyRef))}`);
   }
-  if (openaiApiKeyRef) {
+  if (sel("openai") && openaiApiKeyRef) {
     lines.push(`OPENAI_API_KEY_REF_B64=${encodeBase64(JSON.stringify(openaiApiKeyRef))}`);
   }
-  if (googleApiKeyRef) {
+  if (sel("google") && googleApiKeyRef) {
     lines.push(`GOOGLE_API_KEY_REF_B64=${encodeBase64(JSON.stringify(googleApiKeyRef))}`);
   }
-  if (openrouterApiKeyRef) {
+  if (sel("openrouter") && openrouterApiKeyRef) {
     lines.push(`OPENROUTER_API_KEY_REF_B64=${encodeBase64(JSON.stringify(openrouterApiKeyRef))}`);
   }
-  if (modelEndpointApiKeyRef) {
+  if (sel("custom-endpoint") && modelEndpointApiKeyRef) {
     lines.push(`MODEL_ENDPOINT_API_KEY_REF_B64=${encodeBase64(JSON.stringify(modelEndpointApiKeyRef))}`);
   }
   if (telegramBotTokenRef) {

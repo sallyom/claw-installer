@@ -44,6 +44,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   const [loadedConfigLabel, setLoadedConfigLabel] = useState<string | null>(null);
   const [autoLoadedEnvDir, setAutoLoadedEnvDir] = useState<string | null>(null);
   const [inferenceProvider, setInferenceProvider] = useState<InferenceProvider>("anthropic");
+  const [selectedProviders, setSelectedProviders] = useState<InferenceProvider[]>(["anthropic"]);
   const [modeManuallySelected, setModeManuallySelected] = useState(false);
   const [autoSwitchMessage, setAutoSwitchMessage] = useState<string | null>(null);
   // Refs so refreshEnvironment can read latest values without re-creating the callback
@@ -585,6 +586,10 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     }
   }, [vertexCredsForFetch]);
 
+  const handleSelectedProvidersChange = useCallback((providers: InferenceProvider[]) => {
+    setSelectedProviders(providers);
+  }, []);
+
   const handleDeploy = async () => {
     if (!isValid) {
       return;
@@ -597,6 +602,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
         config,
         isVertex,
         suggestedNamespace,
+        selectedProviders,
         anthropicApiKeyRef,
         openaiApiKeyRef,
         googleApiKeyRef,
@@ -628,6 +634,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
       inferenceProvider,
       isVertex,
       suggestedNamespace,
+      selectedProviders,
       anthropicApiKeyRef,
       openaiApiKeyRef,
       googleApiKeyRef,
@@ -1259,6 +1266,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           setConfig={setConfig}
           setInferenceProvider={setInferenceProvider}
           update={update}
+          onSelectedProvidersChange={handleSelectedProvidersChange}
           loadingAnthropicModels={loadingAnthropicModels}
           loadingOpenaiModels={loadingOpenaiModels}
           anthropicModelOptions={anthropicModelOptions}
