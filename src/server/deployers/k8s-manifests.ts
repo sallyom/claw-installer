@@ -160,8 +160,10 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
   if (config.openaiApiKey && openaiEnvRefId) {
     data[openaiEnvRefId] = config.openaiApiKey;
   }
+  // Fix for #115: only include GEMINI_API_KEY when Google is the active inference provider.
+  const isGoogleInferenceProvider = config.inferenceProvider === "google" || config.inferenceProvider === "vertex-google";
   const googleEnvRefId = resolveEnvSecretRefId(config.googleApiKeyRef, "GEMINI_API_KEY");
-  if (config.googleApiKey && googleEnvRefId) {
+  if (config.googleApiKey && googleEnvRefId && isGoogleInferenceProvider) {
     data[googleEnvRefId] = config.googleApiKey;
   }
   const openrouterEnvRefId = resolveEnvSecretRefId(config.openrouterApiKeyRef, "OPENROUTER_API_KEY");

@@ -958,3 +958,69 @@ describe("MCP servers from agent source", () => {
     expect(rendered.mcp).toBeUndefined();
   });
 });
+
+// Regression tests for #115: Google provider should not leak into non-Google deployments
+describe("Issue #115: Google provider gating", () => {
+  it("does NOT register Google provider when inferenceProvider is vertex-anthropic", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-anthropic",
+      anthropicApiKey: "sk-ant-test",
+      googleApiKey: "AIza-leftover-key",
+    });
+    const rendered = buildOpenClawConfig(config, "token") as {
+      models?: { providers?: Record<string, unknown> };
+    };
+
+    expect(rendered.models?.providers?.google).toBeUndefined();
+  });
+
+  it("does NOT register Google provider when inferenceProvider is anthropic", () => {
+    const config = makeConfig({
+      inferenceProvider: "anthropic",
+      anthropicApiKey: "sk-ant-test",
+      googleApiKey: "AIza-leftover-key",
+    });
+    const rendered = buildOpenClawConfig(config, "token") as {
+      models?: { providers?: Record<string, unknown> };
+    };
+
+    expect(rendered.models?.providers?.google).toBeUndefined();
+  });
+
+  it("does NOT register Google provider when inferenceProvider is openai", () => {
+    const config = makeConfig({
+      inferenceProvider: "openai",
+      openaiApiKey: "sk-oai-test",
+      googleApiKey: "AIza-leftover-key",
+    });
+    const rendered = buildOpenClawConfig(config, "token") as {
+      models?: { providers?: Record<string, unknown> };
+    };
+
+    expect(rendered.models?.providers?.google).toBeUndefined();
+  });
+
+  it("DOES register Google provider when inferenceProvider is google", () => {
+    const config = makeConfig({
+      inferenceProvider: "google",
+      googleApiKey: "AIza-active-key",
+    });
+    const rendered = buildOpenClawConfig(config, "token") as {
+      models?: { providers?: Record<string, unknown> };
+    };
+
+    expect(rendered.models?.providers?.google).toBeDefined();
+  });
+
+  it("DOES register Google provider when inferenceProvider is vertex-google", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-google",
+      googleApiKey: "AIza-active-key",
+    });
+    const rendered = buildOpenClawConfig(config, "token") as {
+      models?: { providers?: Record<string, unknown> };
+    };
+
+    expect(rendered.models?.providers?.google).toBeDefined();
+  });
+});

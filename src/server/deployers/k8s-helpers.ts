@@ -532,7 +532,10 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
       shouldDefineDefaultEnvProvider = true;
     }
   }
-  if (googleApiKeyRef) {
+  // Fix for #115: only register the Google provider when Google is the active
+  // inference provider, not merely because a leftover API key exists in config.
+  const isGoogleInferenceProvider = config.inferenceProvider === "google" || config.inferenceProvider === "vertex-google";
+  if (googleApiKeyRef && isGoogleInferenceProvider) {
     if (googleApiKeyRef.source === "env" && googleApiKeyRef.provider === "default") {
       shouldDefineDefaultEnvProvider = true;
     }

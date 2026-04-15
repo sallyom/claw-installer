@@ -271,6 +271,53 @@ describe("gateway env vars in proxy mode", () => {
     expect(secret.stringData?.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });
 
+  // Regression tests for #115: GEMINI_API_KEY should not leak into non-Google deployments
+  it("excludes GEMINI_API_KEY when inferenceProvider is vertex-anthropic", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-anthropic",
+      anthropicApiKey: "sk-ant-test",
+      googleApiKey: "AIza-leftover-key",
+    });
+
+    const secret = secretManifest("ns", config, "gateway-token");
+
+    expect(secret.stringData?.GEMINI_API_KEY).toBeUndefined();
+  });
+
+  it("excludes GEMINI_API_KEY when inferenceProvider is anthropic", () => {
+    const config = makeConfig({
+      inferenceProvider: "anthropic",
+      anthropicApiKey: "sk-ant-test",
+      googleApiKey: "AIza-leftover-key",
+    });
+
+    const secret = secretManifest("ns", config, "gateway-token");
+
+    expect(secret.stringData?.GEMINI_API_KEY).toBeUndefined();
+  });
+
+  it("includes GEMINI_API_KEY when inferenceProvider is google", () => {
+    const config = makeConfig({
+      inferenceProvider: "google",
+      googleApiKey: "AIza-active-key",
+    });
+
+    const secret = secretManifest("ns", config, "gateway-token");
+
+    expect(secret.stringData?.GEMINI_API_KEY).toBe("AIza-active-key");
+  });
+
+  it("includes GEMINI_API_KEY when inferenceProvider is vertex-google", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-google",
+      googleApiKey: "AIza-active-key",
+    });
+
+    const secret = secretManifest("ns", config, "gateway-token");
+
+    expect(secret.stringData?.GEMINI_API_KEY).toBe("AIza-active-key");
+  });
+
   it("excludes GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION when proxy is active", () => {
     const proxyConfig = makeConfig({
       inferenceProvider: "vertex-anthropic",
