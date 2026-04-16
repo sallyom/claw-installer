@@ -537,14 +537,17 @@ describe("DeployForm agent name validation (issue #7)", () => {
     expect(deployCall).toBeTruthy();
     const body = JSON.parse(String((deployCall?.[1] as RequestInit | undefined)?.body || "{}"));
 
+    // Only the selected primary provider's credentials are sent;
+    // credentials entered while briefly switching the primary are retained
+    // in the form but filtered out at serialization time.
     expect(body.inferenceProvider).toBe("anthropic");
     expect(body.anthropicApiKey).toBe("sk-ant-demo");
-    expect(body.openaiApiKey).toBe("sk-openai-demo");
     expect(body.anthropicModel).toBe("claude-sonnet-4-6");
-    expect(body.openaiModel).toBe("gpt-5");
-    expect(body.modelEndpoint).toBe("http://localhost:8000/v1");
-    expect(body.modelEndpointApiKey).toBe("endpoint-token");
-    expect(body.modelEndpointModel).toBe("mistral-small-24b-w8a8");
+    expect(body.openaiApiKey).toBeUndefined();
+    expect(body.openaiModel).toBeUndefined();
+    expect(body.modelEndpoint).toBeUndefined();
+    expect(body.modelEndpointApiKey).toBeUndefined();
+    expect(body.modelEndpointModel).toBeUndefined();
   });
 
   it("submits the OpenAI-compatible endpoints toggle when disabled", async () => {

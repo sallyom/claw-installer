@@ -199,6 +199,144 @@ describe("Multi-model per provider", () => {
     });
   });
 
+  describe("selectedProviders filtering", () => {
+    it("excludes unselected provider keys from deploy body", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.anthropicApiKey = "sk-ant-test";
+      config.anthropicModel = "claude-sonnet-4-6";
+      config.openaiApiKey = "sk-openai-test";
+      config.openaiModel = "gpt-5";
+      config.googleApiKey = "google-key";
+      config.googleModel = "gemini-3.1-pro-preview";
+      const body = buildDeployRequestBody({
+        mode: "local",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["anthropic"],
+      });
+      expect(body.anthropicApiKey).toBe("sk-ant-test");
+      expect(body.anthropicModel).toBe("claude-sonnet-4-6");
+      expect(body.openaiApiKey).toBeUndefined();
+      expect(body.openaiModel).toBeUndefined();
+      expect(body.googleApiKey).toBeUndefined();
+      expect(body.googleModel).toBeUndefined();
+    });
+
+    it("includes keys for all selected providers", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.anthropicApiKey = "sk-ant-test";
+      config.openaiApiKey = "sk-openai-test";
+      config.googleApiKey = "google-key";
+      const body = buildDeployRequestBody({
+        mode: "local",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["anthropic", "openai"],
+      });
+      expect(body.anthropicApiKey).toBe("sk-ant-test");
+      expect(body.openaiApiKey).toBe("sk-openai-test");
+      expect(body.googleApiKey).toBeUndefined();
+    });
+
+    it("excludes SecretRefs for unselected providers", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      const body = buildDeployRequestBody({
+        mode: "kubernetes",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["anthropic"],
+        anthropicApiKeyRef: { source: "env", provider: "default", id: "ANTHROPIC_API_KEY" },
+        openaiApiKeyRef: { source: "env", provider: "default", id: "OPENAI_API_KEY" },
+        googleApiKeyRef: { source: "env", provider: "default", id: "GEMINI_API_KEY" },
+      });
+      expect(body.anthropicApiKeyRef).toEqual({ source: "env", provider: "default", id: "ANTHROPIC_API_KEY" });
+      expect(body.openaiApiKeyRef).toBeUndefined();
+      expect(body.googleApiKeyRef).toBeUndefined();
+    });
+
+    it("includes all provider keys when selectedProviders is omitted (backward compat)", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.anthropicApiKey = "sk-ant-test";
+      config.openaiApiKey = "sk-openai-test";
+      config.googleApiKey = "google-key";
+      const body = buildDeployRequestBody({
+        mode: "local",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      expect(body.anthropicApiKey).toBe("sk-ant-test");
+      expect(body.openaiApiKey).toBe("sk-openai-test");
+      expect(body.googleApiKey).toBe("google-key");
+    });
+
+    it("excludes unselected provider keys from env file content", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.anthropicApiKey = "sk-ant-test";
+      config.openaiApiKey = "sk-openai-test";
+      config.googleApiKey = "google-key";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["anthropic"],
+      });
+      expect(env).toContain("ANTHROPIC_API_KEY=sk-ant-test");
+      expect(env).toContain("OPENAI_API_KEY=\n");
+      expect(env).toContain("GEMINI_API_KEY=\n");
+    });
+
+    it("excludes vertex models when vertex provider is not selected", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vertexAnthropicModel = "claude-sonnet-4-6";
+      config.vertexAnthropicModels = ["claude-opus-4-6"];
+      const body = buildDeployRequestBody({
+        mode: "kubernetes",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["anthropic"],
+      });
+      expect(body.vertexAnthropicModel).toBeUndefined();
+      expect(body.vertexAnthropicModels).toBeUndefined();
+      expect(body.vertexEnabled).toBeUndefined();
+    });
+
+    it("excludes custom-endpoint fields when not selected", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.modelEndpoint = "https://example.com/v1";
+      config.modelEndpointModel = "my-model";
+      config.modelEndpointApiKey = "ep-key";
+      const body = buildDeployRequestBody({
+        mode: "local",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["anthropic"],
+      });
+      expect(body.modelEndpoint).toBeUndefined();
+      expect(body.modelEndpointModel).toBeUndefined();
+      expect(body.modelEndpointApiKey).toBeUndefined();
+    });
+  });
+
   describe("applySavedVarsToConfig (backward compat)", () => {
     it("loads single-model config without anthropicModels/openaiModels", () => {
       const prev = createInitialDeployFormConfig();

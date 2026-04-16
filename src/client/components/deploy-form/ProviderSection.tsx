@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   MODEL_DEFAULTS,
@@ -39,6 +39,7 @@ interface ProviderSectionProps {
   setConfig: Dispatch<SetStateAction<DeployFormConfig>>;
   setInferenceProvider: Dispatch<SetStateAction<InferenceProvider>>;
   update: (field: string, value: string) => void;
+  onSelectedProvidersChange?: (providers: InferenceProvider[]) => void;
 }
 
 interface AdditionalProvider {
@@ -150,6 +151,7 @@ export function ProviderSection({
   setConfig,
   setInferenceProvider,
   update,
+  onSelectedProvidersChange,
 }: ProviderSectionProps) {
   const [additionalProviders, setAdditionalProviders] = useState<AdditionalProvider[]>([]);
   const nextId = useRef(0);
@@ -159,6 +161,11 @@ export function ProviderSection({
     .filter((p): p is InferenceProvider => p !== "");
 
   const allUsedProviders = [inferenceProvider, ...selectedAdditionalProviders];
+
+  const additionalKey = selectedAdditionalProviders.join(",");
+  useEffect(() => {
+    onSelectedProvidersChange?.(allUsedProviders);
+  }, [inferenceProvider, additionalKey]); // onSelectedProvidersChange is stable (useCallback)
 
   const allAdded = additionalProviders.length >= PROVIDER_OPTIONS.length - 1;
 
