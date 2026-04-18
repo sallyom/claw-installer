@@ -3,13 +3,15 @@
 > **Note:** This space is evolving fast. Here are some current solutions that
 > work well for local setup — expect more options and tighter integrations over time.
 
-The goal: no secrets at rest inside the container or data volume.
+For API-key style credentials, the goal is no secrets at rest inside the
+container or data volume. OpenAI Codex OAuth is the exception because OpenClaw
+needs a refreshable auth profile file at runtime.
 
 ## Why Not Just Use `.env`?
 
-Placing secrets directly in the data volume works but has a significant downside:
-the volume backup (`podman volume export`) captures those secrets too. The options
-below keep secrets out of the volume entirely.
+Placing API keys directly in the data volume works but has a significant
+downside: the volume backup (`podman volume export`) captures those secrets too.
+The options below keep API-key style secrets out of the volume entirely.
 
 ---
 
@@ -17,6 +19,15 @@ below keep secrets out of the volume entirely.
 
 Podman has a built-in secrets manager. Secrets are stored outside the container
 and injected at runtime as environment variables — they never touch the volume.
+
+OpenAI Codex OAuth is a special case. It is not configured through the generic
+Podman secret mappings field because OpenClaw needs a refreshable auth profile,
+not a single API-key environment variable. When you select **OpenAI Codex**, the
+installer reads the Codex CLI `auth.json` on the installer host, creates a
+short-lived Podman secret containing the generated OpenClaw auth profile, copies
+that into the OpenClaw data volume as `auth-profiles.json`, and immediately
+removes the transient Podman secret. The long-lived runtime credential then lives
+in the OpenClaw agent auth profile store.
 
 ### Create a secret
 
@@ -104,6 +115,7 @@ Use consistent secret names so scripts and docs are predictable:
 | GitHub PAT | `gh_token` | `GH_TOKEN` |
 | Anthropic API key | `anthropic_api_key` | `ANTHROPIC_API_KEY` |
 | OpenAI API key | `openai_api_key` | `OPENAI_API_KEY` |
+| OpenAI Codex OAuth | handled automatically | `openai-codex:default` auth profile |
 | Telegram bot token | `telegram_bot_token` | `TELEGRAM_BOT_TOKEN` |
 | OpenClaw gateway token | `openclaw_gateway_token` | `OPENCLAW_GATEWAY_TOKEN` |
 
@@ -114,3 +126,4 @@ Use consistent secret names so scripts and docs are predictable:
 | Approach | Secret at rest? | Travels with volume backup? |
 |---|---|---|
 | Podman secrets | No (Podman store) | No |
+| OpenAI Codex OAuth import | Yes (`auth-profiles.json` in OpenClaw volume) | Yes |

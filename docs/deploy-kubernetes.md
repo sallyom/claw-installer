@@ -34,8 +34,11 @@ For Kubernetes deploys, the installer now uses the safer upstream-compatible sec
 - secrets you enter in the form are written to the installer-managed `openclaw-secrets` Kubernetes Secret
 - the pod receives them through `secretKeyRef`
 - generated `openclaw.json` references them with env-backed OpenClaw SecretRefs instead of embedding raw secret values
+- OpenAI Codex uses Codex CLI OAuth: the installer reads the selected Codex CLI `auth.json`, writes the imported OpenClaw auth profile store into `openclaw-secrets`, and the init container copies it into each managed agent directory as `auth-profiles.json`
 
 You can still provide optional `secrets.providers` JSON and explicit SecretRef overrides when you want `file` or `exec`-based providers such as Vault.
+
+The browser never receives the raw Codex OAuth JSON. The installer stores the imported Codex OAuth profile in the Kubernetes Secret and saves only non-secret deploy metadata locally. Anyone with permission to read the `openclaw-secrets` Secret or the OpenClaw persistent volume can read runtime credentials, so keep normal cluster RBAC and Secret access controls in place.
 
 ## Access
 

@@ -8,7 +8,7 @@ For plain Kubernetes deployments (without OAuth proxy, Route, and ServiceAccount
 
 - An OpenShift cluster: either permission to create namespaces/projects, or a pre-created project where you have admin (or equivalent). If you only have namespace-scoped access, set the Project / Namespace field in the deploy form to that existing project.
 - `oc` CLI authenticated (`oc login`) on the machine running the installer
-- An API key or GCP service account for at least one model provider
+- A credential source for at least one model provider: API key, GCP service account JSON, or Codex CLI OAuth
 
 **Storage:** OpenClaw uses SQLite, which requires POSIX file locking. Block storage classes (gp3-csi, managed-csi, thin-csi) work. Avoid NFS.
 
@@ -43,7 +43,7 @@ For SSH sandbox setup on cluster deployments, see [SANDBOX.md](/Users/somalley/g
 | **Image** | `ghcr.io/openclaw/openclaw:latest` | Container image |
 | **Enable SSH sandbox backend** | checked | Recommended for cluster deploys |
 | **SSH Target** | `sandbox@gateway-host:22` | Remote sandbox runtime host |
-| **API key / Vertex credentials** | *(provider-specific)* | Same provider flow as generic Kubernetes deploys |
+| **Provider credentials** | *(provider-specific)* | API key, Vertex credentials, or Codex CLI OAuth; same provider flow as generic Kubernetes deploys |
 
 ## What Gets Created
 
@@ -83,7 +83,7 @@ Stop and Start only scale replicas. They do not sync local file changes back int
 
 ## Full Re-deploy
 
-To change deploy-level configuration such as image, provider, API keys, or sandbox settings, deploy again to the same namespace from the form.
+To change deploy-level configuration such as image, provider credentials, or sandbox settings, deploy again to the same namespace from the form.
 
 The installer uses create-or-replace behavior for managed resources, and forces a rollout through the deployment restart annotation.
 

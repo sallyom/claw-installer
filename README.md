@@ -19,11 +19,13 @@ The installer now always uses upstream OpenClaw SecretRefs where it can.
 - Local deploys inject secrets as container environment variables and reference them from `openclaw.json`
 - Local Podman deploys can optionally derive those env vars from a guided Podman secret mapping list instead of hand-writing `--secret ...` flags
 - Kubernetes and OpenShift deploys store secrets in the installer-managed `openclaw-secrets` Secret, inject them with `secretKeyRef`, and reference them from `openclaw.json`
+- OpenAI Codex uses ChatGPT OAuth from the Codex CLI `auth.json` instead of an API key; the installer imports it into the conventional OpenClaw auth profile `openai-codex:default`
 - You can still provide explicit SecretRef overrides and optional `secrets.providers` JSON for `env`, `file`, or `exec`-based setups such as Vault
 
 This keeps raw third-party secrets out of generated `openclaw.json` while staying aligned with upstream OpenClaw secret handling.
 
 For local Podman installs, the recommended path is: create Podman secrets, map them in the installer, and let OpenClaw resolve them through SecretRefs. See [docs/podman-secrets.md](docs/podman-secrets.md).
+Codex OAuth is handled separately: leave the Codex auth path blank to use `~/.codex/auth.json`, or provide the path to a Codex CLI `auth.json`.
 
 ### With the launcher script
 
@@ -117,10 +119,12 @@ See [ADR 0001](adr/0001-deployer-plugin-system.md) for the plugin system design.
 |----------|---------------|---------------|
 | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-5` | `OPENAI_API_KEY` |
+| OpenAI Codex | `openai-codex/gpt-5.4` | Codex CLI OAuth at `~/.codex/auth.json` |
 | Vertex AI (Gemini) | `google-vertex/gemini-2.5-pro` | GCP service account JSON |
 | Self-hosted (vLLM, etc.) | `openai/default` | `MODEL_ENDPOINT` URL |
 
 For Vertex AI, upload your GCP service account JSON file (or provide an absolute path). The installer extracts the `project_id` automatically.
+For OpenAI Codex, run Codex CLI login on the installer host first, then select **OpenAI Codex** in the installer. The installer imports the OAuth tokens into OpenClaw as `openai-codex:default`; advanced profile rotation or alternate profile IDs should be managed later with the OpenClaw CLI or agent interaction.
 
 ## SSH Sandbox
 

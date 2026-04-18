@@ -40,7 +40,9 @@ Open `http://localhost:3000`, pick **"This Machine"**, fill in the form, and hit
 
 1. Pick **"This Machine"**
 2. Fill in an **agent name** (e.g., `myagent`) and optionally an **owner prefix** (defaults to your OS username)
-3. Add your API key if not already detected from the environment
+3. Pick a model provider and add the required credential source
+   - API-key providers use their API key fields or inferred SecretRefs
+   - OpenAI Codex uses Codex CLI OAuth from `~/.codex/auth.json` by default
 4. Optional: enable **SSH sandbox backend** if you want sandboxed tool execution on a remote host
 5. For Vertex AI: upload your GCP service account JSON or provide an absolute path
 6. Hit **Deploy OpenClaw**
@@ -81,8 +83,11 @@ For local deploys, the installer now follows the upstream OpenClaw secret model 
 - generated `openclaw.json` uses env-backed SecretRefs instead of storing those raw values directly
 - you can optionally provide `secrets.providers` JSON and explicit SecretRef overrides for `env`, `file`, or `exec` providers
 - for Podman setups, you can also use the **Podman secret mappings** field to expand `podman secret create` entries into runtime `--secret` flags automatically
+- OpenAI Codex is OAuth-based: the installer reads the Codex CLI `auth.json` on the installer host and imports it into the OpenClaw auth profile `openai-codex:default`
 
 This means the container still receives the credentials it needs, but `openclaw.json` does not embed the plaintext API keys or Telegram bot token.
+
+For local Podman Codex OAuth imports, the installer stages the generated auth profile through a short-lived Podman secret, mounts it into a one-off import container, copies it into the OpenClaw data volume, and removes the transient Podman secret. Docker uses a short-lived `0600` temp file fallback for the same import step.
 
 For credentials like GitHub PATs, API keys, and bot tokens, see [podman-secrets.md](podman-secrets.md)
 for current options including Podman secrets, 1Password, and HashiCorp Vault.
@@ -123,6 +128,8 @@ Before starting the gateway, the installer runs an init script inside the contai
 2. Writes `openclaw.json` configuration to the data volume
 3. Copies agent workspace files (`AGENTS.md`, `SOUL.md`, etc.) to the agent workspace
 4. Sets permissions for the `node` user
+
+If OpenAI Codex is selected, the installer then runs a separate one-off import step that writes `auth-profiles.json` for the main agent and any bundled subagents. The generated `openclaw.json` only contains non-secret routing metadata for `openai-codex:default`; the OAuth access and refresh tokens live in the agent auth profile store.
 
 ### GCP credentials (Vertex AI)
 
