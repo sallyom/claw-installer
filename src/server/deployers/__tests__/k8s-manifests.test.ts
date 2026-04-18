@@ -197,6 +197,30 @@ describe("workspace copy in init script", () => {
     expect(initScript).toContain("chmod 0755 /home/node/.openclaw/bin/openclaw-vault");
     expect(initScript).not.toContain("chown -R 1000:1000 /home/node/.openclaw");
   });
+
+  // Regression test for https://github.com/sallyom/openclaw-installer/issues/71:
+  // openclaw.json contains gateway tokens and API key refs — it must not be
+  // world-readable, and the state directory must not be world-writable.
+  it("strips world bits from the state directory and config file (issue #71)", () => {
+    const deployment = deploymentManifest("ns", makeConfig());
+    const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
+    const initScript = initContainer?.command?.[2] ?? "";
+
+    // openclaw.json must start at 600, not 644, so even before the g=u pass
+    // the file is not world-readable.
+    expect(initScript).toContain("chmod 600 /home/node/.openclaw/openclaw.json");
+    expect(initScript).not.toContain("chmod 644 /home/node/.openclaw/openclaw.json");
+
+    // World bits must be stripped after the g=u pass.
+    expect(initScript).toContain("chmod -R o-rwx /home/node/.openclaw");
+
+    // Stripping world bits must happen BEFORE the vault binary re-open so the
+    // binary's world-execute bit is intentionally restored.
+    const oRwxIdx = initScript.indexOf("chmod -R o-rwx /home/node/.openclaw");
+    const vaultChmodIdx = initScript.indexOf("chmod 0755 /home/node/.openclaw/bin/openclaw-vault", oRwxIdx);
+    expect(oRwxIdx).toBeGreaterThan(-1);
+    expect(vaultChmodIdx).toBeGreaterThan(oRwxIdx);
+  });
 });
 
 // Gateway always gets provider API keys — LiteLLM only handles Vertex,

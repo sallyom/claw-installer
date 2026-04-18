@@ -280,7 +280,7 @@ export function buildInitScript(config: DeployConfig): string {
 
   return `
 cp /config/openclaw.json /home/node/.openclaw/openclaw.json
-chmod 644 /home/node/.openclaw/openclaw.json
+chmod 600 /home/node/.openclaw/openclaw.json
 mkdir -p /home/node/.openclaw/bin
 mkdir -p /home/node/.openclaw/workspace
 mkdir -p /home/node/.openclaw/skills
@@ -304,6 +304,7 @@ cp /exec-approvals-src/exec-approvals.json /home/node/.openclaw/exec-approvals.j
 ${authProfileLines}
 chown -R 1000:0 /home/node/.openclaw 2>/dev/null || true
 chmod -R g=u /home/node/.openclaw 2>/dev/null || true
+chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true
 chmod 0755 /home/node/.openclaw/bin/openclaw-vault 2>/dev/null || true
 echo "Config initialized"
 `.trim();
