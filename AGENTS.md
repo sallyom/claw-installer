@@ -34,11 +34,15 @@ npm run test:watch    # Watch mode
 
 Tests mock external dependencies (fetch, K8s API). See `src/server/deployers/__tests__/registry.test.ts` for conventions.
 
+## Manual Testing
+
+For manual testing, ask the user to start the app themselves with `./run.sh` and manage the dev server lifecycle on their own. Do not start or stop the dev server automatically unless explicitly asked to. Only open a browser or trigger deployments if the user specifically requests it.
+
 ## Stopping the Dev Server
 
-Do **not** use `lsof -i :port -t | xargs kill` to stop the dev server — this kills every process with a connection on that port, including the user's browser. Instead, target only node processes:
+If you must stop the dev server (only when explicitly asked), do **not** use `lsof -i :port -t | xargs kill` or `lsof -i :port -t -c node | xargs kill` — these can kill unrelated processes including the user's browser. Instead, kill only the dev server's own process tree:
 
 ```bash
-lsof -i :3000 -t -c node | xargs kill 2>/dev/null
-lsof -i :3001 -t -c node | xargs kill 2>/dev/null
+pkill -f "tsx watch src/server/index.ts" 2>/dev/null
+pkill -f "vite --strictPort" 2>/dev/null
 ```
