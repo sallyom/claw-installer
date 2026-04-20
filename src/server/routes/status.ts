@@ -3,6 +3,7 @@ import { registry } from "../deployers/registry.js";
 import { createLogCallback, sendStatus } from "../ws.js";
 import type { DeployResult } from "../deployers/types.js";
 import { sanitizeDeployResult } from "../security.js";
+import { debugPerf } from "../debug.js";
 import {
   findInstance,
   listInstances,
@@ -21,11 +22,14 @@ export { parseSavedLocalInstanceConfig } from "./status-instances.js";
 // List all instances: running containers + stopped local volumes + K8s
 router.get("/", async (req, res) => {
   const includeK8s = req.query.includeK8s === "1";
+  const t0 = performance.now();
 
   try {
     const instances = await listInstances(includeK8s);
+    debugPerf(`[perf] GET /api/instances (includeK8s=${includeK8s}): ${(performance.now() - t0).toFixed(0)}ms, ${instances.length} instances`);
     res.json(instances.map(sanitizeDeployResult));
   } catch (err) {
+    debugPerf(`[perf] GET /api/instances FAILED after ${(performance.now() - t0).toFixed(0)}ms`);
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
   }
