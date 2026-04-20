@@ -6,7 +6,8 @@ import { readFile } from "node:fs/promises";
 import { v4 as uuid } from "uuid";
 import { coreApi, appsApi, loadKubeConfig, hasOtelOperator, k8sApiHttpCode } from "../services/k8s.js";
 import { ensureK8sPortForward } from "../services/k8s-port-forward.js";
-import { deriveInstanceStatus, derivePodInfo } from "./k8s-discovery.js";
+import { debugPerf } from "../debug.js";
+import { deriveInstanceStatus, derivePodInfo, clearStaleMarker } from "./k8s-discovery.js";
 import { cronJobsFile, installerK8sInstanceDir, skillsDir } from "../paths.js";
 import { loadTextTree } from "../state-tree.js";
 import type {
@@ -54,7 +55,7 @@ import { OPENCLAW_SERVICE_ACCOUNT_NAME } from "./vault-helper.js";
 
 // Re-export discovery for consumers
 export type { K8sPodInfo, K8sInstance } from "./k8s-discovery.js";
-export { discoverK8sInstances } from "./k8s-discovery.js";
+export { discoverK8sInstances, clearStaleMarker } from "./k8s-discovery.js";
 
 // ── Helper: apply or update a resource ─────────────────────────────
 
@@ -480,6 +481,7 @@ export class KubernetesDeployer implements Deployer {
     try {
       const configDir = installerK8sInstanceDir(ns);
       mkdirSync(configDir, { recursive: true });
+      await clearStaleMarker(ns);
       const savedConfig = {
         ...config,
         namespace: ns,
@@ -546,7 +548,9 @@ export class KubernetesDeployer implements Deployer {
     try {
       const apps = appsApi();
       const core = coreApi();
+      const tDep = performance.now();
       const dep = await apps.readNamespacedDeployment({ name: "openclaw", namespace: ns });
+      debugPerf(`[perf]         readDeployment(${ns}): ${(performance.now() - tDep).toFixed(0)}ms`);
       const replicas = dep.spec?.replicas ?? 1;
       const readyReplicas = dep.status?.readyReplicas ?? 0;
 
@@ -556,10 +560,12 @@ export class KubernetesDeployer implements Deployer {
       }
 
       // Fetch pods for accurate status derivation
+      const tPods = performance.now();
       const podList = await core.listNamespacedPod({
         namespace: ns,
         labelSelector: "app=openclaw",
       });
+      debugPerf(`[perf]         listPods(${ns}): ${(performance.now() - tPods).toFixed(0)}ms`);
       const pods = podList.items.map(derivePodInfo);
       const { status, statusDetail } = deriveInstanceStatus(replicas, readyReplicas, pods);
 
@@ -569,16 +575,21 @@ export class KubernetesDeployer implements Deployer {
       }
 
       try {
+        const tPf = performance.now();
         const { url } = await ensureK8sPortForward(ns);
+        debugPerf(`[perf]         portForward(${ns}): ${(performance.now() - tPf).toFixed(0)}ms`);
 
         // Skip the HTTP probe if gateway was already confirmed healthy
         // and readyReplicas hasn't dropped (e.g. pod restart).
         const cached = this.gatewayHealthy.get(ns);
         if (cached && readyReplicas >= cached.readyReplicas) {
+          debugPerf(`[perf]         gatewayProbe(${ns}): skipped (cached)`);
           return { ...result, status: "running", url, statusDetail, pods };
         }
 
+        const tProbe = performance.now();
         const ready = await checkGatewayReady(url);
+        debugPerf(`[perf]         gatewayProbe(${ns}): ${(performance.now() - tProbe).toFixed(0)}ms, ready=${ready}`);
         if (ready) {
           this.gatewayHealthy.set(ns, { readyReplicas });
           return { ...result, status: "running", url, statusDetail, pods };

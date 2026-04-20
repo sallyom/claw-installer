@@ -7,11 +7,12 @@ import {
   detectRuntime,
   type DiscoveredContainer,
 } from "../services/container.js";
-import { discoverK8sInstances } from "../deployers/kubernetes.js";
+import { discoverK8sInstances, type K8sInstance } from "../deployers/kubernetes.js";
 import { isClusterReachable } from "../services/k8s.js";
 import { registry } from "../deployers/registry.js";
 import type { CodexOauthMode, DeployResult, DeploySecretRef, InferenceProvider } from "../deployers/types.js";
 import type { PodmanSecretMapping } from "../../shared/podman-secrets.js";
+import { debugPerf } from "../debug.js";
 
 function decodeSavedBase64(value?: string): string | undefined {
   if (!value) {
@@ -246,13 +247,7 @@ async function buildStoppedLocalInstance(containerName: string, volumeName: stri
   };
 }
 
-async function buildK8sInstance(namespace: string): Promise<DeployResult | null> {
-  const k8sInstances = await discoverK8sInstances({ namespaces: [namespace] });
-  const discovered = k8sInstances.find((instance) => instance.namespace === namespace);
-  if (!discovered) {
-    return null;
-  }
-
+async function buildK8sInstance(discovered: K8sInstance): Promise<DeployResult | null> {
   const savedState = await readSavedK8sState(discovered.namespace);
   const mode = savedState.mode;
   let instance: DeployResult = {
@@ -280,7 +275,9 @@ async function buildK8sInstance(namespace: string): Promise<DeployResult | null>
   const deployer = savedState.hasLocalState ? registry.get(mode) : undefined;
   if (deployer && typeof deployer.status === "function") {
     try {
+      const tStatus = performance.now();
       instance = await deployer.status(instance);
+      debugPerf(`[perf]       deployer.status(${discovered.namespace}): ${(performance.now() - tStatus).toFixed(0)}ms`);
     } catch {
       // Use base instance if status enrichment fails
     }
@@ -292,6 +289,7 @@ async function buildK8sInstance(namespace: string): Promise<DeployResult | null>
 export async function listInstances(includeK8s: boolean): Promise<DeployResult[]> {
   const instances: DeployResult[] = [];
 
+  const tLocal = performance.now();
   const runtime = await detectRuntime();
   if (runtime) {
     const containers = await discoverContainers(runtime);
@@ -309,12 +307,17 @@ export async function listInstances(includeK8s: boolean): Promise<DeployResult[]
       }
     }
   }
+  debugPerf(`[perf]   local discovery: ${(performance.now() - tLocal).toFixed(0)}ms, ${instances.length} local instances`);
 
   if (includeK8s && await isClusterReachable()) {
     try {
+      const tDiscover = performance.now();
       const k8sInstances = await discoverK8sInstances();
+      debugPerf(`[perf]   discoverK8sInstances: ${(performance.now() - tDiscover).toFixed(0)}ms, ${k8sInstances.length} namespaces`);
       for (const discovered of k8sInstances) {
-        const instance = await buildK8sInstance(discovered.namespace);
+        const tBuild = performance.now();
+        const instance = await buildK8sInstance(discovered);
+        debugPerf(`[perf]     buildK8sInstance(${discovered.namespace}): ${(performance.now() - tBuild).toFixed(0)}ms`);
         if (instance) {
           instances.push(instance);
         }
@@ -343,5 +346,8 @@ export async function findInstance(name: string): Promise<DeployResult | null> {
     }
   }
 
-  return await buildK8sInstance(name);
+  const k8sInstances = await discoverK8sInstances({ namespaces: [name] });
+  const discovered = k8sInstances.find((inst) => inst.namespace === name);
+  if (!discovered) return null;
+  return await buildK8sInstance(discovered);
 }
