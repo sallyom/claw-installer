@@ -7,10 +7,12 @@ Deploy [OpenClaw](https://github.com/openclaw) from your browser — to local co
 ```bash
 git clone https://github.com/sallyom/openclaw-installer.git
 cd openclaw-installer
-npm install && npm run build && npm run dev
+npm ci
+npm run build && npm run dev
 ```
 
 Open `http://localhost:3000`, pick your deploy target, fill in the form, and click Deploy.
+After dependencies are installed, the usual local development flow is `npm run build && npm run dev`.
 
 ## Secret Handling
 
@@ -19,7 +21,7 @@ The installer now always uses upstream OpenClaw SecretRefs where it can.
 - Local deploys inject secrets as container environment variables and reference them from `openclaw.json`
 - Local Podman deploys can optionally derive those env vars from a guided Podman secret mapping list instead of hand-writing `--secret ...` flags
 - Kubernetes and OpenShift deploys store secrets in the installer-managed `openclaw-secrets` Secret, inject them with `secretKeyRef`, and reference them from `openclaw.json`
-- OpenAI Codex uses ChatGPT OAuth from the Codex CLI `auth.json` instead of an API key; the installer imports it into the conventional OpenClaw auth profile `openai-codex:default`
+- OpenAI Codex uses ChatGPT OAuth from the Codex CLI `auth.json` for agent turns; OpenAI platform features such as embeddings and images still use normal `OPENAI_API_KEY` auth
 - You can still provide explicit SecretRef overrides and optional `secrets.providers` JSON for `env`, `file`, or `exec`-based setups such as Vault
 
 This keeps raw third-party secrets out of generated `openclaw.json` while staying aligned with upstream OpenClaw secret handling.
@@ -38,12 +40,13 @@ Useful variants:
 ```bash
 ./run.sh --build
 ./run.sh --port 8080
+OPENCLAW_INSTALLER_PORT=8080 ./run.sh
 ./run.sh --runtime docker
 ./run.sh --plugin @acme/openclaw-installer-aws
 ./run.sh --plugins @acme/openclaw-installer-aws,@acme/openclaw-installer-gke
 ```
 
-`run.sh` now prefers `OPENCLAW_INSTALLER_IMAGE`, while still accepting the older `CLAW_INSTALLER_IMAGE`.
+`run.sh` uses `OPENCLAW_INSTALLER_PORT` and `OPENCLAW_INSTALLER_IMAGE`; it also accepts the older generic `PORT` fallback.
 
 ## Deploy Targets
 
@@ -119,12 +122,12 @@ See [ADR 0001](adr/0001-deployer-plugin-system.md) for the plugin system design.
 |----------|---------------|---------------|
 | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-5` | `OPENAI_API_KEY` |
-| OpenAI Codex | `openai-codex/gpt-5.4` | Codex CLI OAuth at `~/.codex/auth.json` |
+| OpenAI Codex | `openai/gpt-5.5` with Codex runtime | Codex CLI OAuth at `~/.codex/auth.json` |
 | Vertex AI (Gemini) | `google-vertex/gemini-2.5-pro` | GCP service account JSON |
 | Self-hosted (vLLM, etc.) | `openai/default` | `MODEL_ENDPOINT` URL |
 
 For Vertex AI, upload your GCP service account JSON file (or provide an absolute path). The installer extracts the `project_id` automatically.
-For OpenAI Codex, run Codex CLI login on the installer host first, then select **OpenAI Codex** in the installer. The installer imports the OAuth tokens into OpenClaw as `openai-codex:default`; advanced profile rotation or alternate profile IDs should be managed later with the OpenClaw CLI or agent interaction.
+For OpenAI Codex, run Codex CLI login on the installer host first, then select **OpenAI Codex** in the installer. The installer imports inline OAuth token material into OpenClaw as `openai-codex:default` and configures canonical `openai/*` model refs with the Codex runtime. Select **OpenAI** as an additional provider when embeddings, image generation, or other OpenAI platform APIs need `OPENAI_API_KEY`.
 
 ## SSH Sandbox
 

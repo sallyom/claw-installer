@@ -1,7 +1,21 @@
 import type { DeployConfig } from "./types.js";
+import {
+  CODEX_AGENT_RUNTIME_ID,
+  CODEX_PLUGIN_ID,
+  CODEX_PLUGIN_NPM_SPEC,
+  DEFAULT_CODEX_MODEL,
+  OPENAI_CODEX_PROVIDER,
+  OPENAI_PROVIDER,
+} from "./openclaw-compat.js";
 
-export const OPENAI_CODEX_PROVIDER = "openai-codex";
-export const DEFAULT_CODEX_MODEL = "gpt-5.4";
+export {
+  CODEX_AGENT_RUNTIME_ID,
+  CODEX_PLUGIN_ID,
+  CODEX_PLUGIN_NPM_SPEC,
+  DEFAULT_CODEX_MODEL,
+  OPENAI_CODEX_PROVIDER,
+  OPENAI_PROVIDER,
+};
 export const DEFAULT_CODEX_PROFILE_ID = `${OPENAI_CODEX_PROVIDER}:default`;
 export const CODEX_AUTH_PROFILES_SECRET_KEY = "OPENAI_CODEX_AUTH_PROFILES_JSON";
 
@@ -17,6 +31,12 @@ type CodexCliAuthFile = {
 type AuthProfileStoreJson = {
   version: 1;
   profiles: Record<string, Record<string, unknown>>;
+};
+
+type AgentModelCatalogEntry = {
+  alias?: string;
+  agentRuntime?: { id?: string };
+  [key: string]: unknown;
 };
 
 function readString(value: unknown): string | undefined {
@@ -57,14 +77,18 @@ export function normalizeCodexOauthProfileId(value?: string): string {
 
 export function normalizeCodexModelRef(modelRef?: string): string {
   const trimmed = modelRef?.trim() || DEFAULT_CODEX_MODEL;
-  return trimmed.startsWith(`${OPENAI_CODEX_PROVIDER}/`)
-    ? trimmed
-    : `${OPENAI_CODEX_PROVIDER}/${trimmed}`;
+  if (trimmed.startsWith(`${OPENAI_PROVIDER}/`)) {
+    return trimmed;
+  }
+  if (trimmed.startsWith(`${OPENAI_CODEX_PROVIDER}/`)) {
+    return `${OPENAI_PROVIDER}/${trimmed.slice(`${OPENAI_CODEX_PROVIDER}/`.length)}`;
+  }
+  return `${OPENAI_PROVIDER}/${trimmed}`;
 }
 
 export function codexModelIdFromRef(modelRef?: string): string {
   const ref = normalizeCodexModelRef(modelRef);
-  return ref.slice(`${OPENAI_CODEX_PROVIDER}/`.length);
+  return ref.slice(`${OPENAI_PROVIDER}/`.length);
 }
 
 export function shouldUseCodexOauth(config: DeployConfig): boolean {
@@ -144,5 +168,32 @@ export function attachCodexOauthConfig(ocConfig: Record<string, unknown>, config
     ...auth,
     profiles,
     order,
+  };
+
+  const agents = (ocConfig.agents as Record<string, unknown> | undefined) || {};
+  const defaults = (agents.defaults as Record<string, unknown> | undefined) || {};
+  const models = (defaults.models as Record<string, AgentModelCatalogEntry> | undefined) || {};
+  const codexModelRefs = [
+    normalizeCodexModelRef(config.codexModel),
+    ...(config.codexModels || []).map((model) => normalizeCodexModelRef(model)),
+  ];
+  for (const modelRef of codexModelRefs) {
+    const existing = models[modelRef] || {};
+    models[modelRef] = {
+      ...existing,
+      alias: existing.alias || codexModelIdFromRef(modelRef),
+      agentRuntime: {
+        ...(existing.agentRuntime || {}),
+        id: CODEX_AGENT_RUNTIME_ID,
+      },
+    };
+  }
+
+  ocConfig.agents = {
+    ...agents,
+    defaults: {
+      ...defaults,
+      models,
+    },
   };
 }

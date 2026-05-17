@@ -3,14 +3,15 @@
 # OpenClaw Installer Launcher
 # ============================================================================
 # Launches the OpenClaw Installer.
-# - macOS (podman): runs from source (npm run dev) in the background
-# - macOS (docker): runs as a container with Docker socket
-# - Linux: runs as a container with podman or docker socket
+# - macOS (podman): runs the built app natively with Node.js
+# - Docker: runs the built app natively with Node.js and the host Docker CLI
+# - Linux (podman): runs as a container with the rootless podman socket
 #
 # Usage:
 #   ./run.sh                                      # Pull image and start
 #   ./run.sh --build                              # Build from source instead of pulling
 #   ./run.sh --port 8080                          # Use a different port (default: 3000)
+#   OPENCLAW_INSTALLER_PORT=8080 ./run.sh          # Same, via env var
 #   ./run.sh --runtime docker                     # Force docker (default: auto-detect)
 #   ./run.sh --plugin @acme/openclaw-installer-aws
 #   ./run.sh --plugins @acme/openclaw-installer-aws,@acme/openclaw-installer-gke
@@ -21,9 +22,9 @@
 
 set -euo pipefail
 
-IMAGE_NAME="${OPENCLAW_INSTALLER_IMAGE:-${CLAW_INSTALLER_IMAGE:-quay.io/sallyom/openclaw-installer:latest}}"
+IMAGE_NAME="${OPENCLAW_INSTALLER_IMAGE:-quay.io/sallyom/openclaw-installer:latest}"
 CONTAINER_NAME="claw-installer"
-PORT="${PORT:-3000}"
+PORT="${OPENCLAW_INSTALLER_PORT:-${PORT:-3000}}"
 BUILD=false
 RUNTIME=""
 PLUGIN_LIST="${OPENCLAW_INSTALLER_PLUGINS:-}"
@@ -146,12 +147,8 @@ fi
 
 OS="$(uname -s)"
 
-# ---- macOS + podman: extract app from image, run natively ----
-# Podman socket forwarding into containers is not reliably supported
-# across macOS VM backends (libkrun, applehv, qemu). Instead, we extract
-# the built app from the container image and run it directly with Node.js.
-if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
-  info "Detected macOS + podman"
+run_native_app() {
+  local extract_runtime="$1"
 
   # Check for Node.js
   if ! command -v node >/dev/null 2>&1; then
@@ -159,9 +156,8 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
   fi
 
   APP_DIR="$HOME/.openclaw/installer/.app"
-
-  # Extract app from container image (or use local source if available)
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
   if [ -f "$SCRIPT_DIR/package.json" ] && [ -d "$SCRIPT_DIR/node_modules" ]; then
     # Running from cloned repo with deps installed — rebuild to pick up source changes
     APP_DIR="$SCRIPT_DIR"
@@ -171,22 +167,23 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
     # Running from cloned repo, need to install deps
     APP_DIR="$SCRIPT_DIR"
     info "Installing dependencies..."
-    (cd "$APP_DIR" && npm install && npm run build)
+    (cd "$APP_DIR" && npm ci && npm run build)
   else
-    # Standalone run.sh — extract from container image
+    if [ "$BUILD" = true ]; then
+      error "--build requires a cloned source checkout when running the installer natively."
+    fi
     if [ ! -f "$APP_DIR/dist/server/index.js" ]; then
       info "Extracting installer from $IMAGE_NAME..."
 
-      # Pull image if needed
-      if ! podman image exists "$IMAGE_NAME" 2>/dev/null; then
-        podman pull "$IMAGE_NAME" || error "Failed to pull image."
+      if ! "$extract_runtime" image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+        "$extract_runtime" pull "$IMAGE_NAME" || error "Failed to pull image."
       fi
 
       mkdir -p "$APP_DIR"
       EXTRACT_CTR="claw-installer-extract-$$"
-      podman create --name "$EXTRACT_CTR" "$IMAGE_NAME" true >/dev/null
-      podman cp "$EXTRACT_CTR:/app/." "$APP_DIR/"
-      podman rm "$EXTRACT_CTR" >/dev/null
+      "$extract_runtime" create --name "$EXTRACT_CTR" "$IMAGE_NAME" true >/dev/null
+      "$extract_runtime" cp "$EXTRACT_CTR:/app/." "$APP_DIR/"
+      "$extract_runtime" rm "$EXTRACT_CTR" >/dev/null
       success "Installer extracted to $APP_DIR"
     fi
   fi
@@ -198,7 +195,22 @@ if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
   info "Open http://localhost:${PORT} in your browser."
   echo ""
   cd "$APP_DIR"
-  PORT="$PORT" NODE_ENV=production exec node dist/server/index.js
+  OPENCLAW_INSTALLER_PORT="$PORT" NODE_ENV=production exec node dist/server/index.js
+}
+
+# ---- macOS + podman: extract app from image, run natively ----
+# Podman socket forwarding into containers is not reliably supported
+# across macOS VM backends (libkrun, applehv, qemu). Instead, we extract
+# the built app from the container image and run it directly with Node.js.
+if [ "$RUNTIME" = "podman" ] && [ "$OS" = "Darwin" ]; then
+  info "Detected macOS + podman"
+  run_native_app podman
+fi
+
+# ---- Docker: run natively so the installer can use the host Docker CLI ----
+if [ "$RUNTIME" = "docker" ]; then
+  info "Detected Docker"
+  run_native_app docker
 fi
 
 # Build or pull image (container modes only)
@@ -235,32 +247,11 @@ if [ -f "$ADC_PATH" ]; then
   GCP_MOUNT_FLAGS+=("-v" "${ADC_PATH}:/tmp/gcp-adc/application_default_credentials.json:ro")
 fi
 
-# ---- Docker (simple on all platforms) ----
-if [ "$RUNTIME" = "docker" ]; then
-  info "Detected Docker"
-  mkdir -p "$HOME/.openclaw/installer"
-  write_plugin_config "$HOME/.openclaw/installer"
-
-  # Stop existing container
-  docker stop "$CONTAINER_NAME" 2>/dev/null || true
-  docker rm "$CONTAINER_NAME" 2>/dev/null || true
-
-  docker run -d \
-    --name "$CONTAINER_NAME" \
-    -p "${PORT}:3000" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$HOME/.openclaw:/host-openclaw:ro" \
-    -v "$HOME/.openclaw/installer:/home/node/.openclaw/installer" \
-    -e AGENT_SOURCE_DIR=/host-openclaw \
-    "${ENV_FLAGS[@]}" \
-    "${GCP_MOUNT_FLAGS[@]}" \
-    "$IMAGE_NAME"
-
-  success "OpenClaw Installer running at http://localhost:${PORT}"
-  echo ""
-  info "Open http://localhost:${PORT} in your browser."
-  info "To stop: docker stop $CONTAINER_NAME"
-  exit 0
+# Mount Codex CLI OAuth auth into containerized installer runs so the default
+# ~/.codex/auth.json path works the same way it does when run natively.
+CODEX_MOUNT_FLAGS=()
+if [ -d "$HOME/.codex" ]; then
+  CODEX_MOUNT_FLAGS+=("-v" "$HOME/.codex:/home/node/.codex:ro")
 fi
 
 # ---- Podman ----
@@ -294,6 +285,7 @@ case "$OS" in
       -e AGENT_SOURCE_DIR=/host-openclaw \
       "${ENV_FLAGS[@]}" \
       "${GCP_MOUNT_FLAGS[@]}" \
+      "${CODEX_MOUNT_FLAGS[@]}" \
       "$IMAGE_NAME"
 
     success "OpenClaw Installer running at http://localhost:${PORT}"

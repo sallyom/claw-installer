@@ -39,6 +39,7 @@ import { JAEGER_UI_PORT } from "./otel.js";
 import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumContainerName, chromiumAgentEnv } from "./chromium.js";
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import {
+  attachDirectVertexProviderModels,
   buildConfiguredAgentModelCatalog,
   CUSTOM_ENDPOINT_PROVIDER,
   GOOGLE_BASE_URL,
@@ -54,11 +55,21 @@ import {
 } from "./k8s-helpers.js";
 import {
   OPENAI_CODEX_PROVIDER,
+  OPENAI_PROVIDER,
+  CODEX_PLUGIN_ID,
+  CODEX_PLUGIN_NPM_SPEC,
   attachCodexOauthConfig,
   buildCodexOauthCredentialFromCliAuthJson,
   codexOauthAuthProfileStoreJson,
   normalizeCodexModelRef,
+  shouldUseCodexOauth,
 } from "./codex-oauth.js";
+import {
+  ANTHROPIC_VERTEX_DEFAULT_MODEL,
+  ANTHROPIC_VERTEX_PROVIDER,
+  GOOGLE_VERTEX_DEFAULT_MODEL,
+  GOOGLE_VERTEX_PROVIDER,
+} from "./openclaw-compat.js";
 import { buildSandboxConfig } from "./sandbox.js";
 import { buildSandboxToolPolicy } from "./tool-policy.js";
 import { loadAgentSourceBundle, loadAgentSourceMcpServers, mainWorkspaceShellCondition } from "./agent-source.js";
@@ -79,6 +90,7 @@ const SANDBOX_SSH_IDENTITY_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/identity`;
 const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.pub`;
 const SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/known_hosts`;
 const AUTH_PROFILE_IMPORT_CONTAINER_PATH = "/tmp/openclaw-auth-profiles/auth-profiles.json";
+const CODEX_PLUGIN_INSTALL_DIR = `/home/node/.openclaw/extensions/${CODEX_PLUGIN_ID}`;
 
 /** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
 export function shouldAlwaysPull(image: string): boolean {
@@ -446,7 +458,7 @@ function prepareLocalSandboxSshConfig(config: DeployConfig): {
 
 function prepareLocalCodexOauthConfig(config: DeployConfig): DeployConfig {
   if (
-    config.inferenceProvider !== OPENAI_CODEX_PROVIDER
+    !shouldUseCodexOauth(config)
     || config.codexOauthMode === "profile"
     || config.codexOauthAuthJson?.trim()
   ) {
@@ -571,20 +583,20 @@ function deriveModel(config: DeployConfig): string {
     return normalizeModelRef(config, config.openrouterModel?.trim() || "auto");
   }
   if (config.inferenceProvider === "vertex-anthropic") {
-    const model = config.vertexAnthropicModel?.trim() || config.agentModel?.trim() || "claude-sonnet-4-6";
-    return shouldUseLitellmProxy(config) ? `litellm/${model}` : `anthropic-vertex/${model}`;
+    const model = config.vertexAnthropicModel?.trim() || config.agentModel?.trim() || ANTHROPIC_VERTEX_DEFAULT_MODEL;
+    return shouldUseLitellmProxy(config) ? `litellm/${model}` : `${ANTHROPIC_VERTEX_PROVIDER}/${model}`;
   }
   if (config.inferenceProvider === "vertex-google") {
-    const model = config.vertexGoogleModel?.trim() || config.agentModel?.trim() || "gemini-2.5-pro";
-    return shouldUseLitellmProxy(config) ? `litellm/${model}` : `google-vertex/${model}`;
+    const model = config.vertexGoogleModel?.trim() || config.agentModel?.trim() || GOOGLE_VERTEX_DEFAULT_MODEL;
+    return shouldUseLitellmProxy(config) ? `litellm/${model}` : `${GOOGLE_VERTEX_PROVIDER}/${model}`;
   }
   if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
     return `litellm/${litellmModelName(config)}`;
   }
   if (config.vertexEnabled) {
     return config.vertexProvider === "anthropic"
-      ? "anthropic-vertex/claude-sonnet-4-6"
-      : "google-vertex/gemini-2.5-pro";
+      ? `${ANTHROPIC_VERTEX_PROVIDER}/${ANTHROPIC_VERTEX_DEFAULT_MODEL}`
+      : `${GOOGLE_VERTEX_PROVIDER}/${GOOGLE_VERTEX_DEFAULT_MODEL}`;
   }
   if (config.openaiApiKey || config.openaiApiKeyRef) {
     return "openai/gpt-5.4";
@@ -844,6 +856,7 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
     }
     providersMap[CUSTOM_ENDPOINT_PROVIDER] = endpointProvider;
   }
+  attachDirectVertexProviderModels(providersMap, config);
 
   if (Object.keys(providersMap).length > 0) {
     models.providers = providersMap;
@@ -896,6 +909,10 @@ function buildAgentModelConfig(config: DeployConfig, primaryModelRef: string): {
 
 function requiredBundledPluginAllowlist(config: DeployConfig): string[] {
   const allow = new Set<string>();
+  if (shouldUseCodexOauth(config)) {
+    allow.add(OPENAI_PROVIDER);
+    allow.add("codex");
+  }
   if (shouldUseOtel(config)) {
     allow.add("diagnostics-otel");
   }
@@ -911,6 +928,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
   const port = config.port ?? 18789;
   const openaiCompatibleEndpointsEnabled = config.openaiCompatibleEndpointsEnabled !== false;
   const useOtel = shouldUseOtel(config);
+  const useCodexOauth = shouldUseCodexOauth(config);
   const pluginAllowlist = requiredBundledPluginAllowlist(config);
   const sourceBundle = loadAgentSourceBundle(config);
   const ocConfig: Record<string, unknown> = {
@@ -918,6 +936,7 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
       ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
       entries: {
         acpx: { enabled: false },
+        ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
       },
     },
@@ -1216,6 +1235,15 @@ export function runtimeOwnershipFixupCommand(): string {
   // host cannot read credentials (gateway tokens, API key refs) from openclaw.json
   // or traverse the state directory.
   return "chown -R node:node /home/node/.openclaw 2>/dev/null || true && chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true";
+}
+
+export function codexPluginInstallCommand(): string {
+  return [
+    `if [ ! -d '${CODEX_PLUGIN_INSTALL_DIR}' ]; then`,
+    `  echo 'Installing ${CODEX_PLUGIN_NPM_SPEC} plugin for Codex OAuth'`,
+    `  node dist/index.js plugins install '${CODEX_PLUGIN_NPM_SPEC}' --pin`,
+    "fi",
+  ].join("\n");
 }
 
 /**
@@ -1527,6 +1555,7 @@ Use this table to track verified peer OpenClaw instances.
     const initScript = [
       // Write openclaw.json only if missing (don't overwrite live config)
       `test -f /home/node/.openclaw/openclaw.json || echo '${esc(ocConfig)}' > /home/node/.openclaw/openclaw.json`,
+      ...(shouldUseCodexOauth(runtimeConfig) ? [codexPluginInstallCommand()] : []),
       // Always update allowedOrigins to match the current port (fixes re-deploy with different port)
       `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${config.openaiCompatibleEndpointsEnabled !== false}};c.gateway.http.endpoints.responses={enabled:${config.openaiCompatibleEndpointsEnabled !== false}};c.gateway.controlUi ||= {};c.gateway.controlUi.allowedOrigins=['http://localhost:${port}','http://127.0.0.1:${port}'];fs.writeFileSync(p,JSON.stringify(c,null,2))"`,
       // Materialize SSH sandbox auth files into the writable volume for the node user.

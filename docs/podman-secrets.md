@@ -126,4 +126,4 @@ Use consistent secret names so scripts and docs are predictable:
 | Approach | Secret at rest? | Travels with volume backup? |
 |---|---|---|
 | Podman secrets | No (Podman store) | No |
-| OpenAI Codex OAuth import | Yes (`auth-profiles.json` in OpenClaw volume) | Yes |
+| OpenAI Codex OAuth import | Yes, inline OAuth material in `auth-profiles.json` in the OpenClaw volume | Yes |

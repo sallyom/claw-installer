@@ -1,0 +1,108 @@
+name: OpenClaw Compatibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: openclaw-compat
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check OpenClaw main
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPAT_BRANCH: bot/openclaw-compat
+    steps:
+      - name: Checkout installer
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout OpenClaw main
+        uses: actions/checkout@v6
+        with:
+          repository: openclaw/openclaw
+          ref: main
+          path: openclaw-main
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync compatibility constants
+        run: npm run openclaw:compat -- --openclaw-dir openclaw-main
+
+      - name: Build installer
+        run: npm run build
+
+      - name: Validate generated installer config
+        run: npm run openclaw:compat -- --openclaw-dir openclaw-main --check-generated
+
+      - name: Test compatibility surface
+        run: npm test -- --run src/server/deployers/__tests__/k8s-helpers.test.ts
+
+      - name: Remove OpenClaw checkout before lint
+        run: rm -rf openclaw-main
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Detect generated updates
+        id: diff
+        run: |
+          git add src/server/deployers/openclaw-compat.ts
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update compatibility PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$COMPAT_BRANCH"
+          git commit -m "chore: update OpenClaw compatibility"
+          git push --force-with-lease origin "$COMPAT_BRANCH"
+
+          cat > /tmp/openclaw-compat-pr.md <<'PRBODY'
+          ## Summary
+          - sync installer compatibility constants from `openclaw/openclaw@main`
+          - validate generated Codex OAuth and Vertex provider config against the current OpenClaw contracts
+
+          ## Verification
+          - npm run openclaw:compat -- --openclaw-dir openclaw-main
+          - npm run build
+          - npm run openclaw:compat -- --openclaw-dir openclaw-main --check-generated
+          - npm test -- --run src/server/deployers/__tests__/k8s-helpers.test.ts
+          - npm run lint
+          PRBODY
+
+          existing_pr="$(gh pr list --head "$COMPAT_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --title "Update OpenClaw compatibility" \
+              --body-file /tmp/openclaw-compat-pr.md
+          else
+            gh pr create \
+              --title "Update OpenClaw compatibility" \
+              --body-file /tmp/openclaw-compat-pr.md \
+              --head "$COMPAT_BRANCH" \
+              --base main
+          fi

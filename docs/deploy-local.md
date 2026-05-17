@@ -4,9 +4,9 @@ The local deployer runs OpenClaw as a single container on your machine. It works
 
 ## Quick Start
 
-### No git clone required (Linux)
+### No git clone required (Linux + podman)
 
-On Linux with podman or docker, you can run the installer directly from its container image:
+On Linux with podman, you can run the installer directly from its container image:
 
 ```bash
 curl -fsSLo run.sh https://raw.githubusercontent.com/sallyom/openclaw-installer/main/run.sh
@@ -14,9 +14,9 @@ chmod +x run.sh
 ./run.sh
 ```
 
-The script pulls the installer image, starts it as a container with your podman (or docker) socket mounted, and opens the UI at `http://localhost:3000`. No clone, no Node.js, no build step.
+The script pulls the installer image, starts it as a container with your rootless podman socket mounted, and opens the UI at `http://localhost:3000`. No clone, no Node.js, no build step.
 
-On macOS with podman, the script extracts the app from the image and runs it natively with Node.js (`brew install node` required).
+With Docker, or with podman on macOS, the script extracts the app from the image and runs it natively with Node.js so the installer can use the host container CLI.
 
 The installer uses the native OpenClaw home layout:
 
@@ -29,7 +29,7 @@ The installer uses the native OpenClaw home layout:
 ```bash
 git clone https://github.com/sallyom/openclaw-installer.git
 cd openclaw-installer
-npm install && npm run build && npm run dev
+npm ci && npm run build && npm run dev
 ```
 
 Open `http://localhost:3000`, pick **"This Machine"**, fill in the form, and hit Deploy.
@@ -43,6 +43,7 @@ Open `http://localhost:3000`, pick **"This Machine"**, fill in the form, and hit
 3. Pick a model provider and add the required credential source
    - API-key providers use their API key fields or inferred SecretRefs
    - OpenAI Codex uses Codex CLI OAuth from `~/.codex/auth.json` by default
+   - Select OpenAI as an additional provider when OpenAI platform APIs need `OPENAI_API_KEY`
 4. Optional: enable **SSH sandbox backend** if you want sandboxed tool execution on a remote host
 5. For Vertex AI: upload your GCP service account JSON or provide an absolute path
 6. Hit **Deploy OpenClaw**
@@ -83,7 +84,7 @@ For local deploys, the installer now follows the upstream OpenClaw secret model 
 - generated `openclaw.json` uses env-backed SecretRefs instead of storing those raw values directly
 - you can optionally provide `secrets.providers` JSON and explicit SecretRef overrides for `env`, `file`, or `exec` providers
 - for Podman setups, you can also use the **Podman secret mappings** field to expand `podman secret create` entries into runtime `--secret` flags automatically
-- OpenAI Codex is OAuth-based: the installer reads the Codex CLI `auth.json` on the installer host and imports it into the OpenClaw auth profile `openai-codex:default`
+- OpenAI Codex is OAuth-based: the installer reads the Codex CLI `auth.json` on the installer host, imports inline OAuth token material into the OpenClaw auth profile `openai-codex:default`, and configures canonical `openai/*` model refs with the Codex runtime
 
 This means the container still receives the credentials it needs, but `openclaw.json` does not embed the plaintext API keys or Telegram bot token.
 
@@ -129,7 +130,7 @@ Before starting the gateway, the installer runs an init script inside the contai
 3. Copies agent workspace files (`AGENTS.md`, `SOUL.md`, etc.) to the agent workspace
 4. Sets permissions for the `node` user
 
-If OpenAI Codex is selected, the installer then runs a separate one-off import step that writes `auth-profiles.json` for the main agent and any bundled subagents. The generated `openclaw.json` only contains non-secret routing metadata for `openai-codex:default`; the OAuth access and refresh tokens live in the agent auth profile store.
+If OpenAI Codex is selected, the installer then runs a separate one-off import step that writes `auth-profiles.json` for the main agent and any bundled subagents. The generated `openclaw.json` contains non-secret routing metadata for `openai-codex:default` plus model-scoped Codex runtime policy on `openai/*` refs; the OAuth access and refresh tokens live in the agent auth profile store. This is separate from OpenAI API-key auth, so deployments can use Codex OAuth for agent turns and `OPENAI_API_KEY` for embeddings or image generation.
 
 ### GCP credentials (Vertex AI)
 
@@ -150,6 +151,7 @@ The SA JSON is written to the podman volume, not bind-mounted, to avoid UID mism
 ./run.sh                              # Pull image and start
 ./run.sh --build                      # Build from source instead of pulling
 ./run.sh --port 8080                  # Custom port (default: 3000)
+OPENCLAW_INSTALLER_PORT=8080 ./run.sh # Same, via env var
 ./run.sh --runtime docker             # Force docker (default: auto-detect)
 ANTHROPIC_API_KEY=sk-... ./run.sh     # Anthropic
 OPENAI_API_KEY=sk-... ./run.sh        # OpenAI
@@ -158,11 +160,11 @@ OPENAI_API_KEY=sk-... ./run.sh        # OpenAI
 | Platform | Runtime | What the script does |
 |----------|---------|---------------------|
 | macOS | podman | Extracts app from image, runs natively with Node.js |
-| macOS | docker | Runs as a container with Docker socket |
+| macOS | docker | Extracts app from image, runs natively with Node.js |
 | Linux | podman | Runs as a container with rootless podman socket |
-| Linux | docker | Runs as a container with `/var/run/docker.sock` |
+| Linux | docker | Extracts app from image, runs natively with Node.js |
 
-To stop: `Ctrl+C` (macOS/podman) or `podman stop claw-installer` / `docker stop claw-installer`.
+To stop: `Ctrl+C` for native launcher runs, or `podman stop claw-installer` for the Linux podman containerized launcher.
 
 ### Manual container setup
 
@@ -176,21 +178,12 @@ podman run -d --name claw-installer \
   -v /run/user/$(id -u)/podman/podman.sock:/run/podman/podman.sock \
   -v ~/.openclaw:/home/node/.openclaw:ro,Z \
   -v ~/.openclaw/installer:/home/node/.openclaw/installer:Z \
+  -v ~/.codex:/home/node/.codex:ro \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   quay.io/sallyom/openclaw-installer:latest
 
-# Docker (any platform)
-docker run -d --name claw-installer \
-  -p 3000:3000 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v ~/.openclaw:/home/node/.openclaw:ro \
-  -v ~/.openclaw/installer:/home/node/.openclaw/installer \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  quay.io/sallyom/openclaw-installer:latest
-
-# macOS with podman (run from source — socket forwarding not supported)
-git clone https://github.com/sallyom/openclaw-installer.git
-cd openclaw-installer && npm install && npm run dev
+# macOS with podman or Docker uses the native launcher path
+./run.sh
 ```
 
 ## Remote Access

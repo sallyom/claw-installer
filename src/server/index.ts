@@ -26,6 +26,7 @@ import {
   sanitizeSavedConfigVars,
   validateUserSuppliedPath,
 } from "./security.js";
+import { configReadRateLimit, frontendRateLimit, modelDiscoveryRateLimit } from "./rate-limit.js";
 
 // Register built-in deployers
 registry.register({
@@ -123,7 +124,7 @@ app.get("/api/configs/gcp-defaults", async (_req, res) => {
 
 // List saved instance configs from ~/.openclaw/installer/local/*/.env
 // and ~/.openclaw/installer/k8s/*/deploy-config.json
-app.get("/api/configs", async (_req, res) => {
+app.get("/api/configs", configReadRateLimit, async (_req, res) => {
   const baseDir = installerDataDir();
   const configs: Array<{ name: string; type: string; vars: Record<string, unknown> }> = [];
 
@@ -173,7 +174,7 @@ app.get("/api/configs", async (_req, res) => {
   res.json(configs);
 });
 
-app.post("/api/configs/source-env", async (req, res) => {
+app.post("/api/configs/source-env", configReadRateLimit, async (req, res) => {
   const rawAgentSourceDir = String(req.body?.agentSourceDir || "").trim();
   if (!rawAgentSourceDir) {
     res.status(400).json({ error: "agentSourceDir is required" });
@@ -205,7 +206,7 @@ app.post("/api/configs/source-env", async (req, res) => {
   }
 });
 
-app.post("/api/configs/model-endpoint-models", async (req, res) => {
+app.post("/api/configs/model-endpoint-models", modelDiscoveryRateLimit, async (req, res) => {
   const endpoint = String(req.body?.endpoint || "").trim();
   const apiKey = String(req.body?.apiKey || "").trim();
   if (!endpoint) {
@@ -222,7 +223,7 @@ app.post("/api/configs/model-endpoint-models", async (req, res) => {
   }
 });
 
-app.post("/api/configs/anthropic-models", async (req, res) => {
+app.post("/api/configs/anthropic-models", modelDiscoveryRateLimit, async (req, res) => {
   const apiKey = (req.body as { apiKey?: string }).apiKey?.trim() || process.env.ANTHROPIC_API_KEY || "";
   if (!apiKey) {
     res.status(400).json({ error: "API key is required" });
@@ -236,7 +237,7 @@ app.post("/api/configs/anthropic-models", async (req, res) => {
   }
 });
 
-app.post("/api/configs/openai-models", async (req, res) => {
+app.post("/api/configs/openai-models", modelDiscoveryRateLimit, async (req, res) => {
   const apiKey = (req.body as { apiKey?: string }).apiKey?.trim() || process.env.OPENAI_API_KEY || "";
   if (!apiKey) {
     res.status(400).json({ error: "API key is required" });
@@ -250,7 +251,7 @@ app.post("/api/configs/openai-models", async (req, res) => {
   }
 });
 
-app.post("/api/configs/vertex-models", async (req, res) => {
+app.post("/api/configs/vertex-models", modelDiscoveryRateLimit, async (req, res) => {
   const body = req.body as {
     saJson?: string;
     project?: string;
@@ -297,7 +298,7 @@ if (clientDir) {
       },
     }),
   );
-  app.get("*", (_req, res) => {
+  app.get("*", frontendRateLimit, (_req, res) => {
     res.sendFile(join(clientDir, "index.html"));
   });
 }

@@ -18,7 +18,11 @@ import {
   buildManagedVaultHelperScript,
   OPENCLAW_SERVICE_ACCOUNT_NAME,
 } from "./vault-helper.js";
-import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
+import {
+  CODEX_AUTH_PROFILES_SECRET_KEY,
+  CODEX_PLUGIN_NPM_SPEC,
+  shouldUseCodexOauth,
+} from "./codex-oauth.js";
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
   return {
@@ -311,6 +315,15 @@ echo "Config initialized"
 `.trim();
 }
 
+export function buildCodexPluginInstallScript(): string {
+  return `
+if [ ! -d /home/node/.openclaw/extensions/codex ]; then
+  echo "Installing ${CODEX_PLUGIN_NPM_SPEC} plugin for Codex OAuth"
+  node dist/index.js plugins install ${CODEX_PLUGIN_NPM_SPEC} --pin
+fi
+`.trim();
+}
+
 export function deploymentManifest(
   ns: string,
   config: DeployConfig,
@@ -470,6 +483,26 @@ export function deploymentManifest(
                 { name: "exec-approvals-config", mountPath: "/exec-approvals-src", readOnly: true },
               ],
             },
+            ...(shouldUseCodexOauth(config) ? [{
+              name: "install-codex-plugin",
+              image,
+              imagePullPolicy: "IfNotPresent" as const,
+              command: ["sh", "-c", buildCodexPluginInstallScript()],
+              env: [
+                { name: "HOME", value: "/home/node" },
+                { name: "NODE_ENV", value: "production" },
+                { name: "OPENCLAW_CONFIG_DIR", value: "/home/node/.openclaw" },
+                { name: "OPENCLAW_STATE_DIR", value: "/home/node/.openclaw" },
+              ],
+              resources: {
+                requests: { memory: "256Mi", cpu: "100m" },
+                limits: { memory: "1Gi", cpu: "500m" },
+              },
+              volumeMounts: [
+                { name: "openclaw-home", mountPath: "/home/node/.openclaw" },
+                { name: "tmp-volume", mountPath: "/tmp" },
+              ],
+            }] : []),
           ],
           containers: [
             {

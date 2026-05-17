@@ -12,11 +12,22 @@ import { normalizeManagedVaultProviders } from "./vault-helper.js";
 import { hasPodmanSecretTarget } from "../../shared/podman-secrets.js";
 import {
   OPENAI_CODEX_PROVIDER,
+  OPENAI_PROVIDER,
   attachCodexOauthConfig,
   codexModelIdFromRef,
   codexOauthAuthProfileStoreJson,
   normalizeCodexModelRef,
+  shouldUseCodexOauth,
 } from "./codex-oauth.js";
+import {
+  ANTHROPIC_VERTEX_API,
+  ANTHROPIC_VERTEX_DEFAULT_MODEL,
+  ANTHROPIC_VERTEX_PROVIDER,
+  GCP_VERTEX_CREDENTIALS_MARKER,
+  GOOGLE_VERTEX_API,
+  GOOGLE_VERTEX_DEFAULT_MODEL,
+  GOOGLE_VERTEX_PROVIDER,
+} from "./openclaw-compat.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "ghcr.io/openclaw/openclaw:latest";
 export const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || DEFAULT_IMAGE;
@@ -86,14 +97,14 @@ export function normalizeModelRef(config: DeployConfig, modelRef: string): strin
   if (config.inferenceProvider === "custom-endpoint") {
     return trimmed.startsWith(`${CUSTOM_ENDPOINT_PROVIDER}/`) ? trimmed : `${CUSTOM_ENDPOINT_PROVIDER}/${trimmed}`;
   }
+  if (config.inferenceProvider === OPENAI_CODEX_PROVIDER) {
+    return normalizeCodexModelRef(trimmed);
+  }
   if (trimmed.includes("/")) return trimmed;
 
   if (config.inferenceProvider === "anthropic") return `anthropic/${trimmed}`;
   if (config.inferenceProvider === "openai") {
     return `openai/${trimmed}`;
-  }
-  if (config.inferenceProvider === OPENAI_CODEX_PROVIDER) {
-    return normalizeCodexModelRef(trimmed);
   }
   if (config.inferenceProvider === GOOGLE_PROVIDER) {
     return `${GOOGLE_PROVIDER}/${trimmed}`;
@@ -135,6 +146,55 @@ function hasLocalProviderSecret(config: DeployConfig, envVar: string): boolean {
   return config.mode === "local" && hasPodmanSecretTarget(config.podmanSecretMappings, envVar);
 }
 
+function normalizedModelOptions(primaryModel: string, extraModels: string[] = []): DeployModelOption[] {
+  const models = new Map<string, DeployModelOption>();
+  for (const model of [primaryModel, ...extraModels]) {
+    const id = model.trim();
+    if (id) {
+      models.set(id, { id, name: id });
+    }
+  }
+  return Array.from(models.values());
+}
+
+function anthropicVertexBaseUrl(location?: string): string {
+  const normalized = location?.trim().toLowerCase();
+  return normalized && normalized !== "global"
+    ? `https://${normalized}-aiplatform.googleapis.com`
+    : "https://aiplatform.googleapis.com";
+}
+
+export function attachDirectVertexProviderModels(
+  providersMap: Record<string, unknown>,
+  config: DeployConfig,
+): void {
+  if (shouldUseLitellmProxy(config)) {
+    return;
+  }
+
+  if (config.inferenceProvider === "vertex-anthropic" || (config.vertexEnabled && config.vertexProvider === "anthropic")) {
+    const model = config.vertexAnthropicModel?.trim() || ANTHROPIC_VERTEX_DEFAULT_MODEL;
+    providersMap[ANTHROPIC_VERTEX_PROVIDER] = {
+      ...((providersMap[ANTHROPIC_VERTEX_PROVIDER] as Record<string, unknown> | undefined) || {}),
+      baseUrl: anthropicVertexBaseUrl(config.googleCloudLocation),
+      api: ANTHROPIC_VERTEX_API,
+      apiKey: GCP_VERTEX_CREDENTIALS_MARKER,
+      models: normalizedModelOptions(model, config.vertexAnthropicModels),
+    };
+  }
+
+  if (config.inferenceProvider === "vertex-google" || (config.vertexEnabled && config.vertexProvider === "google")) {
+    const model = config.vertexGoogleModel?.trim() || GOOGLE_VERTEX_DEFAULT_MODEL;
+    providersMap[GOOGLE_VERTEX_PROVIDER] = {
+      ...((providersMap[GOOGLE_VERTEX_PROVIDER] as Record<string, unknown> | undefined) || {}),
+      baseUrl: "https://{location}-aiplatform.googleapis.com",
+      api: GOOGLE_VERTEX_API,
+      apiKey: GCP_VERTEX_CREDENTIALS_MARKER,
+      models: normalizedModelOptions(model, config.vertexGoogleModels),
+    };
+  }
+}
+
 export function buildConfiguredAgentModelCatalog(
   config: DeployConfig,
   primaryModelRef: string,
@@ -163,11 +223,10 @@ export function buildConfiguredAgentModelCatalog(
       alias: config.openaiModel?.trim() || "gpt-5.4",
     },
     {
-      ref: normalizeProviderModelRef(
-        OPENAI_CODEX_PROVIDER,
-        config.codexModel || (config.inferenceProvider === OPENAI_CODEX_PROVIDER ? "gpt-5.4" : undefined),
-      ),
-      alias: codexModelIdFromRef(config.codexModel || "gpt-5.4"),
+      ref: (config.codexModel?.trim() || config.inferenceProvider === OPENAI_CODEX_PROVIDER)
+        ? normalizeCodexModelRef(config.codexModel)
+        : undefined,
+      alias: codexModelIdFromRef(config.codexModel),
     },
     {
       ref: normalizeProviderModelRef(
@@ -312,11 +371,11 @@ export function deriveModel(config: DeployConfig): string {
     return normalizeProviderModelRef(OPENROUTER_PROVIDER, config.openrouterModel) || `${OPENROUTER_PROVIDER}/auto`;
   }
   if (config.inferenceProvider === "vertex-anthropic") {
-    const model = config.vertexAnthropicModel?.trim() || config.agentModel?.trim() || "claude-sonnet-4-6";
+    const model = config.vertexAnthropicModel?.trim() || config.agentModel?.trim() || ANTHROPIC_VERTEX_DEFAULT_MODEL;
     return config.litellmProxy ? `litellm/${model}` : `anthropic-vertex/${model}`;
   }
   if (config.inferenceProvider === "vertex-google") {
-    const model = config.vertexGoogleModel?.trim() || config.agentModel?.trim() || "gemini-2.5-pro";
+    const model = config.vertexGoogleModel?.trim() || config.agentModel?.trim() || GOOGLE_VERTEX_DEFAULT_MODEL;
     return config.litellmProxy ? `litellm/${model}` : `google-vertex/${model}`;
   }
   if (config.vertexEnabled && shouldUseLitellmProxy(config)) {
@@ -324,8 +383,8 @@ export function deriveModel(config: DeployConfig): string {
   }
   if (config.vertexEnabled) {
     return config.vertexProvider === "anthropic"
-      ? "anthropic-vertex/claude-sonnet-4-6"
-      : "google-vertex/gemini-2.5-pro";
+      ? `${ANTHROPIC_VERTEX_PROVIDER}/${ANTHROPIC_VERTEX_DEFAULT_MODEL}`
+      : `${GOOGLE_VERTEX_PROVIDER}/${GOOGLE_VERTEX_DEFAULT_MODEL}`;
   }
   if (config.openaiApiKey || config.openaiApiKeyRef) return "openai/gpt-5.4";
   if (config.codexOauthAuthJson || config.codexOauthProfileId) return normalizeCodexModelRef(config.codexModel);
@@ -384,6 +443,17 @@ export function resolveSubagentModel(
     : { primary };
 }
 
+function isConfiguredCodexModelRef(modelRef: string, config: DeployConfig): boolean {
+  if (!shouldUseCodexOauth(config)) {
+    return false;
+  }
+  const codexModelRefs = new Set([
+    normalizeCodexModelRef(config.codexModel),
+    ...(config.codexModels || []).map((model) => normalizeCodexModelRef(model)),
+  ]);
+  return codexModelRefs.has(modelRef);
+}
+
 /**
  * Check whether a model ref's provider appears to be unavailable given the
  * current deploy config.  Returns true when the provider likely won't work,
@@ -402,7 +472,8 @@ export function detectUnavailableProvider(
         && config.inferenceProvider !== "anthropic";
     case "openai":
       return !config.openaiApiKey && !config.openaiApiKeyRef
-        && config.inferenceProvider !== "openai";
+        && config.inferenceProvider !== "openai"
+        && !isConfiguredCodexModelRef(modelRef, config);
     case OPENAI_CODEX_PROVIDER:
       return config.inferenceProvider !== OPENAI_CODEX_PROVIDER
         && !config.codexOauthAuthJson
@@ -658,6 +729,7 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
     }
     providersMap[CUSTOM_ENDPOINT_PROVIDER] = endpointProvider;
   }
+  attachDirectVertexProviderModels(providersMap, config);
 
   if (Object.keys(providersMap).length > 0) {
     models.providers = providersMap;
@@ -694,6 +766,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   const openaiCompatibleEndpointsEnabled = config.openaiCompatibleEndpointsEnabled !== false;
   const sourceBundle = loadAgentSourceBundle(config);
   const pluginAllowlist = Array.from(new Set<string>([
+    ...(shouldUseCodexOauth(config) ? [OPENAI_PROVIDER, "codex"] : []),
     ...(shouldUseOtel(config) ? ["diagnostics-otel"] : []),
     ...((config.telegramBotToken || config.telegramBotTokenRef) ? ["telegram"] : []),
   ]));
@@ -702,11 +775,13 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   };
   controlUi.allowedOrigins = ["http://localhost:18789"];
   const useOtel = shouldUseOtel(config);
+  const useCodexOauth = shouldUseCodexOauth(config);
   const ocConfig: Record<string, unknown> = {
     plugins: {
       ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
       entries: {
         acpx: { enabled: false },
+        ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
       },
     },

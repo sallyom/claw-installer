@@ -1,0 +1,58 @@
+name: CodeQL
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/codeql/**"
+      - ".github/workflows/**"
+      - "scripts/**"
+      - "src/**"
+      - "package-lock.json"
+      - "package.json"
+      - "tsconfig*.json"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  security-high:
+    name: Security High (${{ matrix.category }})
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            category: installer
+            config_file: ./.github/codeql/codeql-installer-critical-security.yml
+          - language: actions
+            category: actions
+            config_file: ./.github/codeql/codeql-actions-critical-security.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ${{ matrix.config_file }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/codeql-security-high/${{ matrix.category }}"

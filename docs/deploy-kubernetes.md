@@ -21,7 +21,7 @@ Or from source:
 ```bash
 git clone https://github.com/sallyom/openclaw-installer.git
 cd openclaw-installer
-npm install
+npm ci
 npm run dev
 ```
 
