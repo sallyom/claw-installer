@@ -77,10 +77,9 @@ const CURATED_MODEL_OPTIONS: Partial<Record<InferenceProvider, Array<{ id: strin
     { id: "gpt-5-mini", name: "GPT-5 Mini" },
   ],
   "openai-codex": [
-    { id: "gpt-5.4", name: "GPT-5.4 Codex" },
+    { id: "gpt-5.5", name: "GPT-5.5 Codex" },
     { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
-    { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-    { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark" },
+    { id: "gpt-5.2", name: "GPT-5.2" },
   ],
   google: [
     { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
@@ -121,7 +120,7 @@ function applyProviderDefaultModel(
     case "openai-codex":
       return prev.codexModel.trim()
         ? prev
-        : { ...prev, codexModel: MODEL_DEFAULTS["openai-codex"].replace(/^openai-codex\//, "") };
+        : { ...prev, codexModel: MODEL_DEFAULTS["openai-codex"].replace(/^openai(?:-codex)?\//, "") };
     case "google":
       return prev.googleModel.trim() ? prev : { ...prev, googleModel: MODEL_DEFAULTS.google.replace(/^google\//, "") };
     case "openrouter":
@@ -540,7 +539,7 @@ export function ProviderSection({
                 onChange={(e) => update("codexOauthAuthJsonPath", e.target.value)}
               />
               <div className="hint">
-                The installer reads this file on the server host and imports the ChatGPT OAuth tokens into the managed OpenClaw state as <code>openai-codex:default</code>.
+                The installer reads this file on the server host and imports ChatGPT OAuth as <code>openai-codex:default</code>. Add OpenAI separately when platform APIs need <code>OPENAI_API_KEY</code>.
               </div>
             </div>
             <div className="form-group">
@@ -576,7 +575,7 @@ export function ProviderSection({
                 onChange={(e) => update("codexModel", e.target.value)}
               />
               <div className="hint">
-                The primary model is used as <code>openai-codex/&lt;model&gt;</code>.
+                The primary model is used as <code>openai/&lt;model&gt;</code> with the Codex runtime.
               </div>
             </div>
             <div className="form-group">
@@ -647,7 +646,7 @@ export function ProviderSection({
                 + Add Model
               </button>
               <div className="hint">
-                Additional models appear in the OpenClaw model picker as <code>openai-codex/&lt;model&gt;</code>.
+                Additional models appear in the OpenClaw model picker as <code>openai/&lt;model&gt;</code> with the Codex runtime.
               </div>
             </div>
           </>

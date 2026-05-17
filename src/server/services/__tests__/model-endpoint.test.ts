@@ -23,6 +23,12 @@ describe("normalizeModelEndpointBaseUrl", () => {
       "https://example.com/v1",
     );
   });
+
+  it("trims repeated trailing slashes before suffix normalization", () => {
+    expect(normalizeModelEndpointBaseUrl("https://example.com/v1/models///")).toBe(
+      "https://example.com/v1",
+    );
+  });
 });
 
 describe("normalizeModelEndpointModelsUrl", () => {

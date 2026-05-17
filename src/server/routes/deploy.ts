@@ -13,7 +13,12 @@ import { registry } from "../deployers/registry.js";
 import { k8sApiHttpCode } from "../services/k8s.js";
 import { createLogCallback, sendStatus } from "../ws.js";
 import { validateUserSuppliedPath } from "../security.js";
-import { OPENAI_CODEX_PROVIDER, buildCodexOauthCredentialFromCliAuthJson } from "../deployers/codex-oauth.js";
+import {
+  OPENAI_CODEX_PROVIDER,
+  buildCodexOauthCredentialFromCliAuthJson,
+  shouldUseCodexOauth,
+} from "../deployers/codex-oauth.js";
+import { deploymentRateLimit } from "../rate-limit.js";
 
 const router = Router();
 
@@ -142,7 +147,7 @@ export function applyServerEnvFallbacks(
   }
 }
 
-router.post("/", async (req, res) => {
+router.post("/", deploymentRateLimit, async (req, res) => {
   const { selectedProviders, ...configBody } = req.body as DeployConfig & { selectedProviders?: string[] };
   const config = configBody as DeployConfig;
 
@@ -297,7 +302,7 @@ router.post("/", async (req, res) => {
     }
   }
 
-  if (config.inferenceProvider === OPENAI_CODEX_PROVIDER && config.codexOauthMode !== "profile") {
+  if (shouldUseCodexOauth(config) && config.codexOauthMode !== "profile") {
     if (!config.codexOauthAuthJson) {
       const authPathInput = config.codexOauthAuthJsonPath || join(homedir(), ".codex", "auth.json");
       let authPath: string;

@@ -15,7 +15,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("includes models from anthropicModels array", () => {
     const config = minimalConfig({
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-test",
+      anthropicApiKey: "fake-anthropic-key",
       anthropicModels: ["claude-opus-4-6", "claude-haiku-4-5"],
     });
     const catalog = buildConfiguredAgentModelCatalog(config, "anthropic/claude-sonnet-4-6");
@@ -26,7 +26,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("includes models from openaiModels array", () => {
     const config = minimalConfig({
       inferenceProvider: "openai",
-      openaiApiKey: "sk-test",
+      openaiApiKey: "fake-openai-key",
       openaiModels: ["gpt-5", "gpt-5.3"],
     });
     const catalog = buildConfiguredAgentModelCatalog(config, "openai/gpt-5");
@@ -36,7 +36,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("handles models with provider prefix already included", () => {
     const config = minimalConfig({
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-test",
+      anthropicApiKey: "fake-anthropic-key",
       anthropicModels: ["anthropic/claude-opus-4-6"],
     });
     const catalog = buildConfiguredAgentModelCatalog(config, "anthropic/claude-sonnet-4-6");
@@ -46,7 +46,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("skips empty model IDs in arrays", () => {
     const config = minimalConfig({
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-test",
+      anthropicApiKey: "fake-anthropic-key",
       anthropicModels: ["claude-opus-4-6", "", "  "],
     });
     const catalog = buildConfiguredAgentModelCatalog(config, "anthropic/claude-sonnet-4-6");
@@ -59,7 +59,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("works with empty arrays (backward compat)", () => {
     const config = minimalConfig({
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-test",
+      anthropicApiKey: "fake-anthropic-key",
       anthropicModels: [],
       openaiModels: [],
     });
@@ -70,7 +70,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("works with undefined arrays (backward compat)", () => {
     const config = minimalConfig({
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-test",
+      anthropicApiKey: "fake-anthropic-key",
     });
     const catalog = buildConfiguredAgentModelCatalog(config, "anthropic/claude-sonnet-4-6");
     expect(catalog["anthropic/claude-sonnet-4-6"]).toBeDefined();
@@ -79,7 +79,7 @@ describe("buildConfiguredAgentModelCatalog with multi-model arrays", () => {
   it("adds the default Anthropic model when local Podman secret mappings provide the provider auth", () => {
     const config = minimalConfig({
       inferenceProvider: "openrouter",
-      openrouterApiKey: "sk-or-test",
+      openrouterApiKey: "fake-openrouter-key",
       podmanSecretMappings: [
         { secretName: "anthropic_api_key", targetEnv: "ANTHROPIC_API_KEY" },
       ],

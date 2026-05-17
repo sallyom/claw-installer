@@ -23,7 +23,7 @@ describe("litellm — Vertex-only proxy", () => {
   describe("generateLitellmConfig", () => {
     it("includes Vertex Anthropic models for anthropic provider", () => {
       const config = makeConfig({ vertexProvider: "anthropic" });
-      const yaml = generateLitellmConfig(config, "sk-master");
+      const yaml = generateLitellmConfig(config, "fake-litellm-master-key");
 
       expect(yaml).toContain("model: vertex_ai/claude-sonnet-4-6");
       expect(yaml).toContain("model: vertex_ai/claude-haiku-4-5");
@@ -31,7 +31,7 @@ describe("litellm — Vertex-only proxy", () => {
 
     it("includes Vertex Google models for google provider", () => {
       const config = makeConfig({ vertexProvider: "google" });
-      const yaml = generateLitellmConfig(config, "sk-master");
+      const yaml = generateLitellmConfig(config, "fake-litellm-master-key");
 
       expect(yaml).toContain("model: vertex_ai/gemini-2.5-pro");
       expect(yaml).toContain("model: vertex_ai/gemini-2.5-flash");
@@ -40,9 +40,9 @@ describe("litellm — Vertex-only proxy", () => {
     it("does not include secondary provider models even when keys are configured", () => {
       const config = makeConfig({
         vertexProvider: "anthropic",
-        openaiApiKey: "sk-oai-test",
+        openaiApiKey: "fake-openai-key",
       });
-      const yaml = generateLitellmConfig(config, "sk-master");
+      const yaml = generateLitellmConfig(config, "fake-litellm-master-key");
 
       // LiteLLM only handles Vertex — secondary providers go direct via gateway
       expect(yaml).not.toContain("model: openai/");
@@ -52,16 +52,16 @@ describe("litellm — Vertex-only proxy", () => {
     it("does not include direct Anthropic models even when anthropicApiKey is set", () => {
       const config = makeConfig({
         vertexProvider: "google",
-        anthropicApiKey: "sk-ant-test",
+        anthropicApiKey: "fake-anthropic-key",
       });
-      const yaml = generateLitellmConfig(config, "sk-master");
+      const yaml = generateLitellmConfig(config, "fake-litellm-master-key");
 
       expect(yaml).not.toContain("model: anthropic/");
     });
 
     it("omits vertex_project/location for non-vertex entries", () => {
       const config = makeConfig();
-      const yaml = generateLitellmConfig(config, "sk-master");
+      const yaml = generateLitellmConfig(config, "fake-litellm-master-key");
 
       // All entries should have vertex params since LiteLLM only has Vertex models
       const lines = yaml.split("\n");
@@ -88,7 +88,7 @@ describe("litellm — Vertex-only proxy", () => {
     it("does not include secondary provider models", () => {
       const config = makeConfig({
         vertexProvider: "anthropic",
-        openaiApiKey: "sk-oai-test",
+        openaiApiKey: "fake-openai-key",
       });
       const names = litellmRegisteredModelNames(config);
 

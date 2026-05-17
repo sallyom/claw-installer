@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { installerDataDir, installerLocalInstanceDir } from "../paths.js";
 import {
   discoverContainers,
@@ -13,6 +13,14 @@ import { registry } from "../deployers/registry.js";
 import type { CodexOauthMode, DeployResult, DeploySecretRef, InferenceProvider } from "../deployers/types.js";
 import type { PodmanSecretMapping } from "../../shared/podman-secrets.js";
 import { debugPerf } from "../debug.js";
+
+const INSTANCE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+
+function safeInstancePathSegment(name: string): string | undefined {
+  const trimmed = name.trim();
+  const base = basename(trimmed);
+  return base === trimmed && INSTANCE_PATH_SEGMENT_PATTERN.test(base) ? base : undefined;
+}
 
 function decodeSavedBase64(value?: string): string | undefined {
   if (!value) {
@@ -181,8 +189,12 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
 
 export async function readSavedConfig(containerName: string): Promise<Record<string, string>> {
   const vars: Record<string, string> = {};
+  const safeContainerName = safeInstancePathSegment(containerName);
+  if (!safeContainerName) {
+    return vars;
+  }
   try {
-    const envPath = join(installerLocalInstanceDir(containerName), ".env");
+    const envPath = join(installerLocalInstanceDir(safeContainerName), ".env");
     const content = await readFile(envPath, "utf8");
     for (const line of content.split("\n")) {
       if (line.startsWith("#") || !line.includes("=")) continue;
@@ -196,8 +208,12 @@ export async function readSavedConfig(containerName: string): Promise<Record<str
 }
 
 export async function readSavedGatewayToken(containerName: string): Promise<string | undefined> {
+  const safeContainerName = safeInstancePathSegment(containerName);
+  if (!safeContainerName) {
+    return undefined;
+  }
   try {
-    const tokenPath = join(installerLocalInstanceDir(containerName), "gateway-token");
+    const tokenPath = join(installerLocalInstanceDir(safeContainerName), "gateway-token");
     const token = (await readFile(tokenPath, "utf8")).trim();
     return token || undefined;
   } catch {

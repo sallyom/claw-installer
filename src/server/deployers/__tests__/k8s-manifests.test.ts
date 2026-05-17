@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deploymentManifest, fileConfigMapManifest, fileTreeConfigMapManifest, secretManifest } from "../k8s-manifests.js";
+import { buildCodexPluginInstallScript, deploymentManifest, fileConfigMapManifest, fileTreeConfigMapManifest, secretManifest } from "../k8s-manifests.js";
 import type { DeployConfig } from "../types.js";
 import type * as k8s from "@kubernetes/client-node";
 
@@ -145,6 +145,30 @@ describe("k8s state sync manifests", () => {
     expect(initScript).not.toContain("codex-refresh-token");
   });
 
+  it("installs the external Codex plugin before starting a Codex OAuth gateway", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        inferenceProvider: "vertex-anthropic",
+        codexModel: "gpt-5.5",
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const installContainer = initContainers.find((container) => container.name === "install-codex-plugin");
+
+    expect(installContainer?.image).toBe("ghcr.io/openclaw/openclaw:latest");
+    expect(installContainer?.command?.[2]).toBe(buildCodexPluginInstallScript());
+    expect(installContainer?.command?.[2]).toContain("node dist/index.js plugins install @openclaw/codex --pin");
+  });
+
+  it("does not install the Codex plugin when Codex OAuth is not configured", () => {
+    const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
+    const names = deployment.spec?.template.spec?.initContainers?.map((container) => container.name) ?? [];
+
+    expect(names).not.toContain("install-codex-plugin");
+  });
+
   it("uses the dedicated openclaw service account for non-A2A deployments", () => {
     const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
     expect(deployment.spec?.template?.spec?.serviceAccountName).toBe("openclaw");
@@ -248,8 +272,8 @@ describe("gateway env vars in proxy mode", () => {
     const proxyConfig = makeConfig({
       inferenceProvider: "vertex-anthropic",
       litellmProxy: true,
-      anthropicApiKey: "sk-ant-test",
-      openaiApiKey: "sk-oai-test",
+      anthropicApiKey: "fake-anthropic-key",
+      openaiApiKey: "fake-openai-key",
       gcpServiceAccountJson: '{"project_id":"test"}',
     });
 
@@ -263,8 +287,8 @@ describe("gateway env vars in proxy mode", () => {
   it("includes ANTHROPIC_API_KEY and OPENAI_API_KEY when proxy is not active", () => {
     const directConfig = makeConfig({
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-ant-test",
-      openaiApiKey: "sk-oai-test",
+      anthropicApiKey: "fake-anthropic-key",
+      openaiApiKey: "fake-openai-key",
     });
 
     const deployment = deploymentManifest("ns", directConfig);
@@ -277,7 +301,7 @@ describe("gateway env vars in proxy mode", () => {
   it("materializes default env SecretRefs into the backing Secret data", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
-      openaiApiKey: "sk-oai-test",
+      openaiApiKey: "fake-openai-key",
       openaiApiKeyRef: {
         source: "env",
         provider: "default",
@@ -293,7 +317,7 @@ describe("gateway env vars in proxy mode", () => {
 
     const secret = secretManifest("ns", config, "gateway-token");
 
-    expect(secret.stringData?.OPENAI_API_KEY).toBe("sk-oai-test");
+    expect(secret.stringData?.OPENAI_API_KEY).toBe("fake-openai-key");
     expect(secret.stringData?.TELEGRAM_BOT_TOKEN).toBe("123:abc");
   });
 
@@ -317,7 +341,7 @@ describe("gateway env vars in proxy mode", () => {
   it("materializes custom env/default SecretRef ids into the backing Secret data", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
-      openaiApiKey: "sk-oai-test",
+      openaiApiKey: "fake-openai-key",
       openaiApiKeyRef: {
         source: "env",
         provider: "default",
@@ -333,7 +357,7 @@ describe("gateway env vars in proxy mode", () => {
 
     const secret = secretManifest("ns", config, "gateway-token");
 
-    expect(secret.stringData?.JOY_OPENAI_API_KEY).toBe("sk-oai-test");
+    expect(secret.stringData?.JOY_OPENAI_API_KEY).toBe("fake-openai-key");
     expect(secret.stringData?.JOY_TELEGRAM_BOT_TOKEN).toBe("123:abc");
     expect(secret.stringData?.OPENAI_API_KEY).toBeUndefined();
     expect(secret.stringData?.TELEGRAM_BOT_TOKEN).toBeUndefined();
@@ -367,8 +391,8 @@ describe("litellm sidecar env vars in proxy mode", () => {
       inferenceProvider: "vertex-anthropic",
       litellmProxy: true,
       gcpServiceAccountJson: '{"project_id":"test"}',
-      openaiApiKey: "sk-oai-test",
-      anthropicApiKey: "sk-ant-test",
+      openaiApiKey: "fake-openai-key",
+      anthropicApiKey: "fake-anthropic-key",
     });
 
     const deployment = deploymentManifest("ns", config);
@@ -385,8 +409,8 @@ describe("litellm sidecar env vars in proxy mode", () => {
       inferenceProvider: "vertex-anthropic",
       litellmProxy: true,
       gcpServiceAccountJson: '{"project_id":"test"}',
-      openaiApiKey: "sk-oai-test",
-      anthropicApiKey: "sk-ant-test",
+      openaiApiKey: "fake-openai-key",
+      anthropicApiKey: "fake-anthropic-key",
     });
 
     const deployment = deploymentManifest("ns", config);

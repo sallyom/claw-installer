@@ -90,29 +90,202 @@ describe("model config generation", () => {
     const config = makeConfig({
       inferenceProvider: "openai-codex",
       codexOauthProfileId: "openai-codex:default",
-      codexModel: "gpt-5.4",
+      codexModel: "gpt-5.5",
       codexModels: ["gpt-5.4-mini"],
     });
 
-    expect(normalizeModelRef(config, "gpt-5.4")).toBe("openai-codex/gpt-5.4");
-    expect(deriveModel(config)).toBe("openai-codex/gpt-5.4");
+    expect(normalizeModelRef(config, "gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(normalizeModelRef(config, "openai-codex/gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(deriveModel(config)).toBe("openai/gpt-5.5");
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      plugins?: {
+        allow?: string[];
+        entries?: Record<string, { enabled?: boolean }>;
+      };
+      auth?: {
+        profiles?: Record<string, { provider?: string; mode?: string }>;
+        order?: Record<string, string[]>;
+      };
+      agents?: {
+        defaults?: {
+          model?: { primary?: string };
+          models?: Record<string, { alias?: string; agentRuntime?: { id?: string } }>;
+        };
+      };
+    };
+
+    expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["openai", "codex"]));
+    expect(rendered.plugins?.entries?.openai?.enabled).toBe(true);
+    expect(rendered.plugins?.entries?.codex?.enabled).toBe(true);
+    expect(rendered.auth?.profiles?.["openai-codex:default"]).toEqual({
+      provider: "openai-codex",
+      mode: "oauth",
+    });
+    expect(rendered.auth?.order?.["openai-codex"]).toEqual(["openai-codex:default"]);
+    expect(rendered.agents?.defaults?.model?.primary).toBe("openai/gpt-5.5");
+    expect(rendered.agents?.defaults?.models?.["openai-codex/gpt-5.5"]).toBeUndefined();
+    expect(rendered.agents?.defaults?.models).toMatchObject({
+      "openai/gpt-5.5": { alias: "gpt-5.5", agentRuntime: { id: "codex" } },
+      "openai/gpt-5.4-mini": { alias: "gpt-5.4-mini", agentRuntime: { id: "codex" } },
+    });
+  });
+
+  it("keeps Codex OAuth and OpenAI API-key auth separate when both are configured", () => {
+    const codexAuthJson = JSON.stringify({
+      auth_mode: "chatgpt",
+      tokens: {
+        access_token: "codex-access-token",
+        refresh_token: "codex-refresh-token",
+      },
+    });
+    const config = makeConfig({
+      inferenceProvider: "openai-codex",
+      codexOauthAuthJson: codexAuthJson,
+      codexOauthProfileId: "openai-codex:default",
+      openaiApiKey: "fake-openai-runtime-key",
+    });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       auth?: {
         profiles?: Record<string, { provider?: string; mode?: string }>;
         order?: Record<string, string[]>;
       };
-      agents?: { defaults?: { models?: Record<string, { alias?: string }> } };
+      secrets?: { providers?: Record<string, unknown> };
+      models?: { providers?: Record<string, unknown> };
+      agents?: {
+        defaults?: {
+          model?: { primary?: string };
+          models?: Record<string, { agentRuntime?: { id?: string } }>;
+        };
+      };
     };
+    const authProfiles = buildManagedAgentAuthProfiles(config);
 
+    expect(rendered.agents?.defaults?.model?.primary).toBe("openai/gpt-5.5");
+    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]?.agentRuntime).toEqual({
+      id: "codex",
+    });
     expect(rendered.auth?.profiles?.["openai-codex:default"]).toEqual({
       provider: "openai-codex",
       mode: "oauth",
     });
     expect(rendered.auth?.order?.["openai-codex"]).toEqual(["openai-codex:default"]);
-    expect(rendered.agents?.defaults?.models).toMatchObject({
-      "openai-codex/gpt-5.4": { alias: "gpt-5.4" },
-      "openai-codex/gpt-5.4-mini": { alias: "gpt-5.4-mini" },
+    expect(rendered.secrets?.providers).toMatchObject({ default: { source: "env" } });
+    expect(rendered.models?.providers?.openai).toBeUndefined();
+    expect(authProfiles?.profiles["openai:default"]).toEqual({
+      type: "api_key",
+      provider: "openai",
+      keyRef: {
+        source: "env",
+        provider: "default",
+        id: "OPENAI_API_KEY",
+      },
+    });
+  });
+
+  it("registers Codex OAuth as a selectable additional provider", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-anthropic",
+      vertexEnabled: true,
+      vertexProvider: "anthropic",
+      litellmProxy: false,
+      vertexAnthropicModel: "claude-sonnet-4-6",
+      codexOauthProfileId: "openai-codex:default",
+      codexModel: "gpt-5.5",
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      plugins?: {
+        allow?: string[];
+        entries?: Record<string, { enabled?: boolean }>;
+      };
+      agents?: {
+        defaults?: {
+          model?: { primary?: string };
+          models?: Record<string, { alias?: string; agentRuntime?: { id?: string } }>;
+        };
+      };
+    };
+
+    expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["openai", "codex"]));
+    expect(rendered.plugins?.entries?.openai?.enabled).toBe(true);
+    expect(rendered.plugins?.entries?.codex?.enabled).toBe(true);
+    expect(rendered.agents?.defaults?.model?.primary).toBe("anthropic-vertex/claude-sonnet-4-6");
+    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]).toMatchObject({
+      alias: "gpt-5.5",
+      agentRuntime: { id: "codex" },
+    });
+  });
+
+  it("registers direct Anthropic Vertex models in models.providers", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-anthropic",
+      vertexEnabled: true,
+      vertexProvider: "anthropic",
+      litellmProxy: false,
+      googleCloudLocation: "us-central1",
+      vertexAnthropicModel: "claude-sonnet-4-6",
+      vertexAnthropicModels: ["claude-opus-4-6"],
+      gcpServiceAccountJson: '{"project_id":"vertex-project"}',
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      agents?: { defaults?: { model?: { primary?: string } } };
+      models?: {
+        providers?: Record<string, {
+          baseUrl?: string;
+          api?: string;
+          apiKey?: string;
+          models?: Array<{ id?: string; name?: string }>;
+        }>;
+      };
+    };
+
+    expect(rendered.agents?.defaults?.model?.primary).toBe("anthropic-vertex/claude-sonnet-4-6");
+    expect(rendered.models?.providers?.["anthropic-vertex"]).toMatchObject({
+      baseUrl: "https://us-central1-aiplatform.googleapis.com",
+      api: "anthropic-messages",
+      apiKey: "gcp-vertex-credentials",
+      models: [
+        { id: "claude-sonnet-4-6", name: "claude-sonnet-4-6" },
+        { id: "claude-opus-4-6", name: "claude-opus-4-6" },
+      ],
+    });
+  });
+
+  it("registers direct Google Vertex models in models.providers", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-google",
+      vertexEnabled: true,
+      vertexProvider: "google",
+      litellmProxy: false,
+      vertexGoogleModel: "gemini-2.5-pro",
+      vertexGoogleModels: ["gemini-2.5-flash"],
+      gcpServiceAccountJson: '{"project_id":"vertex-project"}',
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      agents?: { defaults?: { model?: { primary?: string } } };
+      models?: {
+        providers?: Record<string, {
+          baseUrl?: string;
+          api?: string;
+          apiKey?: string;
+          models?: Array<{ id?: string; name?: string }>;
+        }>;
+      };
+    };
+
+    expect(rendered.agents?.defaults?.model?.primary).toBe("google-vertex/gemini-2.5-pro");
+    expect(rendered.models?.providers?.["google-vertex"]).toMatchObject({
+      baseUrl: "https://{location}-aiplatform.googleapis.com",
+      api: "google-vertex",
+      apiKey: "gcp-vertex-credentials",
+      models: [
+        { id: "gemini-2.5-pro", name: "gemini-2.5-pro" },
+        { id: "gemini-2.5-flash", name: "gemini-2.5-flash" },
+      ],
     });
   });
 
@@ -488,7 +661,7 @@ describe("model config generation", () => {
         provider: "vault",
         id: "providers/anthropic/apiKey",
       },
-      openaiApiKey: "sk-openai-runtime",
+      openaiApiKey: "fake-openai-runtime-key",
       googleApiKey: "google-runtime-key",
     });
 
@@ -630,7 +803,7 @@ describe("model config generation", () => {
   it("configures OpenRouter provider auth and published models", () => {
     const config = makeConfig({
       inferenceProvider: "openrouter",
-      openrouterApiKey: "sk-or-test",
+      openrouterApiKey: "fake-openrouter-key",
       openrouterModel: "openrouter/auto",
       openrouterModels: ["openrouter/anthropic/claude-sonnet-4-6"],
     });
@@ -740,7 +913,7 @@ describe("model config generation", () => {
     const config = makeConfig({
       mode: "kubernetes",
       inferenceProvider: "openai",
-      openaiApiKey: "sk-openai-test",
+      openaiApiKey: "fake-openai-key",
       telegramEnabled: true,
       telegramBotToken: "123:abc",
       telegramAllowFrom: "12345",
@@ -768,7 +941,7 @@ describe("model config generation", () => {
       mode: "local",
       inferenceProvider: "anthropic",
       agentSecurityMode: "secretrefs",
-      anthropicApiKey: "sk-ant-test",
+      anthropicApiKey: "fake-anthropic-key",
     });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
@@ -784,7 +957,7 @@ describe("model config generation", () => {
     const config = makeConfig({
       mode: "local",
       inferenceProvider: "anthropic",
-      anthropicApiKey: "sk-ant-test",
+      anthropicApiKey: "fake-anthropic-key",
     });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
@@ -802,7 +975,7 @@ describe("litellm model catalog in proxy mode", () => {
       inferenceProvider: "vertex-anthropic",
       litellmProxy: true,
       gcpServiceAccountJson: '{"project_id":"test"}',
-      openaiApiKey: "sk-oai-test",
+      openaiApiKey: "fake-openai-key",
     });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
@@ -820,7 +993,7 @@ describe("litellm model catalog in proxy mode", () => {
       inferenceProvider: "vertex-anthropic",
       litellmProxy: true,
       gcpServiceAccountJson: '{"project_id":"test"}',
-      openaiApiKey: "sk-oai-test",
+      openaiApiKey: "fake-openai-key",
     });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
@@ -953,33 +1126,60 @@ describe("resolveSubagentModel", () => {
 
 describe("detectUnavailableProvider", () => {
   it("detects missing OpenAI provider", () => {
-    const config = makeConfig({ inferenceProvider: "anthropic", anthropicApiKey: "sk-ant" });
+    const config = makeConfig({ inferenceProvider: "anthropic", anthropicApiKey: "fake-anthropic-key" });
     expect(detectUnavailableProvider("openai/gpt-5.4", config)).toBe(true);
   });
 
   it("detects missing Google provider", () => {
-    const config = makeConfig({ inferenceProvider: "anthropic", anthropicApiKey: "sk-ant" });
+    const config = makeConfig({ inferenceProvider: "anthropic", anthropicApiKey: "fake-anthropic-key" });
     expect(detectUnavailableProvider("google/gemini-3.1-pro-preview", config)).toBe(true);
   });
 
   it("detects missing Anthropic provider", () => {
-    const config = makeConfig({ inferenceProvider: "openai", openaiApiKey: "sk-oai" });
+    const config = makeConfig({ inferenceProvider: "openai", openaiApiKey: "fake-openai-key" });
     expect(detectUnavailableProvider("anthropic/claude-sonnet-4-6", config)).toBe(true);
   });
 
   it("returns false when OpenAI key is configured", () => {
-    const config = makeConfig({ openaiApiKey: "sk-oai" });
+    const config = makeConfig({ openaiApiKey: "fake-openai-key" });
     expect(detectUnavailableProvider("openai/gpt-5.4", config)).toBe(false);
   });
 
   it("returns false when Anthropic key is configured", () => {
-    const config = makeConfig({ anthropicApiKey: "sk-ant" });
+    const config = makeConfig({ anthropicApiKey: "fake-anthropic-key" });
     expect(detectUnavailableProvider("anthropic/claude-sonnet-4-6", config)).toBe(false);
   });
 
   it("returns false when inference provider matches", () => {
     const config = makeConfig({ inferenceProvider: "openai" });
     expect(detectUnavailableProvider("openai/gpt-5.4", config)).toBe(false);
+  });
+
+  it("returns false for OpenAI refs backed by configured Codex OAuth models", () => {
+    const config = makeConfig({
+      inferenceProvider: "openai-codex",
+      codexModels: ["gpt-5.2"],
+    });
+
+    expect(detectUnavailableProvider("openai/gpt-5.5", config)).toBe(false);
+    expect(detectUnavailableProvider("openai/gpt-5.2", config)).toBe(false);
+    expect(detectUnavailableProvider("openai/gpt-5.4", config)).toBe(true);
+  });
+
+  it("preserves subagent OpenAI refs backed by configured Codex OAuth models", () => {
+    const config = makeConfig({
+      inferenceProvider: "openai-codex",
+      codexModels: ["gpt-5.2"],
+    });
+
+    expect(resolveSubagentModel(
+      { primary: "openai/gpt-5.2" },
+      "openai/gpt-5.5",
+      config,
+    )).toEqual({
+      primary: "openai/gpt-5.2",
+      fallbacks: ["openai/gpt-5.5"],
+    });
   });
 
   it("detects missing vertex-anthropic provider", () => {

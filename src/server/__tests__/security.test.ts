@@ -8,6 +8,7 @@ import {
   sanitizeSavedConfigVars,
   validateUserSuppliedPath,
 } from "../security.js";
+import { validateInstallerPathSegment } from "../paths.js";
 
 describe("security helpers", () => {
   it("redacts sensitive values from saved config payloads", () => {
@@ -49,9 +50,19 @@ describe("security helpers", () => {
   });
 
   it("allows user-supplied paths inside approved roots and rejects paths outside them", () => {
-    expect(validateUserSuppliedPath("README.md", "test path")).toContain("/openclaw-installer/README.md");
+    expect(validateUserSuppliedPath("README.md", "test path")).toMatch(/README\.md$/);
     expect(() => validateUserSuppliedPath("/etc/passwd", "test path")).toThrow(
       /must be under your home directory, the current repository, or the system temp directory/,
+    );
+  });
+
+  it("rejects installer path segments that could escape instance directories", () => {
+    expect(validateInstallerPathSegment("openclaw-sally-lynx", "instance")).toBe("openclaw-sally-lynx");
+    expect(() => validateInstallerPathSegment("../openclaw-sally-lynx", "instance")).toThrow(
+      /contains invalid characters/,
+    );
+    expect(() => validateInstallerPathSegment("openclaw/sally", "instance")).toThrow(
+      /contains invalid characters/,
     );
   });
 

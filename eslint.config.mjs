@@ -21,6 +21,7 @@ export default tseslint.config(
     files: [
       "src/server/**/*.ts",
       "src/**/*.test.ts",
+      "scripts/**/*.mjs",
       "vite.config.ts",
     ],
     languageOptions: {
