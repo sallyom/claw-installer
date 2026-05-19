@@ -50,7 +50,6 @@ function collectContracts() {
   const anthropicIndex = read(resolve(openclawDir, "extensions/anthropic-vertex/index.ts"));
   const googleManifest = JSON.parse(read(resolve(openclawDir, "extensions/google/openclaw.plugin.json")));
   const codexManifest = JSON.parse(read(resolve(openclawDir, "extensions/codex/openclaw.plugin.json")));
-  const codexPackage = JSON.parse(read(resolve(openclawDir, "extensions/codex/package.json")));
   const googleTransport = read(resolve(openclawDir, "extensions/google/transport-stream.ts"));
   const pluginAutoEnable = read(resolve(openclawDir, "src/config/plugin-auto-enable.core.test.ts"));
   const modelResolver = read(resolve(openclawDir, "src/agents/pi-embedded-runner/model.ts"));
@@ -84,7 +83,6 @@ function collectContracts() {
     OPENAI_CODEX_PROVIDER: "openai-codex",
     CODEX_AGENT_RUNTIME_ID: "codex",
     CODEX_PLUGIN_ID: codexManifest.id,
-    CODEX_PLUGIN_NPM_SPEC: codexPackage.name,
     DEFAULT_CODEX_MODEL: matchRequired(pluginAutoEnable, /model: "openai\/([^"]+)"/, "Codex default OpenAI model"),
     ANTHROPIC_VERTEX_PROVIDER: matchRequired(anthropicIndex, /const PROVIDER_ID = "([^"]+)";/, "Anthropic Vertex provider id"),
     ANTHROPIC_VERTEX_DEFAULT_MODEL: matchRequired(

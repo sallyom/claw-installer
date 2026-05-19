@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   applyGatewayRuntimeConfig,
-  codexPluginInstallCommand,
   parseContainerRunArgs,
   resolveLocalRuntimeModelEndpoint,
   runtimeOwnershipFixupCommand,
@@ -153,14 +152,5 @@ describe("runtimeOwnershipFixupCommand", () => {
     const chownIdx = cmd.indexOf("chown -R node:node /home/node/.openclaw");
     const chmodIdx = cmd.indexOf("chmod -R o-rwx /home/node/.openclaw");
     expect(chmodIdx).toBeGreaterThan(chownIdx);
-  });
-});
-
-describe("codexPluginInstallCommand", () => {
-  it("installs the external Codex plugin before the gateway can use the codex harness", () => {
-    const cmd = codexPluginInstallCommand();
-
-    expect(cmd).toContain("/home/node/.openclaw/extensions/codex");
-    expect(cmd).toContain("node dist/index.js plugins install '@openclaw/codex' --pin");
   });
 });

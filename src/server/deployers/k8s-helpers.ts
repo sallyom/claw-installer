@@ -11,6 +11,7 @@ import type { AgentSourceBundle } from "./agent-source.js";
 import { normalizeManagedVaultProviders } from "./vault-helper.js";
 import { hasPodmanSecretTarget } from "../../shared/podman-secrets.js";
 import {
+  CODEX_PLUGIN_ID,
   OPENAI_CODEX_PROVIDER,
   OPENAI_PROVIDER,
   attachCodexOauthConfig,
@@ -766,7 +767,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   const openaiCompatibleEndpointsEnabled = config.openaiCompatibleEndpointsEnabled !== false;
   const sourceBundle = loadAgentSourceBundle(config);
   const pluginAllowlist = Array.from(new Set<string>([
-    ...(shouldUseCodexOauth(config) ? [OPENAI_PROVIDER, "codex"] : []),
+    ...(shouldUseCodexOauth(config) ? [OPENAI_PROVIDER, CODEX_PLUGIN_ID] : []),
     ...(shouldUseOtel(config) ? ["diagnostics-otel"] : []),
     ...((config.telegramBotToken || config.telegramBotTokenRef) ? ["telegram"] : []),
   ]));
@@ -781,7 +782,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
       ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
       entries: {
         acpx: { enabled: false },
-        ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
+        ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, [CODEX_PLUGIN_ID]: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
       },
     },
