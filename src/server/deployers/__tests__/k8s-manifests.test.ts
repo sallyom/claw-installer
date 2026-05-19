@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexPluginInstallScript, deploymentManifest, fileConfigMapManifest, fileTreeConfigMapManifest, secretManifest } from "../k8s-manifests.js";
+import { deploymentManifest, fileConfigMapManifest, fileTreeConfigMapManifest, secretManifest } from "../k8s-manifests.js";
 import type { DeployConfig } from "../types.js";
 import type * as k8s from "@kubernetes/client-node";
 
@@ -145,7 +145,7 @@ describe("k8s state sync manifests", () => {
     expect(initScript).not.toContain("codex-refresh-token");
   });
 
-  it("installs the external Codex plugin before starting a Codex OAuth gateway", () => {
+  it("does not install the external Codex plugin for a Codex OAuth gateway", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
@@ -154,12 +154,9 @@ describe("k8s state sync manifests", () => {
       }),
     );
 
-    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
-    const installContainer = initContainers.find((container) => container.name === "install-codex-plugin");
+    const names = deployment.spec?.template.spec?.initContainers?.map((container) => container.name) ?? [];
 
-    expect(installContainer?.image).toBe("ghcr.io/openclaw/openclaw:latest");
-    expect(installContainer?.command?.[2]).toBe(buildCodexPluginInstallScript());
-    expect(installContainer?.command?.[2]).toContain("node dist/index.js plugins install @openclaw/codex --pin");
+    expect(names).not.toContain("install-codex-plugin");
   });
 
   it("does not install the Codex plugin when Codex OAuth is not configured", () => {

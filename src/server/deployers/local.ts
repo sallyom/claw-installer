@@ -56,8 +56,6 @@ import {
 import {
   OPENAI_CODEX_PROVIDER,
   OPENAI_PROVIDER,
-  CODEX_PLUGIN_ID,
-  CODEX_PLUGIN_NPM_SPEC,
   attachCodexOauthConfig,
   buildCodexOauthCredentialFromCliAuthJson,
   codexOauthAuthProfileStoreJson,
@@ -90,7 +88,6 @@ const SANDBOX_SSH_IDENTITY_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/identity`;
 const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.pub`;
 const SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/known_hosts`;
 const AUTH_PROFILE_IMPORT_CONTAINER_PATH = "/tmp/openclaw-auth-profiles/auth-profiles.json";
-const CODEX_PLUGIN_INSTALL_DIR = `/home/node/.openclaw/extensions/${CODEX_PLUGIN_ID}`;
 
 /** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
 export function shouldAlwaysPull(image: string): boolean {
@@ -1237,15 +1234,6 @@ export function runtimeOwnershipFixupCommand(): string {
   return "chown -R node:node /home/node/.openclaw 2>/dev/null || true && chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true";
 }
 
-export function codexPluginInstallCommand(): string {
-  return [
-    `if [ ! -d '${CODEX_PLUGIN_INSTALL_DIR}' ]; then`,
-    `  echo 'Installing ${CODEX_PLUGIN_NPM_SPEC} plugin for Codex OAuth'`,
-    `  node dist/index.js plugins install '${CODEX_PLUGIN_NPM_SPEC}' --pin`,
-    "fi",
-  ].join("\n");
-}
-
 /**
  * Build the podman/docker run args for a given config.
  * Used by both deploy() and start() so the same long-lived run command
@@ -1555,7 +1543,6 @@ Use this table to track verified peer OpenClaw instances.
     const initScript = [
       // Write openclaw.json only if missing (don't overwrite live config)
       `test -f /home/node/.openclaw/openclaw.json || echo '${esc(ocConfig)}' > /home/node/.openclaw/openclaw.json`,
-      ...(shouldUseCodexOauth(runtimeConfig) ? [codexPluginInstallCommand()] : []),
       // Always update allowedOrigins to match the current port (fixes re-deploy with different port)
       `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${config.openaiCompatibleEndpointsEnabled !== false}};c.gateway.http.endpoints.responses={enabled:${config.openaiCompatibleEndpointsEnabled !== false}};c.gateway.controlUi ||= {};c.gateway.controlUi.allowedOrigins=['http://localhost:${port}','http://127.0.0.1:${port}'];fs.writeFileSync(p,JSON.stringify(c,null,2))"`,
       // Materialize SSH sandbox auth files into the writable volume for the node user.
