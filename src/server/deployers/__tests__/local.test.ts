@@ -142,15 +142,21 @@ describe("parseContainerRunArgs", () => {
 // so that other users/processes on the host cannot read gateway tokens or API
 // key references from openclaw.json.
 describe("runtimeOwnershipFixupCommand", () => {
-  it("strips world bits from the state directory after chown (issue #71)", () => {
+  it("sets doctor-clean state directory and config file permissions after chown (issue #71)", () => {
     const cmd = runtimeOwnershipFixupCommand();
 
     expect(cmd).toContain("chown -R node:node /home/node/.openclaw");
     expect(cmd).toContain("chmod -R o-rwx /home/node/.openclaw");
+    expect(cmd).toContain("chmod 700 /home/node/.openclaw");
+    expect(cmd).toContain("chmod 600 /home/node/.openclaw/openclaw.json");
 
-    // chmod must run AFTER chown so ownership is correct before mode change
+    // chmod must run AFTER chown so ownership is correct before mode change.
     const chownIdx = cmd.indexOf("chown -R node:node /home/node/.openclaw");
-    const chmodIdx = cmd.indexOf("chmod -R o-rwx /home/node/.openclaw");
-    expect(chmodIdx).toBeGreaterThan(chownIdx);
+    const stripWorldIdx = cmd.indexOf("chmod -R o-rwx /home/node/.openclaw");
+    const stateDirIdx = cmd.indexOf("chmod 700 /home/node/.openclaw");
+    const configIdx = cmd.indexOf("chmod 600 /home/node/.openclaw/openclaw.json");
+    expect(stripWorldIdx).toBeGreaterThan(chownIdx);
+    expect(stateDirIdx).toBeGreaterThan(stripWorldIdx);
+    expect(configIdx).toBeGreaterThan(stateDirIdx);
   });
 });
