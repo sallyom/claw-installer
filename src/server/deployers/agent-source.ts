@@ -73,7 +73,8 @@ export function mainWorkspaceShellCondition(
   }
   // Build: if [ "$base" = "workspace-builder" ] || [ "$base" = "workspace-research" ] ...
   const checks = ids.map((id) => `[ "$base" = "workspace-${id}" ]`).join(" || ");
-  return `if ${checks}; then dest="/home/node/.openclaw/$base"; else dest="${mainDest}"; fi`;
+  const workspaceParent = mainDest.replace(/\/[^/]+$/, "") || ".";
+  return `if ${checks}; then dest="${workspaceParent}/$base"; else dest="${mainDest}"; fi`;
 }
 
 export function loadAgentSourceCronJobs(agentSourceDir?: string): string | undefined {

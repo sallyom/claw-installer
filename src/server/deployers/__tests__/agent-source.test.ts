@@ -58,7 +58,7 @@ describe("subagentIds", () => {
 
 // Regression tests for #62: workspace-shadowman not recognized as main agent workspace
 describe("mainWorkspaceShellCondition", () => {
-  const mainDest = "/home/node/.openclaw/workspace-openclaw_shadowman";
+  const mainDest = "/openclaw-home/home/.openclaw/workspace-openclaw_shadowman";
 
   it("maps all workspace-* dirs to main when bundle is undefined", () => {
     const result = mainWorkspaceShellCondition(mainDest, undefined);
@@ -81,17 +81,17 @@ describe("mainWorkspaceShellCondition", () => {
     };
     const result = mainWorkspaceShellCondition(mainDest, bundle);
 
-    // Subagent dirs should be routed to /home/node/.openclaw/$base
+    // Subagent dirs should be routed to /openclaw-home/home/.openclaw/$base
     expect(result).toContain('[ "$base" = "workspace-builder" ]');
     expect(result).toContain('[ "$base" = "workspace-research" ]');
     expect(result).toContain('[ "$base" = "workspace-ops" ]');
-    expect(result).toContain('dest="/home/node/.openclaw/$base"');
+    expect(result).toContain('dest="/openclaw-home/home/.openclaw/$base"');
 
     // Non-subagent dirs (workspace-shadowman, workspace-main, etc.) go to main
     expect(result).toContain(`dest="${mainDest}"`);
 
     // The subagent check is in the "then" branch, main is in the "else" branch
-    expect(result).toMatch(/^if .+ then dest="\/home\/node\/.openclaw\/\$base"; else dest=".*"; fi$/);
+    expect(result).toMatch(/^if .+ then dest="\/openclaw-home\/home\/.openclaw\/\$base"; else dest=".*"; fi$/);
   });
 
   it("handles single subagent", () => {
@@ -100,7 +100,7 @@ describe("mainWorkspaceShellCondition", () => {
     };
     const result = mainWorkspaceShellCondition(mainDest, bundle);
     expect(result).toBe(
-      `if [ "$base" = "workspace-builder" ]; then dest="/home/node/.openclaw/$base"; else dest="${mainDest}"; fi`,
+      `if [ "$base" = "workspace-builder" ]; then dest="/openclaw-home/home/.openclaw/$base"; else dest="${mainDest}"; fi`,
     );
   });
 
