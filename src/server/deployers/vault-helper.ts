@@ -1,7 +1,7 @@
 import path from "node:path";
 
 export const OPENCLAW_SERVICE_ACCOUNT_NAME = "openclaw";
-export const MANAGED_VAULT_HELPER_PATH = "/openclaw-home/home/.openclaw/bin/openclaw-vault";
+export const MANAGED_VAULT_HELPER_PATH = "/home/node/.openclaw/bin/openclaw-vault";
 export const LEGACY_IMAGE_VAULT_HELPER_PATH = "/home/node/bin/openclaw-vault";
 export const DEFAULT_VAULT_ADDR = "http://vault.vault.svc:8200";
 export const DEFAULT_VAULT_K8S_ROLE = OPENCLAW_SERVICE_ACCOUNT_NAME;
@@ -111,7 +111,7 @@ export function buildManagedVaultHelperScript(): string {
     "  }",
     "  const ids = Array.isArray(request.ids) ? request.ids.filter((id) => typeof id === 'string') : [];",
     "  const env = { ...process.env };",
-    "  env.HOME = env.HOME || '/openclaw-home/home';",
+    "  env.HOME = env.HOME || '/home/node';",
     "  env.VAULT_ADDR = env.VAULT_ADDR || '" + DEFAULT_VAULT_ADDR + "';",
     "  if (!env.VAULT_TOKEN) {",
     "    const jwtPath = env.VAULT_JWT_PATH || '/var/run/secrets/kubernetes.io/serviceaccount/token';",

@@ -21,8 +21,8 @@ import {
 } from "./vault-helper.js";
 import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
 
-export const OPENCLAW_HOME_VOLUME_MOUNT = "/openclaw-home";
-export const OPENCLAW_RUNTIME_HOME = `${OPENCLAW_HOME_VOLUME_MOUNT}/home`;
+export const OPENCLAW_HOME_VOLUME_MOUNT = "/home/node";
+export const OPENCLAW_RUNTIME_HOME = OPENCLAW_HOME_VOLUME_MOUNT;
 export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
@@ -289,13 +289,13 @@ if [ -f ${OPENCLAW_HOME_VOLUME_MOUNT}/openclaw.json ] || [ -d ${OPENCLAW_HOME_VO
   for path in ${OPENCLAW_HOME_VOLUME_MOUNT}/* ${OPENCLAW_HOME_VOLUME_MOUNT}/.[!.]* ${OPENCLAW_HOME_VOLUME_MOUNT}/..?*; do
     [ -e "$path" ] || continue
     base="$(basename "$path")"
-    case "$base" in .|..|home|lost+found) continue ;; esac
+    case "$base" in .|..|.openclaw|gcp|lost+found) continue ;; esac
     [ -e "${OPENCLAW_RUNTIME_DIR}/$base" ] && continue
     mv "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || cp -R "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || true
   done
 fi
 mkdir -p ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config
-chmod 700 ${OPENCLAW_RUNTIME_HOME} ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config 2>/dev/null || true
+chmod 700 ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config 2>/dev/null || true
 cp /config/openclaw.json ${OPENCLAW_RUNTIME_DIR}/openclaw.json
 chmod 600 ${OPENCLAW_RUNTIME_DIR}/openclaw.json
 mkdir -p ${OPENCLAW_RUNTIME_DIR}/bin
@@ -323,7 +323,8 @@ ${authProfileLines}
 chown -R 1000:0 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R g=u ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R o-rwx ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
-chmod 700 ${OPENCLAW_RUNTIME_HOME} ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
+chmod 700 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
+chmod 600 ${OPENCLAW_RUNTIME_DIR}/openclaw.json 2>/dev/null || true
 chmod 0755 ${MANAGED_VAULT_HELPER_PATH} 2>/dev/null || true
 echo "Config initialized"
 `.trim();

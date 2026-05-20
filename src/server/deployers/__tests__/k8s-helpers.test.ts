@@ -648,7 +648,7 @@ describe("model config generation", () => {
       };
     };
 
-    expect(rendered.secrets?.providers?.vault?.command).toBe("/openclaw-home/home/.openclaw/bin/openclaw-vault");
+    expect(rendered.secrets?.providers?.vault?.command).toBe("/home/node/.openclaw/bin/openclaw-vault");
     expect(rendered.secrets?.providers?.vault?.timeoutMs).toBe(15000);
     expect(rendered.secrets?.providers?.vault?.noOutputTimeoutMs).toBe(15000);
   });
