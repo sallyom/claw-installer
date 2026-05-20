@@ -488,14 +488,14 @@ describe("model config generation", () => {
     expect(rendered.gateway?.http?.endpoints?.responses?.enabled).toBe(false);
   });
 
-  it("disables the bundled acpx plugin by default in generated config", () => {
+  it("does not configure the bundled acpx plugin by default", () => {
     const rendered = buildOpenClawConfig(makeConfig(), "gateway-token") as {
       plugins?: {
         entries?: Record<string, { enabled?: boolean }>;
       };
     };
 
-    expect(rendered.plugins?.entries?.acpx?.enabled).toBe(false);
+    expect(rendered.plugins?.entries?.acpx).toBeUndefined();
   });
 
   it("writes the display name into the default agent identity", () => {
@@ -1005,6 +1005,26 @@ describe("litellm model catalog in proxy mode", () => {
     // Primary model (claude-sonnet-4-6) should NOT be in the provider listing
     // because it is already in agents.defaults.models via buildDefaultAgentModelCatalog
     expect(modelIds).not.toContain("claude-sonnet-4-6");
+  });
+
+  it("caps Anthropic Vertex LiteLLM models at the provider max output tokens", () => {
+    const config = makeConfig({
+      inferenceProvider: "vertex-anthropic",
+      vertexProvider: "anthropic",
+      litellmProxy: true,
+      gcpServiceAccountJson: '{"project_id":"test"}',
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      models?: { providers?: { litellm?: { maxTokens?: number; models?: Array<{ id: string; maxTokens?: number }> } } };
+    };
+
+    expect(rendered.models?.providers?.litellm?.maxTokens).toBe(128000);
+    expect(rendered.models?.providers?.litellm?.models).toContainEqual({
+      id: "claude-haiku-4-5",
+      name: "claude-haiku-4-5",
+      maxTokens: 128000,
+    });
   });
 });
 

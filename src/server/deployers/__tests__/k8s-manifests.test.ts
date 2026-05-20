@@ -20,6 +20,11 @@ function gatewayEnvNames(deployment: k8s.V1Deployment): string[] {
   return (container?.env ?? []).map((e) => e.name);
 }
 
+function gatewayEnvMap(deployment: k8s.V1Deployment): Record<string, string | undefined> {
+  const container = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+  return Object.fromEntries((container?.env ?? []).map((e) => [e.name, e.value]));
+}
+
 describe("k8s state sync manifests", () => {
   const config: DeployConfig = makeConfig();
 
@@ -78,6 +83,31 @@ describe("k8s state sync manifests", () => {
     expect(cronVolume?.configMap?.items).toEqual([{ key: "jobs.json", path: "jobs.json" }]);
   });
 
+  it("uses a writable PVC-backed runtime home at /home/node", () => {
+    const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
+    const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
+    const gatewayContainer = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+    const env = gatewayEnvMap(deployment);
+
+    expect(initContainer?.volumeMounts?.find((mount) => mount.name === "openclaw-home")?.mountPath).toBe("/home/node");
+    expect(gatewayContainer?.volumeMounts?.find((mount) => mount.name === "openclaw-home")?.mountPath).toBe("/home/node");
+    expect(env.HOME).toBe("/home/node");
+    expect(env.OPENCLAW_CONFIG_DIR).toBe("/home/node/.openclaw");
+    expect(env.OPENCLAW_STATE_DIR).toBe("/home/node/.openclaw");
+    expect(env.NPM_CONFIG_CACHE).toBe("/home/node/.npm");
+    expect(env.XDG_CACHE_HOME).toBe("/home/node/.cache");
+    expect(env.XDG_CONFIG_HOME).toBe("/home/node/.config");
+  });
+
+  it("migrates the legacy PVC-root state layout into the runtime home", () => {
+    const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
+    const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
+
+    expect(initScript).toContain("if [ -f /home/node/openclaw.json ] || [ -d /home/node/workspace ]; then");
+    expect(initScript).toContain("case \"$base\" in .|..|.openclaw|gcp|lost+found) continue ;; esac");
+    expect(initScript).toContain("mv \"$path\" \"/home/node/.openclaw/$base\"");
+  });
+
   it("provisions the managed Vault helper in the writable home volume", () => {
     const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
     const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
@@ -117,6 +147,21 @@ describe("k8s state sync manifests", () => {
     expect(initScript).toContain('"provider": "vault"');
     expect(initScript).toContain('"id": "providers/anthropic/apiKey"');
     expect(initScript).toContain('"id": "providers/openai/apiKey"');
+  });
+
+  it("creates the session store directory for each managed agent", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        agentSourceDir: "/tmp/does-not-exist",
+      }),
+      false,
+      [],
+      [],
+    );
+    const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
+
+    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw_alpha/sessions");
   });
 
   it("stores imported Codex OAuth profiles in the Secret instead of the init command", () => {
@@ -256,8 +301,10 @@ describe("workspace copy in init script", () => {
     // Stripping world bits must happen BEFORE the vault binary re-open so the
     // binary's world-execute bit is intentionally restored.
     const oRwxIdx = initScript.indexOf("chmod -R o-rwx /home/node/.openclaw");
+    const configChmodIdx = initScript.indexOf("chmod 600 /home/node/.openclaw/openclaw.json", oRwxIdx);
     const vaultChmodIdx = initScript.indexOf("chmod 0755 /home/node/.openclaw/bin/openclaw-vault", oRwxIdx);
     expect(oRwxIdx).toBeGreaterThan(-1);
+    expect(configChmodIdx).toBeGreaterThan(oRwxIdx);
     expect(vaultChmodIdx).toBeGreaterThan(oRwxIdx);
   });
 });

@@ -932,7 +932,6 @@ function buildOpenClawConfig(config: DeployConfig, gatewayToken: string): string
     plugins: {
       ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
       entries: {
-        acpx: { enabled: false },
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
       },
@@ -1231,7 +1230,12 @@ export function runtimeOwnershipFixupCommand(): string {
   // Fix for #71: strip world bits after chown so other users/processes on the
   // host cannot read credentials (gateway tokens, API key refs) from openclaw.json
   // or traverse the state directory.
-  return "chown -R node:node /home/node/.openclaw 2>/dev/null || true && chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true";
+  return [
+    "chown -R node:node /home/node/.openclaw 2>/dev/null || true",
+    "chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true",
+    "chmod 700 /home/node/.openclaw 2>/dev/null || true",
+    "chmod 600 /home/node/.openclaw/openclaw.json 2>/dev/null || true",
+  ].join(" && ");
 }
 
 /**

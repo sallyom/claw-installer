@@ -16,9 +16,14 @@ import type { TreeEntry } from "../state-tree.js";
 import { loadAgentSourceBundle, mainWorkspaceShellCondition } from "./agent-source.js";
 import {
   buildManagedVaultHelperScript,
+  MANAGED_VAULT_HELPER_PATH,
   OPENCLAW_SERVICE_ACCOUNT_NAME,
 } from "./vault-helper.js";
 import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
+
+export const OPENCLAW_HOME_VOLUME_MOUNT = "/home/node";
+export const OPENCLAW_RUNTIME_HOME = OPENCLAW_HOME_VOLUME_MOUNT;
+export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
   return {
@@ -249,48 +254,63 @@ export function buildInitScript(config: DeployConfig): string {
   const bundle = loadAgentSourceBundle(config);
   const agentFiles = ["AGENTS.md", "agent.json", "SOUL.md", "IDENTITY.md", "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md"];
   const copyLines = agentFiles
-    .map((f) => `  cp /agents/${f} /home/node/.openclaw/workspace-${id}/${f} 2>/dev/null || true`)
+    .map((f) => `  cp /agents/${f} ${OPENCLAW_RUNTIME_DIR}/workspace-${id}/${f} 2>/dev/null || true`)
     .join("\n");
 
-  const mainWorkspaceDest = `/home/node/.openclaw/workspace-${id}`;
+  const mainWorkspaceDest = `${OPENCLAW_RUNTIME_DIR}/workspace-${id}`;
   const workspaceRouting = mainWorkspaceShellCondition(mainWorkspaceDest, bundle);
   const vaultHelperScript = buildManagedVaultHelperScript();
   const authProfiles = buildManagedAgentAuthProfiles(config);
   const authProfilesSecretJson = buildManagedAgentAuthProfilesSecretJson(config);
-  const authManagedAgentIds = Array.from(new Set([id, ...((bundle?.agents || []).map((entry) => entry.id).filter(Boolean))]));
+  const managedAgentIds = Array.from(new Set([id, ...((bundle?.agents || []).map((entry) => entry.id).filter(Boolean))]));
+  const sessionStoreLines = managedAgentIds
+    .map((agentId) => `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/sessions`)
+    .join("\n");
   const authProfileLines = authProfilesSecretJson
-    ? authManagedAgentIds
+    ? managedAgentIds
       .map((agentId) => [
-        `mkdir -p /home/node/.openclaw/agents/${agentId}/agent`,
-        `if [ -f /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ]; then cp /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} /home/node/.openclaw/agents/${agentId}/agent/auth-profiles.json; fi`,
-        `chmod 600 /home/node/.openclaw/agents/${agentId}/agent/auth-profiles.json 2>/dev/null || true`,
+        `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent`,
+        `if [ -f /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ]; then cp /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json; fi`,
+        `chmod 600 ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json 2>/dev/null || true`,
       ].join("\n"))
       .join("\n")
     : authProfiles
-      ? authManagedAgentIds
+      ? managedAgentIds
       .map((agentId) => [
-        `mkdir -p /home/node/.openclaw/agents/${agentId}/agent`,
-        `cat > /home/node/.openclaw/agents/${agentId}/agent/auth-profiles.json <<'EOF_AUTH_PROFILES'`,
+        `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent`,
+        `cat > ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json <<'EOF_AUTH_PROFILES'`,
         JSON.stringify(authProfiles, null, 2),
         "EOF_AUTH_PROFILES",
-        `chmod 600 /home/node/.openclaw/agents/${agentId}/agent/auth-profiles.json`,
+        `chmod 600 ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json`,
       ].join("\n"))
       .join("\n")
       : "";
 
   return `
-cp /config/openclaw.json /home/node/.openclaw/openclaw.json
-chmod 600 /home/node/.openclaw/openclaw.json
-mkdir -p /home/node/.openclaw/bin
-mkdir -p /home/node/.openclaw/workspace
-mkdir -p /home/node/.openclaw/skills
-mkdir -p /home/node/.openclaw/cron
-mkdir -p /home/node/.openclaw/workspace-${id}
-touch /home/node/.openclaw/workspace-${id}/.env
-cat > /home/node/.openclaw/bin/openclaw-vault <<'EOF_VAULT_HELPER'
+mkdir -p ${OPENCLAW_RUNTIME_HOME} ${OPENCLAW_RUNTIME_DIR}
+if [ -f ${OPENCLAW_HOME_VOLUME_MOUNT}/openclaw.json ] || [ -d ${OPENCLAW_HOME_VOLUME_MOUNT}/workspace ]; then
+  for path in ${OPENCLAW_HOME_VOLUME_MOUNT}/* ${OPENCLAW_HOME_VOLUME_MOUNT}/.[!.]* ${OPENCLAW_HOME_VOLUME_MOUNT}/..?*; do
+    [ -e "$path" ] || continue
+    base="$(basename "$path")"
+    case "$base" in .|..|.openclaw|gcp|lost+found) continue ;; esac
+    [ -e "${OPENCLAW_RUNTIME_DIR}/$base" ] && continue
+    mv "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || cp -R "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || true
+  done
+fi
+mkdir -p ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config
+chmod 700 ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config 2>/dev/null || true
+cp /config/openclaw.json ${OPENCLAW_RUNTIME_DIR}/openclaw.json
+chmod 600 ${OPENCLAW_RUNTIME_DIR}/openclaw.json
+mkdir -p ${OPENCLAW_RUNTIME_DIR}/bin
+mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace
+mkdir -p ${OPENCLAW_RUNTIME_DIR}/skills
+mkdir -p ${OPENCLAW_RUNTIME_DIR}/cron
+mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace-${id}
+touch ${OPENCLAW_RUNTIME_DIR}/workspace-${id}/.env
+cat > ${MANAGED_VAULT_HELPER_PATH} <<'EOF_VAULT_HELPER'
 ${vaultHelperScript}
 EOF_VAULT_HELPER
-chmod 0755 /home/node/.openclaw/bin/openclaw-vault
+chmod 0755 ${MANAGED_VAULT_HELPER_PATH}
 ${copyLines}
 for dir in /agents-tree/workspace-*; do
   [ -d "$dir" ] || continue
@@ -299,14 +319,17 @@ for dir in /agents-tree/workspace-*; do
   mkdir -p "$dest"
   cp -r "$dir"/. "$dest"/ 2>/dev/null || true
 done
-cp -r /skills-src/. /home/node/.openclaw/skills/ 2>/dev/null || true
-cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true
-cp /exec-approvals-src/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true
+cp -r /skills-src/. ${OPENCLAW_RUNTIME_DIR}/skills/ 2>/dev/null || true
+cp /cron-src/jobs.json ${OPENCLAW_RUNTIME_DIR}/cron/jobs.json 2>/dev/null || true
+cp /exec-approvals-src/exec-approvals.json ${OPENCLAW_RUNTIME_DIR}/exec-approvals.json 2>/dev/null || true
+${sessionStoreLines}
 ${authProfileLines}
-chown -R 1000:0 /home/node/.openclaw 2>/dev/null || true
-chmod -R g=u /home/node/.openclaw 2>/dev/null || true
-chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true
-chmod 0755 /home/node/.openclaw/bin/openclaw-vault 2>/dev/null || true
+chown -R 1000:0 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
+chmod -R g=u ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
+chmod -R o-rwx ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
+chmod 700 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
+chmod 600 ${OPENCLAW_RUNTIME_DIR}/openclaw.json 2>/dev/null || true
+chmod 0755 ${MANAGED_VAULT_HELPER_PATH} 2>/dev/null || true
 echo "Config initialized"
 `.trim();
 }
@@ -323,10 +346,14 @@ export function deploymentManifest(
   const image = defaultImage(config);
 
   const envVars: k8s.V1EnvVar[] = [
-    { name: "HOME", value: "/home/node" },
+    { name: "HOME", value: OPENCLAW_RUNTIME_HOME },
     { name: "NODE_ENV", value: "production" },
-    { name: "OPENCLAW_CONFIG_DIR", value: "/home/node/.openclaw" },
-    { name: "OPENCLAW_STATE_DIR", value: "/home/node/.openclaw" },
+    { name: "OPENCLAW_CONFIG_DIR", value: OPENCLAW_RUNTIME_DIR },
+    { name: "OPENCLAW_STATE_DIR", value: OPENCLAW_RUNTIME_DIR },
+    { name: "NPM_CONFIG_CACHE", value: `${OPENCLAW_RUNTIME_HOME}/.npm` },
+    { name: "npm_config_cache", value: `${OPENCLAW_RUNTIME_HOME}/.npm` },
+    { name: "XDG_CACHE_HOME", value: `${OPENCLAW_RUNTIME_HOME}/.cache` },
+    { name: "XDG_CONFIG_HOME", value: `${OPENCLAW_RUNTIME_HOME}/.config` },
     {
       name: "OPENCLAW_GATEWAY_TOKEN",
       valueFrom: { secretKeyRef: { name: "openclaw-secrets", key: "OPENCLAW_GATEWAY_TOKEN" } },
@@ -460,7 +487,7 @@ export function deploymentManifest(
                 limits: { memory: "128Mi", cpu: "200m" },
               },
               volumeMounts: [
-                { name: "openclaw-home", mountPath: "/home/node/.openclaw" },
+                { name: "openclaw-home", mountPath: OPENCLAW_HOME_VOLUME_MOUNT },
                 { name: "config-template", mountPath: "/config" },
                 { name: "openclaw-secrets", mountPath: "/openclaw-secrets", readOnly: true },
                 { name: "agent-config", mountPath: "/agents" },
@@ -514,7 +541,7 @@ export function deploymentManifest(
                 failureThreshold: 2,
               },
               volumeMounts: [
-                { name: "openclaw-home", mountPath: "/home/node/.openclaw" },
+                { name: "openclaw-home", mountPath: OPENCLAW_HOME_VOLUME_MOUNT },
                 { name: "tmp-volume", mountPath: "/tmp" },
                 // Only mount GCP creds on gateway in direct (non-proxy) mode
                 ...(!useProxy && config.gcpServiceAccountJson
