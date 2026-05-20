@@ -149,6 +149,21 @@ describe("k8s state sync manifests", () => {
     expect(initScript).toContain('"id": "providers/openai/apiKey"');
   });
 
+  it("creates the session store directory for each managed agent", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        agentSourceDir: "/tmp/does-not-exist",
+      }),
+      false,
+      [],
+      [],
+    );
+    const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
+
+    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw_alpha/sessions");
+  });
+
   it("stores imported Codex OAuth profiles in the Secret instead of the init command", () => {
     const codexAuthJson = JSON.stringify({
       auth_mode: "chatgpt",

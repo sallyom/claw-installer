@@ -262,9 +262,12 @@ export function buildInitScript(config: DeployConfig): string {
   const vaultHelperScript = buildManagedVaultHelperScript();
   const authProfiles = buildManagedAgentAuthProfiles(config);
   const authProfilesSecretJson = buildManagedAgentAuthProfilesSecretJson(config);
-  const authManagedAgentIds = Array.from(new Set([id, ...((bundle?.agents || []).map((entry) => entry.id).filter(Boolean))]));
+  const managedAgentIds = Array.from(new Set([id, ...((bundle?.agents || []).map((entry) => entry.id).filter(Boolean))]));
+  const sessionStoreLines = managedAgentIds
+    .map((agentId) => `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/sessions`)
+    .join("\n");
   const authProfileLines = authProfilesSecretJson
-    ? authManagedAgentIds
+    ? managedAgentIds
       .map((agentId) => [
         `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent`,
         `if [ -f /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ]; then cp /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json; fi`,
@@ -272,7 +275,7 @@ export function buildInitScript(config: DeployConfig): string {
       ].join("\n"))
       .join("\n")
     : authProfiles
-      ? authManagedAgentIds
+      ? managedAgentIds
       .map((agentId) => [
         `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent`,
         `cat > ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json <<'EOF_AUTH_PROFILES'`,
@@ -319,6 +322,7 @@ done
 cp -r /skills-src/. ${OPENCLAW_RUNTIME_DIR}/skills/ 2>/dev/null || true
 cp /cron-src/jobs.json ${OPENCLAW_RUNTIME_DIR}/cron/jobs.json 2>/dev/null || true
 cp /exec-approvals-src/exec-approvals.json ${OPENCLAW_RUNTIME_DIR}/exec-approvals.json 2>/dev/null || true
+${sessionStoreLines}
 ${authProfileLines}
 chown -R 1000:0 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R g=u ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
