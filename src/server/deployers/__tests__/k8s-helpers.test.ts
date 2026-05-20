@@ -488,14 +488,14 @@ describe("model config generation", () => {
     expect(rendered.gateway?.http?.endpoints?.responses?.enabled).toBe(false);
   });
 
-  it("disables the bundled acpx plugin by default in generated config", () => {
+  it("does not configure the bundled acpx plugin by default", () => {
     const rendered = buildOpenClawConfig(makeConfig(), "gateway-token") as {
       plugins?: {
         entries?: Record<string, { enabled?: boolean }>;
       };
     };
 
-    expect(rendered.plugins?.entries?.acpx?.enabled).toBe(false);
+    expect(rendered.plugins?.entries?.acpx).toBeUndefined();
   });
 
   it("writes the display name into the default agent identity", () => {

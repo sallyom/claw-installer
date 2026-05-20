@@ -796,7 +796,6 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
     plugins: {
       ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
       entries: {
-        acpx: { enabled: false },
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, [CODEX_PLUGIN_ID]: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
       },
