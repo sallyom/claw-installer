@@ -121,7 +121,7 @@ export default function PluginList() {
       </div>
 
       {errors.length > 0 && (
-        <div className="card" style={{ borderColor: "rgba(248, 81, 73, 0.3)" }}>
+        <div className="card" style={{ borderColor: "var(--border-focus)" }}>
           <button
             type="button"
             onClick={() => setShowErrors(!showErrors)}
@@ -149,7 +149,7 @@ export default function PluginList() {
                   style={{
                     padding: "0.5rem 0.75rem",
                     marginBottom: "0.5rem",
-                    background: "rgba(248, 81, 73, 0.08)",
+                    background: "var(--danger-soft)",
                     borderRadius: "var(--radius-sm)",
                     fontSize: "0.85rem",
                   }}
@@ -223,7 +223,7 @@ function PluginRow({
                 fontSize: "0.75rem",
                 padding: "0.1rem 0.4rem",
                 borderRadius: "99px",
-                background: "rgba(139, 148, 158, 0.15)",
+                background: "var(--warning-soft)",
                 color: "var(--text-secondary)",
               }}>
                 {SOURCE_LABELS[plugin.source] || plugin.source}

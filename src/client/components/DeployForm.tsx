@@ -853,8 +853,8 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           style={{
             marginBottom: "1rem",
             padding: "0.6rem 1rem",
-            background: "rgba(52, 152, 219, 0.1)",
-            border: "1px solid rgba(52, 152, 219, 0.3)",
+            background: "var(--accent-soft)",
+            border: "1px solid var(--border-focus)",
             borderRadius: "var(--radius-sm)",
             fontSize: "0.85rem",
             color: "var(--text-secondary)",
@@ -890,7 +890,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               Connected to cluster: <strong>{defaults.k8sContext}</strong>
             </div>
           ) : (
-            <div style={{ color: "#e74c3c", fontSize: "0.85rem" }}>
+            <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>
               No Kubernetes cluster detected. Configure kubectl and ensure you are logged in.
             </div>
           )}
@@ -960,10 +960,10 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               placeholder="e.g., lynx"
               value={config.agentName}
               onChange={(e) => update("agentName", e.target.value)}
-              style={agentNameError ? { borderColor: "#e74c3c" } : undefined}
+              style={agentNameError ? { borderColor: "var(--danger)" } : undefined}
             />
             {agentNameError ? (
-              <div className="hint" style={{ color: "#e74c3c" }}>{agentNameError}</div>
+              <div className="hint" style={{ color: "var(--danger)" }}>{agentNameError}</div>
             ) : (
               <div className="hint">Lowercase letters, numbers, and hyphens (e.g., my-agent)</div>
             )}
@@ -1431,7 +1431,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
 
         <div style={{ marginTop: "1.5rem" }}>
           {!isValid && (
-            <div style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+            <div style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
               {validationErrors.join(" ")}
             </div>
           )}

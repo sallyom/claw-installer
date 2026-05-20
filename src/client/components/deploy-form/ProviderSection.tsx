@@ -253,7 +253,7 @@ export function ProviderSection({
                 <div className="hint">Loading models...</div>
               )}
               {anthropicModelsError && (
-                <div className="hint" style={{ color: "#e74c3c" }}>{anthropicModelsError}</div>
+                <div className="hint" style={{ color: "var(--danger)" }}>{anthropicModelsError}</div>
               )}
               {visibleAnthropicOptions.length > 0 && (
                 <select
@@ -403,7 +403,7 @@ export function ProviderSection({
                 <div className="hint">Loading models...</div>
               )}
               {openaiModelsError && (
-                <div className="hint" style={{ color: "#e74c3c" }}>{openaiModelsError}</div>
+                <div className="hint" style={{ color: "var(--danger)" }}>{openaiModelsError}</div>
               )}
               {visibleOpenaiOptions.length > 0 && (
                 <select
@@ -888,11 +888,11 @@ export function ProviderSection({
               <div style={{
                 marginBottom: "1rem",
                 padding: "0.5rem 0.75rem",
-                background: "rgba(231, 76, 60, 0.1)",
-                border: "1px solid rgba(231, 76, 60, 0.3)",
-                borderRadius: "6px",
+                background: "var(--danger-soft)",
+                border: "1px solid var(--border-focus)",
+                borderRadius: "var(--radius-sm)",
                 fontSize: "0.85rem",
-                color: "#e74c3c",
+                color: "var(--danger)",
               }}>
                 Your environment credentials are Application Default Credentials (from <code>gcloud auth</code>),
                 which are not supported by Gemini on Vertex. Either upload a Service Account JSON below,
@@ -1040,7 +1040,7 @@ export function ProviderSection({
                       <div className="hint">Loading models...</div>
                     )}
                     {error && (
-                      <div className="hint" style={{ color: "#e74c3c" }}>{error}</div>
+                      <div className="hint" style={{ color: "var(--danger)" }}>{error}</div>
                     )}
                     {warning && !error && (
                       <div className="hint">{warning}</div>
@@ -1174,7 +1174,7 @@ export function ProviderSection({
                 Runs a LiteLLM sidecar that handles Vertex AI authentication.
                 GCP credentials stay in the proxy container and are never exposed to the agent.
                 {!config.litellmProxy && (
-                  <span style={{ color: "#e67e22" }}>
+                  <span style={{ color: "var(--warning)" }}>
                     {" "}Disabled: credentials will be passed directly to the agent container.
                   </span>
                 )}
@@ -1183,9 +1183,9 @@ export function ProviderSection({
                 <div style={{
                   marginTop: "0.5rem",
                   padding: "0.5rem 0.75rem",
-                  background: "rgba(52, 152, 219, 0.1)",
-                  border: "1px solid rgba(52, 152, 219, 0.3)",
-                  borderRadius: "6px",
+                  background: "var(--accent-soft)",
+                  border: "1px solid var(--border-focus)",
+                  borderRadius: "var(--radius-sm)",
                   fontSize: "0.85rem",
                   color: "var(--text-secondary)",
                 }}>
@@ -1228,7 +1228,7 @@ export function ProviderSection({
                 If you paste just the service URL, the installer will normalize it to a <code>/v1</code> API base for runtime requests.
               </div>
               {modelEndpointOptionsError && (
-                <div className="hint" style={{ color: "#e74c3c", marginTop: "0.35rem" }}>
+                <div className="hint" style={{ color: "var(--danger)", marginTop: "0.35rem" }}>
                   {modelEndpointOptionsError}
                 </div>
               )}

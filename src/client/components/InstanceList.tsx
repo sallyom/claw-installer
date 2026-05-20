@@ -75,12 +75,12 @@ function StatusBadge({ inst, isActing }: { inst: Instance; isActing: boolean }) 
   const badgeColor: Record<string, string> = {
     running: "",
     stopped: "",
-    deploying: "#f39c12",
-    error: "#e74c3c",
+    deploying: "var(--warning)",
+    error: "var(--danger)",
     unknown: "",
   };
   const style = badgeColor[inst.status]
-    ? { marginLeft: "0.5rem", background: badgeColor[inst.status], color: "#fff" }
+    ? { marginLeft: "0.5rem", background: badgeColor[inst.status], color: "var(--text-on-accent)" }
     : { marginLeft: "0.5rem" };
 
   let label = inst.status;
@@ -107,7 +107,7 @@ function K8sProgress({ inst }: { inst: Instance }) {
       style={{
         padding: "0.5rem 1rem",
         fontSize: "0.8rem",
-        color: inst.status === "error" ? "#e74c3c" : "var(--text-secondary)",
+        color: inst.status === "error" ? "var(--danger)" : "var(--text-secondary)",
         borderTop: "1px solid var(--border)",
         fontFamily: "var(--font-mono)",
       }}
@@ -115,7 +115,7 @@ function K8sProgress({ inst }: { inst: Instance }) {
       <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
         {inst.statusDetail && <span>{inst.statusDetail}</span>}
         {pod && pod.restarts > 0 && (
-          <span style={{ color: "#e74c3c" }}>
+          <span style={{ color: "var(--danger)" }}>
             Restarts: {pod.restarts}
           </span>
         )}
@@ -505,7 +505,7 @@ export default function InstanceList({ active }: { active: boolean }) {
         style={{
           padding: "0.75rem 1rem",
           borderBottom: "1px solid var(--border)",
-          background: "rgba(243, 156, 18, 0.08)",
+          background: "var(--warning-soft)",
           color: "var(--text-secondary)",
           fontSize: "0.9rem",
         }}
@@ -543,7 +543,7 @@ export default function InstanceList({ active }: { active: boolean }) {
                   {isK8s && (
                     <span
                       className="badge"
-                      style={{ marginLeft: "0.25rem", background: "var(--accent)", color: "#fff", fontSize: "0.65rem" }}
+                      style={{ marginLeft: "0.25rem", background: "var(--accent)", color: "var(--text-on-accent)", fontSize: "0.65rem" }}
                     >
                       {inst.mode === "openshift" ? "OpenShift" : "K8s"}
                     </span>
@@ -570,7 +570,7 @@ export default function InstanceList({ active }: { active: boolean }) {
                   ) : isDeploying ? (
                     "deploying..."
                   ) : isError ? (
-                    <span style={{ color: "#e74c3c" }}>
+                    <span style={{ color: "var(--danger)" }}>
                       deployment error — check pod status
                     </span>
                   ) : (
@@ -666,12 +666,12 @@ export default function InstanceList({ active }: { active: boolean }) {
                   borderTop: "1px solid var(--border)",
                   color:
                     pairingMessage.tone === "success"
-                      ? "#1f7a3d"
+                      ? "var(--success)"
                       : pairingMessage.tone === "info"
                         ? "var(--text-secondary)"
                       : pairingMessage.tone === "warning"
-                        ? "#9a6700"
-                        : "#e74c3c",
+                        ? "var(--warning)"
+                        : "var(--danger)",
                   fontSize: "0.85rem",
                 }}
               >
