@@ -184,6 +184,49 @@ describe("model config generation", () => {
     });
   });
 
+  it("renders OpenShell sandbox plugin config for cluster deployments", () => {
+    const config = makeConfig({
+      sandboxEnabled: true,
+      sandboxBackend: "openshell",
+      sandboxMode: "all",
+      sandboxScope: "session",
+      sandboxWorkspaceAccess: "rw",
+      sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+      sandboxOpenShellMode: "mirror",
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      plugins?: {
+        allow?: string[];
+        entries?: Record<string, { enabled?: boolean; config?: Record<string, unknown> }>;
+      };
+      agents?: {
+        defaults?: {
+          sandbox?: Record<string, unknown>;
+        };
+      };
+    };
+
+    expect(rendered.agents?.defaults?.sandbox).toEqual({
+      mode: "all",
+      backend: "openshell",
+      scope: "session",
+      workspaceAccess: "rw",
+    });
+    expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["openshell"]));
+    expect(rendered.plugins?.entries?.openshell).toEqual({
+      enabled: true,
+      config: {
+        command: "/opt/openshell/bin/openshell",
+        gateway: "openshell",
+        from: "openclaw",
+        mode: "mirror",
+        gatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+        timeoutSeconds: 180,
+      },
+    });
+  });
+
   it("registers Codex OAuth as a selectable additional provider", () => {
     const config = makeConfig({
       inferenceProvider: "vertex-anthropic",
@@ -617,6 +660,49 @@ describe("model config generation", () => {
       id: "TELEGRAM_BOT_TOKEN",
     });
     expect(rendered.channels?.telegram?.allowFrom).toEqual([12345]);
+  });
+
+  it("generates the bundled Vault plugin SecretRef provider", () => {
+    const config = makeConfig({
+      inferenceProvider: "openai",
+      vaultSecretsEnabled: true,
+      openaiApiKeyRef: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      },
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      plugins?: {
+        allow?: string[];
+        entries?: Record<string, { enabled?: boolean }>;
+      };
+      secrets?: {
+        providers?: Record<string, {
+          source?: string;
+          command?: string;
+          args?: string[];
+          passEnv?: string[];
+          allowInsecurePath?: boolean;
+        }>;
+      };
+    };
+
+    expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["vault"]));
+    expect(rendered.plugins?.entries?.vault).toEqual({ enabled: true });
+    expect(rendered.secrets?.providers?.vault).toMatchObject({
+      source: "exec",
+      command: "/usr/local/bin/node",
+      args: ["/app/extensions/vault/vault-secret-ref-resolver.js"],
+      allowInsecurePath: true,
+      passEnv: expect.arrayContaining([
+        "VAULT_ADDR",
+        "VAULT_TOKEN",
+        "CLAW_VAULT_KV_MOUNT",
+        "CLAW_VAULT_KV_VERSION",
+      ]),
+    });
   });
 
   it("rewrites managed vault helper commands onto the writable OpenClaw home volume", () => {

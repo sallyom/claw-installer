@@ -5,6 +5,22 @@ function nonEmpty(value?: string): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+const OPEN_SHELL_CLI_MOUNT_PATH = "/opt/openshell/bin/openshell";
+
+export function buildOpenShellPluginConfig(config: DeployConfig): Record<string, unknown> | undefined {
+  if (!config.sandboxEnabled || config.sandboxBackend !== "openshell") {
+    return undefined;
+  }
+  return {
+    command: OPEN_SHELL_CLI_MOUNT_PATH,
+    gateway: "openshell",
+    from: "openclaw",
+    mode: config.sandboxOpenShellMode || "mirror",
+    gatewayEndpoint: nonEmpty(config.sandboxOpenShellGatewayEndpoint),
+    timeoutSeconds: 180,
+  };
+}
+
 export function buildSandboxConfig(config: DeployConfig): Record<string, unknown> | undefined {
   if (!config.sandboxEnabled) {
     return undefined;

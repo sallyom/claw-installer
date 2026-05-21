@@ -1,0 +1,8 @@
+# Per-user OpenShell namespace for the PoC.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshell-alice
+  labels:
+    app.kubernetes.io/part-of: openclaw-openshell-poc
+    openshell.openclaw.ai/user: alice

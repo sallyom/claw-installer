@@ -601,6 +601,50 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     setSelectedProviders(providers);
   }, []);
 
+  const handleVaultEnabledChange = useCallback((enabled: boolean) => {
+    setConfig((prev) => {
+      const next: DeployFormConfig = { ...prev, vaultSecretsEnabled: enabled };
+      if (!enabled) {
+        return next;
+      }
+
+      const selected = new Set(selectedProviders);
+      if (selected.has("anthropic") && !prev.anthropicApiKeyRefId.trim()) {
+        next.anthropicApiKeyRefSource = "exec";
+        next.anthropicApiKeyRefProvider = "vault";
+        next.anthropicApiKeyRefId = "providers/anthropic/apiKey";
+      }
+      if (selected.has("openai") && !prev.openaiApiKeyRefId.trim()) {
+        next.openaiApiKeyRefSource = "exec";
+        next.openaiApiKeyRefProvider = "vault";
+        next.openaiApiKeyRefId = "providers/openai/apiKey";
+      }
+      if (selected.has("google") && !prev.googleApiKeyRefId.trim()) {
+        next.googleApiKeyRefSource = "exec";
+        next.googleApiKeyRefProvider = "vault";
+        next.googleApiKeyRefId = "providers/google/apiKey";
+      }
+      if (selected.has("openrouter") && !prev.openrouterApiKeyRefId.trim()) {
+        next.openrouterApiKeyRefSource = "exec";
+        next.openrouterApiKeyRefProvider = "vault";
+        next.openrouterApiKeyRefId = "providers/openrouter/apiKey";
+      }
+      if (selected.has("custom-endpoint") && !prev.modelEndpointApiKeyRefId.trim()) {
+        next.modelEndpointApiKeyRefSource = "exec";
+        next.modelEndpointApiKeyRefProvider = "vault";
+        next.modelEndpointApiKeyRefId = "providers/endpoint/apiKey";
+      }
+
+      if (prev.telegramEnabled && !prev.telegramBotTokenRefId.trim()) {
+        next.telegramBotTokenRefSource = "exec";
+        next.telegramBotTokenRefProvider = "vault";
+        next.telegramBotTokenRefId = "channels/telegram/botToken";
+      }
+
+      return next;
+    });
+  }, [selectedProviders]);
+
   const handleDeploy = async () => {
     if (!isValid) {
       return;
@@ -759,11 +803,17 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   } else if (agentNameError) {
     validationErrors.push(agentNameError);
   }
-  if (config.sandboxEnabled && !config.sandboxSshTarget.trim()) {
+  if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshTarget.trim()) {
     validationErrors.push("SSH Target is required when the SSH sandbox backend is enabled.");
   }
-  if (config.sandboxEnabled && !config.sandboxSshIdentityPath.trim()) {
+  if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshIdentityPath.trim()) {
     validationErrors.push("SSH Private Key is required when the SSH sandbox backend is enabled.");
+  }
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !isClusterMode) {
+    validationErrors.push("OpenShell sandbox backend is only available for Kubernetes and OpenShift deployments.");
+  }
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint.trim()) {
+    validationErrors.push("OpenShell Gateway Endpoint is required when the OpenShell sandbox backend is enabled.");
   }
   if (config.sandboxEnabled && !hasSandboxToolSelection) {
     validationErrors.push("Select at least one sandbox tool group or disable custom sandbox tool baseline.");
@@ -771,14 +821,40 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   if (isClusterMode && !defaults?.k8sAvailable) {
     validationErrors.push("No Kubernetes cluster detected.");
   }
+  let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson.trim()) {
     try {
       const parsed = JSON.parse(config.secretsProvidersJson);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         validationErrors.push("Secret providers JSON must be a JSON object.");
+      } else {
+        customSecretProviders = parsed as Record<string, unknown>;
       }
     } catch {
       validationErrors.push("Secret providers JSON is invalid.");
+    }
+  }
+  if (config.vaultSecretsEnabled) {
+    if (!isClusterMode) {
+      validationErrors.push("Vault plugin wiring is available for Kubernetes/OpenShift deploys.");
+    }
+    if (!config.vaultAddr.trim()) {
+      validationErrors.push("Vault Address is required when the Vault plugin is enabled.");
+    }
+    if (!config.vaultKvMount.trim()) {
+      validationErrors.push("Vault KV Mount is required when the Vault plugin is enabled.");
+    }
+    if (config.vaultKvVersion !== "1" && config.vaultKvVersion !== "2") {
+      validationErrors.push("Vault KV Version must be 1 or 2.");
+    }
+    if (!config.vaultTokenSecretName.trim()) {
+      validationErrors.push("Vault Token Secret Name is required when the Vault plugin is enabled.");
+    }
+    if (!config.vaultTokenSecretKey.trim()) {
+      validationErrors.push("Vault Token Secret Key is required when the Vault plugin is enabled.");
+    }
+    if (customSecretProviders && "vault" in customSecretProviders) {
+      validationErrors.push("Remove the custom vault provider JSON when the bundled Vault plugin is enabled.");
     }
   }
   if (config.anthropicApiKeyRefId.trim() && !anthropicApiKeyRef) {
@@ -1404,6 +1480,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
 
         <SandboxSection
           config={config}
+          isClusterMode={isClusterMode}
           update={update}
           setConfig={setConfig}
         />
@@ -1425,8 +1502,10 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
         />
 
         <ExternalSecretProvidersSection
-          secretsProvidersJson={config.secretsProvidersJson}
+          config={config}
+          isClusterMode={isClusterMode}
           update={update}
+          onVaultEnabledChange={handleVaultEnabledChange}
         />
 
         <div style={{ marginTop: "1.5rem" }}>

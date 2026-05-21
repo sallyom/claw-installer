@@ -1,0 +1,24 @@
+# OpenShell Helm values for the per-user OpenShift namespace PoC.
+#
+# Install example:
+#   oc create ns openshell-alice
+#   oc adm policy add-scc-to-user privileged -z default -n openshell-alice
+#   helm install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+#     --version <version> \
+#     -n openshell-alice \
+#     -f openshell/configs/openshell-values-openshift.yaml
+
+server:
+  disableTls: true
+
+pkiInitJob:
+  enabled: false
+
+service:
+  type: ClusterIP
+
+podSecurityContext:
+  fsGroup: null
+
+securityContext:
+  runAsUser: null

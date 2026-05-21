@@ -90,4 +90,5 @@ describe("parseSavedLocalInstanceConfig", () => {
     expect(parsed.codexModel).toBe("gpt-5.4");
     expect(parsed.codexModels).toEqual(["gpt-5.4-mini"]);
   });
+
 });

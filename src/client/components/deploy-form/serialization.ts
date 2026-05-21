@@ -25,6 +25,13 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     image: "",
     containerRunArgs: "",
     podmanSecretMappingsText: DEFAULT_PROVIDER_PODMAN_SECRET_MAPPINGS_TEXT,
+    vaultSecretsEnabled: false,
+    vaultAddr: "http://vault.vault.svc:8200",
+    vaultNamespace: "",
+    vaultKvMount: "secret",
+    vaultKvVersion: "2",
+    vaultTokenSecretName: "openclaw-vault-token",
+    vaultTokenSecretKey: "VAULT_TOKEN",
     secretsProvidersJson: "",
     anthropicApiKeyRefSource: "env",
     anthropicApiKeyRefProvider: "default",
@@ -45,9 +52,12 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     telegramBotTokenRefProvider: "default",
     telegramBotTokenRefId: "",
     sandboxEnabled: false,
+    sandboxBackend: "ssh",
     sandboxMode: "all",
     sandboxScope: "session",
     sandboxWorkspaceAccess: "rw",
+    sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+    sandboxOpenShellMode: "mirror",
     sandboxToolPolicyEnabled: false,
     sandboxToolAllowFiles: true,
     sandboxToolAllowSessions: true,
@@ -315,6 +325,19 @@ export function applySavedVarsToConfig(
       image: getStringVar(vars, "OPENCLAW_IMAGE", "image") || prev.image,
       containerRunArgs: getStringVar(vars, "OPENCLAW_CONTAINER_RUN_ARGS", "containerRunArgs") || prev.containerRunArgs,
       podmanSecretMappingsText: savedPodmanSecretMappingsText || prev.podmanSecretMappingsText,
+      vaultSecretsEnabled:
+        vars.VAULT_SECRETS_ENABLED === "true"
+          || vars.vaultSecretsEnabled === true
+          || vars.vaultSecretsEnabled === "true"
+          || prev.vaultSecretsEnabled,
+      vaultAddr: getStringVar(vars, "VAULT_ADDR", "vaultAddr") || prev.vaultAddr,
+      vaultNamespace: getStringVar(vars, "VAULT_NAMESPACE", "vaultNamespace") || prev.vaultNamespace,
+      vaultKvMount: getStringVar(vars, "CLAW_VAULT_KV_MOUNT", "vaultKvMount") || prev.vaultKvMount,
+      vaultKvVersion: getStringVar(vars, "CLAW_VAULT_KV_VERSION", "vaultKvVersion") || prev.vaultKvVersion,
+      vaultTokenSecretName:
+        getStringVar(vars, "VAULT_TOKEN_SECRET_NAME", "vaultTokenSecretName") || prev.vaultTokenSecretName,
+      vaultTokenSecretKey:
+        getStringVar(vars, "VAULT_TOKEN_SECRET_KEY", "vaultTokenSecretKey") || prev.vaultTokenSecretKey,
       secretsProvidersJson: savedProvidersJson || prev.secretsProvidersJson,
       anthropicApiKeyRefSource: inferredAnthropicRef?.source || prev.anthropicApiKeyRefSource,
       anthropicApiKeyRefProvider: inferredAnthropicRef?.provider || prev.anthropicApiKeyRefProvider,
@@ -336,6 +359,8 @@ export function applySavedVarsToConfig(
       telegramBotTokenRefId: telegramBotTokenRef?.id || prev.telegramBotTokenRefId,
       sandboxEnabled:
         vars.SANDBOX_ENABLED === "true" || vars.sandboxEnabled === "true" || prev.sandboxEnabled,
+      sandboxBackend:
+        getStringVar(vars, "SANDBOX_BACKEND", "sandboxBackend") === "openshell" ? "openshell" : prev.sandboxBackend,
       sandboxMode: getStringVar(vars, "SANDBOX_MODE", "sandboxMode") || prev.sandboxMode,
       sandboxScope: getStringVar(vars, "SANDBOX_SCOPE", "sandboxScope") || prev.sandboxScope,
       sandboxToolPolicyEnabled:
@@ -378,6 +403,13 @@ export function applySavedVarsToConfig(
           || prev.sandboxToolAllowMessaging,
       sandboxWorkspaceAccess:
         getStringVar(vars, "SANDBOX_WORKSPACE_ACCESS", "sandboxWorkspaceAccess") || prev.sandboxWorkspaceAccess,
+      sandboxOpenShellGatewayEndpoint:
+        getStringVar(vars, "SANDBOX_OPENSHELL_GATEWAY_ENDPOINT", "sandboxOpenShellGatewayEndpoint")
+        || prev.sandboxOpenShellGatewayEndpoint,
+      sandboxOpenShellMode:
+        getStringVar(vars, "SANDBOX_OPENSHELL_MODE", "sandboxOpenShellMode") === "remote"
+          ? "remote"
+          : prev.sandboxOpenShellMode,
       sandboxSshTarget:
         getStringVar(vars, "SANDBOX_SSH_TARGET", "sandboxSshTarget") || prev.sandboxSshTarget,
       sandboxSshWorkspaceRoot:
@@ -538,6 +570,13 @@ export function buildDeployRequestBody(params: {
     image: trimToUndefined(config.image),
     containerRunArgs: mode === "local" ? trimToUndefined(config.containerRunArgs) : undefined,
     podmanSecretMappings: mode === "local" && podmanSecretMappings.length > 0 ? podmanSecretMappings : undefined,
+    vaultSecretsEnabled: config.vaultSecretsEnabled || undefined,
+    vaultAddr: config.vaultSecretsEnabled ? trimToUndefined(config.vaultAddr) : undefined,
+    vaultNamespace: config.vaultSecretsEnabled ? trimToUndefined(config.vaultNamespace) : undefined,
+    vaultKvMount: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvMount) : undefined,
+    vaultKvVersion: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvVersion) : undefined,
+    vaultTokenSecretName: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretName) : undefined,
+    vaultTokenSecretKey: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretKey) : undefined,
     secretsProvidersJson: trimToUndefined(config.secretsProvidersJson),
     anthropicApiKeyRef: sel("anthropic") ? anthropicApiKeyRef : undefined,
     openaiApiKeyRef: sel("openai") ? openaiApiKeyRef : undefined,
@@ -546,7 +585,7 @@ export function buildDeployRequestBody(params: {
     modelEndpointApiKeyRef: sel("custom-endpoint") ? modelEndpointApiKeyRef : undefined,
     telegramBotTokenRef: config.telegramEnabled ? telegramBotTokenRef : undefined,
     sandboxEnabled: config.sandboxEnabled || undefined,
-    sandboxBackend: config.sandboxEnabled ? "ssh" : undefined,
+    sandboxBackend: config.sandboxEnabled ? config.sandboxBackend : undefined,
     sandboxMode: config.sandboxEnabled ? config.sandboxMode : undefined,
     sandboxScope: config.sandboxEnabled ? config.sandboxScope : undefined,
     sandboxToolPolicyEnabled:
@@ -559,23 +598,50 @@ export function buildDeployRequestBody(params: {
     sandboxToolAllowAutomation: config.sandboxEnabled ? config.sandboxToolAllowAutomation : undefined,
     sandboxToolAllowMessaging: config.sandboxEnabled ? config.sandboxToolAllowMessaging : undefined,
     sandboxWorkspaceAccess: config.sandboxEnabled ? config.sandboxWorkspaceAccess : undefined,
-    sandboxSshTarget: config.sandboxEnabled ? config.sandboxSshTarget || undefined : undefined,
+    sandboxOpenShellGatewayEndpoint:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? config.sandboxOpenShellGatewayEndpoint || undefined
+        : undefined,
+    sandboxOpenShellMode:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? config.sandboxOpenShellMode
+        : undefined,
+    sandboxSshTarget:
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshTarget || undefined
+        : undefined,
     sandboxSshWorkspaceRoot:
-      config.sandboxEnabled ? config.sandboxSshWorkspaceRoot || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshWorkspaceRoot || undefined
+        : undefined,
     sandboxSshIdentityPath:
-      config.sandboxEnabled ? config.sandboxSshIdentityPath || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshIdentityPath || undefined
+        : undefined,
     sandboxSshCertificatePath:
-      config.sandboxEnabled ? config.sandboxSshCertificatePath || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshCertificatePath || undefined
+        : undefined,
     sandboxSshKnownHostsPath:
-      config.sandboxEnabled ? config.sandboxSshKnownHostsPath || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshKnownHostsPath || undefined
+        : undefined,
     sandboxSshStrictHostKeyChecking:
-      config.sandboxEnabled ? config.sandboxSshStrictHostKeyChecking : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshStrictHostKeyChecking
+        : undefined,
     sandboxSshUpdateHostKeys:
-      config.sandboxEnabled ? config.sandboxSshUpdateHostKeys : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshUpdateHostKeys
+        : undefined,
     sandboxSshCertificate:
-      config.sandboxEnabled ? config.sandboxSshCertificate || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshCertificate || undefined
+        : undefined,
     sandboxSshKnownHosts:
-      config.sandboxEnabled ? config.sandboxSshKnownHosts || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshKnownHosts || undefined
+        : undefined,
     anthropicApiKey: sel("anthropic") && !anthropicApiKeyRef ? trimToUndefined(config.anthropicApiKey) : undefined,
     openaiApiKey: sel("openai") && !openaiApiKeyRef ? trimToUndefined(config.openaiApiKey) : undefined,
     codexOauthMode: sel("openai-codex") ? "codex-cli" : undefined,
@@ -671,6 +737,13 @@ export function buildEnvFileContent(params: {
     `OPENCLAW_IMAGE=${config.image}`,
     `OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`,
     `PODMAN_SECRET_MAPPINGS_B64=${encodeBase64(JSON.stringify(parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings))}`,
+    `VAULT_SECRETS_ENABLED=${config.vaultSecretsEnabled}`,
+    `VAULT_ADDR=${config.vaultAddr}`,
+    `VAULT_NAMESPACE=${config.vaultNamespace}`,
+    `CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`,
+    `CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`,
+    `VAULT_TOKEN_SECRET_NAME=${config.vaultTokenSecretName}`,
+    `VAULT_TOKEN_SECRET_KEY=${config.vaultTokenSecretKey}`,
     `OPENCLAW_PORT=${config.port}`,
     `AGENT_SOURCE_DIR=${config.agentSourceDir}`,
     "",
@@ -712,10 +785,12 @@ export function buildEnvFileContent(params: {
     `LITELLM_PROXY=${config.litellmProxy}`,
     "",
     `SANDBOX_ENABLED=${config.sandboxEnabled}`,
-    "SANDBOX_BACKEND=ssh",
+    `SANDBOX_BACKEND=${config.sandboxBackend}`,
     `SANDBOX_MODE=${config.sandboxMode}`,
     `SANDBOX_SCOPE=${config.sandboxScope}`,
     `SANDBOX_WORKSPACE_ACCESS=${config.sandboxWorkspaceAccess}`,
+    `SANDBOX_OPENSHELL_GATEWAY_ENDPOINT=${config.sandboxOpenShellGatewayEndpoint}`,
+    `SANDBOX_OPENSHELL_MODE=${config.sandboxOpenShellMode}`,
     `SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`,
     `SANDBOX_SSH_WORKSPACE_ROOT=${config.sandboxSshWorkspaceRoot}`,
     `SANDBOX_SSH_IDENTITY_PATH=${config.sandboxSshIdentityPath}`,

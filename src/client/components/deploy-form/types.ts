@@ -75,6 +75,8 @@ export interface ModelEndpointOption {
 }
 
 export type SubagentPolicy = "none" | "self" | "unrestricted";
+export type SandboxBackend = "ssh" | "openshell";
+export type OpenShellSandboxMode = "mirror" | "remote";
 
 export interface DeployFormConfig {
   prefix: string;
@@ -83,6 +85,13 @@ export interface DeployFormConfig {
   image: string;
   containerRunArgs: string;
   podmanSecretMappingsText: string;
+  vaultSecretsEnabled: boolean;
+  vaultAddr: string;
+  vaultNamespace: string;
+  vaultKvMount: string;
+  vaultKvVersion: string;
+  vaultTokenSecretName: string;
+  vaultTokenSecretKey: string;
   secretsProvidersJson: string;
   anthropicApiKeyRefSource: SecretRefSource;
   anthropicApiKeyRefProvider: string;
@@ -103,9 +112,12 @@ export interface DeployFormConfig {
   telegramBotTokenRefProvider: string;
   telegramBotTokenRefId: string;
   sandboxEnabled: boolean;
+  sandboxBackend: SandboxBackend;
   sandboxMode: string;
   sandboxScope: string;
   sandboxWorkspaceAccess: string;
+  sandboxOpenShellGatewayEndpoint: string;
+  sandboxOpenShellMode: OpenShellSandboxMode;
   sandboxToolPolicyEnabled: boolean;
   sandboxToolAllowFiles: boolean;
   sandboxToolAllowSessions: boolean;

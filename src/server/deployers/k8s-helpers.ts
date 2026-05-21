@@ -4,7 +4,7 @@ import type { DeployConfig, DeployModelOption, DeploySecretRef } from "./types.j
 import { shouldUseLitellmProxy, litellmModelName, litellmRegisteredModelNames, LITELLM_PORT } from "./litellm.js";
 import { shouldUseOtel, OTEL_HTTP_PORT } from "./otel.js";
 import { shouldUseChromiumSidecar, CHROMIUM_CDP_PORT } from "./chromium.js";
-import { buildSandboxConfig } from "./sandbox.js";
+import { buildOpenShellPluginConfig, buildSandboxConfig } from "./sandbox.js";
 import { buildSandboxToolPolicy } from "./tool-policy.js";
 import { loadAgentSourceBundle, loadAgentSourceMcpServers } from "./agent-source.js";
 import type { AgentSourceBundle } from "./agent-source.js";
@@ -37,6 +37,9 @@ export const GOOGLE_PROVIDER = "google";
 export const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 export const OPENROUTER_PROVIDER = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+export const VAULT_SECRET_PROVIDER_ALIAS = "vault";
+export const VAULT_SECRET_PROVIDER_COMMAND = "/usr/local/bin/node";
+export const VAULT_SECRET_PROVIDER_RESOLVER_PATH = "/app/extensions/vault/vault-secret-ref-resolver.js";
 const ANTHROPIC_VERTEX_MAX_TOKENS = 128000;
 
 type ModelCatalogEntry = {
@@ -539,6 +542,28 @@ function parseSecretProvidersJson(raw?: string): Record<string, unknown> | undef
   return normalizeManagedVaultProviders(raw);
 }
 
+export function buildVaultSecretProviderConfig(config: DeployConfig): Record<string, unknown> | undefined {
+  if (!config.vaultSecretsEnabled) {
+    return undefined;
+  }
+  return {
+    source: "exec",
+    command: VAULT_SECRET_PROVIDER_COMMAND,
+    args: [VAULT_SECRET_PROVIDER_RESOLVER_PATH],
+    timeoutMs: 5000,
+    noOutputTimeoutMs: 5000,
+    maxOutputBytes: 1048576,
+    allowInsecurePath: true,
+    passEnv: [
+      "VAULT_ADDR",
+      "VAULT_TOKEN",
+      "VAULT_NAMESPACE",
+      "CLAW_VAULT_KV_MOUNT",
+      "CLAW_VAULT_KV_VERSION",
+    ],
+  };
+}
+
 function shouldAutoEnvRef(config: DeployConfig, explicitRef: DeploySecretRef | undefined, value: string | undefined): boolean {
   return config.mode !== "local" && !hasSecretRef(explicitRef) && Boolean(value?.trim());
 }
@@ -637,6 +662,10 @@ export function buildManagedAgentAuthProfilesSecretJson(config: DeployConfig): s
 
 function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: DeployConfig): void {
   const providers = parseSecretProvidersJson(config.secretsProvidersJson) || {};
+  const vaultProvider = buildVaultSecretProviderConfig(config);
+  if (vaultProvider) {
+    providers[VAULT_SECRET_PROVIDER_ALIAS] = vaultProvider;
+  }
   let shouldDefineDefaultEnvProvider = false;
 
   const models = (ocConfig.models as Record<string, unknown> | undefined) || {};
@@ -784,6 +813,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   const pluginAllowlist = Array.from(new Set<string>([
     ...(shouldUseCodexOauth(config) ? [OPENAI_PROVIDER, CODEX_PLUGIN_ID] : []),
     ...(shouldUseOtel(config) ? ["diagnostics-otel"] : []),
+    ...(config.vaultSecretsEnabled ? [VAULT_SECRET_PROVIDER_ALIAS] : []),
     ...((config.telegramBotToken || config.telegramBotTokenRef) ? ["telegram"] : []),
   ]));
   const controlUi: Record<string, unknown> = {
@@ -792,12 +822,17 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   controlUi.allowedOrigins = ["http://localhost:18789"];
   const useOtel = shouldUseOtel(config);
   const useCodexOauth = shouldUseCodexOauth(config);
+  const openShellPluginConfig = buildOpenShellPluginConfig(config);
   const ocConfig: Record<string, unknown> = {
     plugins: {
-      ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
+      ...((pluginAllowlist.length > 0 || openShellPluginConfig)
+        ? { allow: [...pluginAllowlist, ...(openShellPluginConfig ? ["openshell"] : [])] }
+        : {}),
       entries: {
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, [CODEX_PLUGIN_ID]: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
+        ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_ALIAS]: { enabled: true } } : {}),
+        ...(openShellPluginConfig ? { openshell: { enabled: true, config: openShellPluginConfig } } : {}),
       },
     },
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces

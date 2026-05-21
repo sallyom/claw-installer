@@ -34,6 +34,13 @@ export interface DeployConfig {
   prefix?: string;
   // Agent security / upstream SecretRefs
   agentSecurityMode?: "basic" | "secretrefs";
+  vaultSecretsEnabled?: boolean;
+  vaultAddr?: string;
+  vaultNamespace?: string;
+  vaultKvMount?: string;
+  vaultKvVersion?: string;
+  vaultTokenSecretName?: string;
+  vaultTokenSecretKey?: string;
   secretsProvidersJson?: string;
   anthropicApiKeyRef?: DeploySecretRef;
   openaiApiKeyRef?: DeploySecretRef;
@@ -46,7 +53,9 @@ export interface DeployConfig {
   sandboxMode?: "off" | "non-main" | "all";
   sandboxScope?: "session" | "agent" | "shared";
   sandboxWorkspaceAccess?: "none" | "ro" | "rw";
-  sandboxBackend?: "ssh";
+  sandboxBackend?: "ssh" | "openshell";
+  sandboxOpenShellGatewayEndpoint?: string;
+  sandboxOpenShellMode?: "mirror" | "remote";
   sandboxToolPolicyEnabled?: boolean;
   sandboxToolAllowFiles?: boolean;
   sandboxToolAllowSessions?: boolean;

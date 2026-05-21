@@ -185,10 +185,17 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.sshUser = trimOptional(config.sshUser);
   config.agentSourceDir = trimOptional(config.agentSourceDir);
   config.containerRunArgs = trimOptional(config.containerRunArgs);
+  config.sandboxOpenShellGatewayEndpoint = trimOptional(config.sandboxOpenShellGatewayEndpoint);
   config.podmanSecretMappings = normalizePodmanSecretMappings(config.podmanSecretMappings);
   config.modelFallbacks = normalizeModelFallbacks(config.modelFallbacks);
   config.otelEndpoint = trimOptional(config.otelEndpoint);
   config.otelExperimentId = trimOptional(config.otelExperimentId);
+  config.vaultAddr = trimOptional(config.vaultAddr);
+  config.vaultNamespace = trimOptional(config.vaultNamespace);
+  config.vaultKvMount = trimOptional(config.vaultKvMount);
+  config.vaultKvVersion = trimOptional(config.vaultKvVersion);
+  config.vaultTokenSecretName = trimOptional(config.vaultTokenSecretName);
+  config.vaultTokenSecretKey = trimOptional(config.vaultTokenSecretKey);
   config.secretsProvidersJson = trimOptional(config.secretsProvidersJson);
 
   if (config.modelEndpoint) {
@@ -212,16 +219,45 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     return;
   }
 
+  let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson) {
     try {
       const parsed = JSON.parse(config.secretsProvidersJson);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         throw new Error("secretsProvidersJson must be a JSON object");
       }
+      customSecretProviders = parsed as Record<string, unknown>;
     } catch (err) {
       res.status(400).json({
         error: `Invalid secretsProvidersJson: ${err instanceof Error ? err.message : String(err)}`,
       });
+      return;
+    }
+  }
+
+  if (config.vaultSecretsEnabled) {
+    if (config.mode !== "kubernetes" && config.mode !== "openshift") {
+      res.status(400).json({ error: "Vault plugin wiring is supported for Kubernetes/OpenShift deployments" });
+      return;
+    }
+    if (!config.vaultAddr) {
+      res.status(400).json({ error: "vaultAddr is required when vaultSecretsEnabled is true" });
+      return;
+    }
+    if (!config.vaultKvMount) {
+      res.status(400).json({ error: "vaultKvMount is required when vaultSecretsEnabled is true" });
+      return;
+    }
+    if (config.vaultKvVersion !== "1" && config.vaultKvVersion !== "2") {
+      res.status(400).json({ error: "vaultKvVersion must be 1 or 2" });
+      return;
+    }
+    if (!config.vaultTokenSecretName || !config.vaultTokenSecretKey) {
+      res.status(400).json({ error: "vaultTokenSecretName and vaultTokenSecretKey are required when vaultSecretsEnabled is true" });
+      return;
+    }
+    if (customSecretProviders && "vault" in customSecretProviders) {
+      res.status(400).json({ error: "Remove secretsProvidersJson.vault when vaultSecretsEnabled is true" });
       return;
     }
   }
@@ -241,6 +277,18 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshIdentityPath?.trim()) {
     res.status(400).json({
       error: "SSH sandbox requires sandboxSshIdentityPath",
+    });
+    return;
+  }
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && config.mode !== "kubernetes" && config.mode !== "openshift") {
+    res.status(400).json({
+      error: "OpenShell sandbox is only supported for Kubernetes and OpenShift deployments",
+    });
+    return;
+  }
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint?.trim()) {
+    res.status(400).json({
+      error: "OpenShell sandbox requires sandboxOpenShellGatewayEndpoint",
     });
     return;
   }
@@ -293,9 +341,9 @@ router.post("/", deploymentRateLimit, async (req, res) => {
       config.inferenceProvider = OPENAI_CODEX_PROVIDER;
     } else if (config.openrouterApiKey || config.openrouterApiKeyRef) {
       config.inferenceProvider = "openrouter";
-    } else if (config.anthropicApiKey) {
+    } else if (config.anthropicApiKey || config.anthropicApiKeyRef) {
       config.inferenceProvider = "anthropic";
-    } else if (config.openaiApiKey) {
+    } else if (config.openaiApiKey || config.openaiApiKeyRef) {
       config.inferenceProvider = "openai";
     } else if (config.googleApiKey || config.googleApiKeyRef) {
       config.inferenceProvider = "google";

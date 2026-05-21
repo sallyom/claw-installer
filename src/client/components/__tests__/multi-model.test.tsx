@@ -125,6 +125,38 @@ describe("Multi-model per provider", () => {
         { secretName: "openai_api_key", targetEnv: "OPENAI_API_KEY" },
       ]);
     });
+
+    it("includes Vault plugin deployment settings when enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vaultSecretsEnabled = true;
+      config.vaultAddr = "http://vault.vault.svc:8200";
+      config.vaultTokenSecretName = "openclaw-vault-token";
+      config.vaultTokenSecretKey = "token";
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "openai",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        openaiApiKeyRef: {
+          source: "exec",
+          provider: "vault",
+          id: "providers/openai/apiKey",
+        },
+      });
+
+      expect(body.vaultSecretsEnabled).toBe(true);
+      expect(body.vaultAddr).toBe("http://vault.vault.svc:8200");
+      expect(body.vaultTokenSecretName).toBe("openclaw-vault-token");
+      expect(body.vaultTokenSecretKey).toBe("token");
+      expect(body.openaiApiKeyRef).toEqual({
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      });
+      expect(body.openaiApiKey).toBeUndefined();
+    });
   });
 
   describe("buildEnvFileContent", () => {
@@ -196,6 +228,26 @@ describe("Multi-model per provider", () => {
       expect(match).toBeTruthy();
       const decoded = JSON.parse(window.atob(match![1]));
       expect(decoded).toEqual([{ secretName: "joy_token", targetEnv: "JOY_TELEGRAM_BOT_TOKEN" }]);
+    });
+
+    it("exports Vault plugin settings into the env file", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vaultSecretsEnabled = true;
+      config.vaultAddr = "http://vault.vault.svc:8200";
+      config.vaultTokenSecretName = "openclaw-vault-token";
+      config.vaultTokenSecretKey = "token";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "openai",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(env).toContain("VAULT_SECRETS_ENABLED=true");
+      expect(env).toContain("VAULT_ADDR=http://vault.vault.svc:8200");
+      expect(env).toContain("VAULT_TOKEN_SECRET_NAME=openclaw-vault-token");
+      expect(env).toContain("VAULT_TOKEN_SECRET_KEY=token");
     });
   });
 

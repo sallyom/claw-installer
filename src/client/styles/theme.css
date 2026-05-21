@@ -1,9 +1,9 @@
 /* ClawHub-inspired light theme */
 :root {
-  --bg-primary: #faf6f1;
-  --bg-secondary: #fff8f2;
-  --bg-tertiary: #fff;
-  --bg-hover: #fff4ea;
+  --bg-primary: #f4eee7;
+  --bg-secondary: #fbf1e8;
+  --bg-tertiary: #fffaf5;
+  --bg-hover: #f7e8da;
   --border: #aa7d5038;
   --border-hover: #aa7d5059;
   --border-focus: #c43a2f73;
@@ -23,8 +23,8 @@
   --danger: #c43a2f;
   --danger-soft: #c43a2f12;
   --text-on-accent: #fff;
-  --shadow-card: inset 0 1px #ffffffb3, inset 0 0 24px #aa7d500f, 0 1px 4px #8c643c14, 0 0 0 1px #a0734814;
-  --shadow-card-hover: inset 0 1px #fffc, inset 0 0 30px #aa7d5014, 0 4px 18px #8c643c1f, 0 0 0 1px #a073481f;
+  --shadow-card: inset 0 1px #ffffff99, inset 0 0 24px #aa7d5012, 0 1px 4px #8c643c18, 0 0 0 1px #a0734814;
+  --shadow-card-hover: inset 0 1px #ffffffb3, inset 0 0 30px #aa7d5017, 0 4px 18px #8c643c24, 0 0 0 1px #a073481f;
   --radius: 8px;
   --radius-sm: 8px;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
@@ -39,7 +39,7 @@
 
 body {
   font-family: var(--font-sans);
-  background: linear-gradient(#fdf9f4 0%, #faf3ea 100%);
+  background: linear-gradient(#f7efe6 0%, #f1e5d8 100%);
   color: var(--text-primary);
   line-height: 1.5;
   min-height: 100vh;

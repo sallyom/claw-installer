@@ -144,7 +144,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
     telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
     sandboxEnabled: savedVars.SANDBOX_ENABLED === "true" || undefined,
-    sandboxBackend: (savedVars.SANDBOX_BACKEND as "ssh") || undefined,
+    sandboxBackend: (savedVars.SANDBOX_BACKEND as "ssh" | "openshell") || undefined,
     sandboxMode:
       (savedVars.SANDBOX_MODE as "off" | "non-main" | "all") || undefined,
     sandboxScope:
@@ -167,6 +167,8 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
       savedVars.SANDBOX_TOOL_ALLOW_MESSAGING === "true" || undefined,
     sandboxWorkspaceAccess:
       (savedVars.SANDBOX_WORKSPACE_ACCESS as "none" | "ro" | "rw") || undefined,
+    sandboxOpenShellGatewayEndpoint: savedVars.SANDBOX_OPENSHELL_GATEWAY_ENDPOINT || undefined,
+    sandboxOpenShellMode: (savedVars.SANDBOX_OPENSHELL_MODE as "mirror" | "remote") || undefined,
     sandboxSshTarget: savedVars.SANDBOX_SSH_TARGET || undefined,
     sandboxSshWorkspaceRoot: savedVars.SANDBOX_SSH_WORKSPACE_ROOT || undefined,
     sandboxSshIdentityPath: savedVars.SANDBOX_SSH_IDENTITY_PATH || undefined,

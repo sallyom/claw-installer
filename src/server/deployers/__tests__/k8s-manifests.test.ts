@@ -25,6 +25,11 @@ function gatewayEnvMap(deployment: k8s.V1Deployment): Record<string, string | un
   return Object.fromEntries((container?.env ?? []).map((e) => [e.name, e.value]));
 }
 
+function gatewayEnv(deployment: k8s.V1Deployment, name: string): k8s.V1EnvVar | undefined {
+  const container = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+  return (container?.env ?? []).find((e) => e.name === name);
+}
+
 describe("k8s state sync manifests", () => {
   const config: DeployConfig = makeConfig();
 
@@ -419,6 +424,30 @@ describe("gateway env vars in proxy mode", () => {
 
     expect(envNames).not.toContain("GOOGLE_CLOUD_PROJECT");
     expect(envNames).not.toContain("GOOGLE_CLOUD_LOCATION");
+  });
+
+  it("injects Vault plugin runtime env vars from the configured token Secret", () => {
+    const config = makeConfig({
+      vaultSecretsEnabled: true,
+      vaultAddr: "http://vault.vault.svc:8200",
+      vaultNamespace: "admin",
+      vaultKvMount: "secret",
+      vaultKvVersion: "2",
+      vaultTokenSecretName: "openclaw-vault-token",
+      vaultTokenSecretKey: "token",
+    });
+
+    const deployment = deploymentManifest("ns", config);
+    const env = gatewayEnvMap(deployment);
+
+    expect(env.VAULT_ADDR).toBe("http://vault.vault.svc:8200");
+    expect(env.VAULT_NAMESPACE).toBe("admin");
+    expect(env.CLAW_VAULT_KV_MOUNT).toBe("secret");
+    expect(env.CLAW_VAULT_KV_VERSION).toBe("2");
+    expect(gatewayEnv(deployment, "VAULT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
+      name: "openclaw-vault-token",
+      key: "token",
+    });
   });
 });
 

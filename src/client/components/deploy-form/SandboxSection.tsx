@@ -4,11 +4,14 @@ import type { DeployFormConfig } from "./types.js";
 
 interface SandboxSectionProps {
   config: DeployFormConfig;
+  isClusterMode: boolean;
   update: (field: string, value: string) => void;
   setConfig: Dispatch<SetStateAction<DeployFormConfig>>;
 }
 
-export function SandboxSection({ config, update, setConfig }: SandboxSectionProps) {
+export function SandboxSection({ config, isClusterMode, update, setConfig }: SandboxSectionProps) {
+  const backend = isClusterMode ? config.sandboxBackend : "ssh";
+
   return (
     <>
       <h3 style={{ marginTop: "1.5rem" }}>Sandbox</h3>
@@ -22,16 +25,31 @@ export function SandboxSection({ config, update, setConfig }: SandboxSectionProp
               setConfig((prev) => ({ ...prev, sandboxEnabled: e.target.checked }))
             }
           />
-          Enable SSH sandbox backend
+          Enable sandbox backend
         </label>
         <div className="hint">
-          Recommended path for this installer on both local containers and Kubernetes.
+          Use SSH for local deployments, or OpenShell for Kubernetes and OpenShift deployments.
         </div>
       </div>
 
       {config.sandboxEnabled && (
         <>
           <div className="form-row">
+            {isClusterMode && (
+              <div className="form-group">
+                <label>Sandbox Backend</label>
+                <select
+                  value={config.sandboxBackend}
+                  onChange={(e) => update("sandboxBackend", e.target.value)}
+                >
+                  <option value="openshell">OpenShell</option>
+                  <option value="ssh">SSH</option>
+                </select>
+                <div className="hint">
+                  Choose OpenShell only when a cluster admin has provisioned an OpenShell gateway for this user or namespace.
+                </div>
+              </div>
+            )}
             <div className="form-group">
               <label>Sandbox Mode</label>
               <select
@@ -43,6 +61,39 @@ export function SandboxSection({ config, update, setConfig }: SandboxSectionProp
                 <option value="off">off</option>
               </select>
             </div>
+          </div>
+
+          {backend === "openshell" && (
+            <div className="form-row">
+              <div className="form-group">
+                <label>OpenShell Gateway Endpoint</label>
+                <input
+                  type="text"
+                  placeholder="http://openshell.openshell-alice.svc.cluster.local:8080"
+                  value={config.sandboxOpenShellGatewayEndpoint}
+                  onChange={(e) => update("sandboxOpenShellGatewayEndpoint", e.target.value)}
+                />
+                <div className="hint">
+                  Cluster-internal URL for the user's admin-provisioned OpenShell gateway service.
+                </div>
+              </div>
+              <div className="form-group">
+                <label>OpenShell Workspace Mode</label>
+                <select
+                  value={config.sandboxOpenShellMode}
+                  onChange={(e) => update("sandboxOpenShellMode", e.target.value)}
+                >
+                  <option value="mirror">mirror</option>
+                  <option value="remote">remote</option>
+                </select>
+                <div className="hint">
+                  Start with mirror so the OpenClaw PVC remains the canonical workspace.
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="form-row">
             <div className="form-group">
               <label>Sandbox Scope</label>
               <select
@@ -54,9 +105,6 @@ export function SandboxSection({ config, update, setConfig }: SandboxSectionProp
                 <option value="shared">shared</option>
               </select>
             </div>
-          </div>
-
-          <div className="form-row">
             <div className="form-group">
               <label>Workspace Access</label>
               <select
@@ -68,6 +116,9 @@ export function SandboxSection({ config, update, setConfig }: SandboxSectionProp
                 <option value="none">none</option>
               </select>
             </div>
+          </div>
+
+          {backend === "ssh" && (
             <div className="form-group">
               <label>Remote Workspace Root</label>
               <input
@@ -77,7 +128,7 @@ export function SandboxSection({ config, update, setConfig }: SandboxSectionProp
                 onChange={(e) => update("sandboxSshWorkspaceRoot", e.target.value)}
               />
             </div>
-          </div>
+          )}
 
           <div className="form-group">
             <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
@@ -170,102 +221,106 @@ export function SandboxSection({ config, update, setConfig }: SandboxSectionProp
             </div>
           )}
 
-          <div className="form-group">
-            <label>SSH Target</label>
-            <input
-              type="text"
-              placeholder="user@gateway-host:22"
-              value={config.sandboxSshTarget}
-              onChange={(e) => update("sandboxSshTarget", e.target.value)}
-            />
-            <div className="hint">
-              Required. OpenClaw will run sandboxed tools on this remote host.
-            </div>
-          </div>
+          {backend === "ssh" && (
+            <>
+              <div className="form-group">
+                <label>SSH Target</label>
+                <input
+                  type="text"
+                  placeholder="user@gateway-host:22"
+                  value={config.sandboxSshTarget}
+                  onChange={(e) => update("sandboxSshTarget", e.target.value)}
+                />
+                <div className="hint">
+                  Required. OpenClaw will run sandboxed tools on this remote host.
+                </div>
+              </div>
 
-          <div className="form-row">
-            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={config.sandboxSshStrictHostKeyChecking}
-                onChange={(e) =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    sandboxSshStrictHostKeyChecking: e.target.checked,
-                  }))}
-              />
-              Strict host key checking
-            </label>
-            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={config.sandboxSshUpdateHostKeys}
-                onChange={(e) =>
-                  setConfig((prev) => ({
-                    ...prev,
-                    sandboxSshUpdateHostKeys: e.target.checked,
-                  }))}
-              />
-              Update host keys
-            </label>
-          </div>
+              <div className="form-row">
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxSshStrictHostKeyChecking}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        sandboxSshStrictHostKeyChecking: e.target.checked,
+                      }))}
+                  />
+                  Strict host key checking
+                </label>
+                <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.sandboxSshUpdateHostKeys}
+                    onChange={(e) =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        sandboxSshUpdateHostKeys: e.target.checked,
+                      }))}
+                  />
+                  Update host keys
+                </label>
+              </div>
 
-          <div className="form-group">
-            <label>SSH Private Key</label>
-            <input
-              type="text"
-              placeholder="/path/to/id_ed25519"
-              value={config.sandboxSshIdentityPath}
-              onChange={(e) => update("sandboxSshIdentityPath", e.target.value)}
-            />
-            <div className="hint">Path on the installer host to the private key file.</div>
-          </div>
+              <div className="form-group">
+                <label>SSH Private Key</label>
+                <input
+                  type="text"
+                  placeholder="/path/to/id_ed25519"
+                  value={config.sandboxSshIdentityPath}
+                  onChange={(e) => update("sandboxSshIdentityPath", e.target.value)}
+                />
+                <div className="hint">Path on the installer host to the private key file.</div>
+              </div>
 
-          <div className="form-group">
-            <label>
-              SSH Certificate
-              <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
-                {" "}(optional)
-              </span>
-            </label>
-            <input
-              type="text"
-              placeholder="/path/to/id_ed25519-cert.pub"
-              value={config.sandboxSshCertificatePath}
-              onChange={(e) => update("sandboxSshCertificatePath", e.target.value)}
-              style={{ marginBottom: "0.5rem" }}
-            />
-            <textarea
-              rows={4}
-              placeholder="ssh-ed25519-cert-v01@openssh.com ..."
-              value={config.sandboxSshCertificate}
-              onChange={(e) => update("sandboxSshCertificate", e.target.value)}
-            />
-            <div className="hint">Type a path on the installer host, or paste the certificate directly.</div>
-          </div>
+              <div className="form-group">
+                <label>
+                  SSH Certificate
+                  <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
+                    {" "}(optional)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="/path/to/id_ed25519-cert.pub"
+                  value={config.sandboxSshCertificatePath}
+                  onChange={(e) => update("sandboxSshCertificatePath", e.target.value)}
+                  style={{ marginBottom: "0.5rem" }}
+                />
+                <textarea
+                  rows={4}
+                  placeholder="ssh-ed25519-cert-v01@openssh.com ..."
+                  value={config.sandboxSshCertificate}
+                  onChange={(e) => update("sandboxSshCertificate", e.target.value)}
+                />
+                <div className="hint">Type a path on the installer host, or paste the certificate directly.</div>
+              </div>
 
-          <div className="form-group">
-            <label>
-              Known Hosts
-              <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
-                {" "}(optional)
-              </span>
-            </label>
-            <input
-              type="text"
-              placeholder="/path/to/known_hosts"
-              value={config.sandboxSshKnownHostsPath}
-              onChange={(e) => update("sandboxSshKnownHostsPath", e.target.value)}
-              style={{ marginBottom: "0.5rem" }}
-            />
-            <textarea
-              rows={4}
-              placeholder="gateway-host ssh-ed25519 AAAA..."
-              value={config.sandboxSshKnownHosts}
-              onChange={(e) => update("sandboxSshKnownHosts", e.target.value)}
-            />
-            <div className="hint">Type a path on the installer host, or paste known_hosts entries directly.</div>
-          </div>
+              <div className="form-group">
+                <label>
+                  Known Hosts
+                  <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
+                    {" "}(optional)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="/path/to/known_hosts"
+                  value={config.sandboxSshKnownHostsPath}
+                  onChange={(e) => update("sandboxSshKnownHostsPath", e.target.value)}
+                  style={{ marginBottom: "0.5rem" }}
+                />
+                <textarea
+                  rows={4}
+                  placeholder="gateway-host ssh-ed25519 AAAA..."
+                  value={config.sandboxSshKnownHosts}
+                  onChange={(e) => update("sandboxSshKnownHosts", e.target.value)}
+                />
+                <div className="hint">Type a path on the installer host, or paste known_hosts entries directly.</div>
+              </div>
+            </>
+          )}
         </>
       )}
     </>

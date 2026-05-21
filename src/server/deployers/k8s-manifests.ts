@@ -16,6 +16,7 @@ import type { TreeEntry } from "../state-tree.js";
 import { loadAgentSourceBundle, mainWorkspaceShellCondition } from "./agent-source.js";
 import {
   buildManagedVaultHelperScript,
+  DEFAULT_VAULT_ADDR,
   MANAGED_VAULT_HELPER_PATH,
   OPENCLAW_SERVICE_ACCOUNT_NAME,
 } from "./vault-helper.js";
@@ -207,6 +208,29 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
   };
 }
 
+function appendVaultPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): void {
+  if (!config.vaultSecretsEnabled) {
+    return;
+  }
+  envVars.push(
+    { name: "VAULT_ADDR", value: config.vaultAddr || DEFAULT_VAULT_ADDR },
+    { name: "CLAW_VAULT_KV_MOUNT", value: config.vaultKvMount || "secret" },
+    { name: "CLAW_VAULT_KV_VERSION", value: config.vaultKvVersion || "2" },
+    {
+      name: "VAULT_TOKEN",
+      valueFrom: {
+        secretKeyRef: {
+          name: config.vaultTokenSecretName || "openclaw-vault-token",
+          key: config.vaultTokenSecretKey || "VAULT_TOKEN",
+        },
+      },
+    },
+  );
+  if (config.vaultNamespace) {
+    envVars.push({ name: "VAULT_NAMESPACE", value: config.vaultNamespace });
+  }
+}
+
 export function serviceManifest(ns: string, config: DeployConfig): k8s.V1Service {
   const withA2a = Boolean(config.withA2a);
   return {
@@ -390,6 +414,7 @@ export function deploymentManifest(
       valueFrom: { secretKeyRef: { name: "openclaw-secrets", key, optional: true } },
     });
   }
+  appendVaultPluginEnv(envVars, config);
 
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtel) {
@@ -505,7 +530,7 @@ export function deploymentManifest(
               imagePullPolicy: "IfNotPresent",
               command: [
                 "sh", "-c",
-                "umask 007 && exec node dist/index.js gateway run --bind lan --port 18789",
+                "umask 007 && exec node openclaw.mjs gateway run --bind lan --port 18789",
               ],
               ports: [
                 { name: "gateway", containerPort: 18789, protocol: "TCP" },
