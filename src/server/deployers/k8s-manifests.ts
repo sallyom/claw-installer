@@ -7,6 +7,7 @@ import {
   buildManagedAgentAuthProfiles,
   buildManagedAgentAuthProfilesSecretJson,
   resolveEnvSecretRefId,
+  VAULT_SECRET_PROVIDER_RESOLVER_PATH,
 } from "./k8s-helpers.js";
 import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
@@ -16,14 +17,155 @@ import type { TreeEntry } from "../state-tree.js";
 import { loadAgentSourceBundle, mainWorkspaceShellCondition } from "./agent-source.js";
 import {
   buildManagedVaultHelperScript,
+  DEFAULT_VAULT_ADDR,
   MANAGED_VAULT_HELPER_PATH,
   OPENCLAW_SERVICE_ACCOUNT_NAME,
 } from "./vault-helper.js";
 import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
+import { OPEN_SHELL_POLICY_PATH, OPEN_SHELL_POLICY_YAML } from "./sandbox.js";
 
 export const OPENCLAW_HOME_VOLUME_MOUNT = "/home/node";
 export const OPENCLAW_RUNTIME_HOME = OPENCLAW_HOME_VOLUME_MOUNT;
 export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
+export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
+const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
+const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
+
+function configuredPluginInstallSpecs(config: DeployConfig): string[] {
+  const seen = new Set<string>();
+  const specs: string[] = [];
+  for (const spec of [
+    ...(config.pluginInstallSpecs ?? []),
+    ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
+  ]) {
+    const trimmed = spec.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    specs.push(trimmed);
+  }
+  return specs;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function pluginInstallCommand(spec: string): string {
+  const quotedSpec = shellQuote(spec);
+  return [
+    `node openclaw.mjs plugins install ${quotedSpec} --force || {`,
+    `  echo "WARNING: OpenClaw plugin install failed for ${quotedSpec}; continuing. Run openclaw doctor after install." >&2`,
+    "  true",
+    "}",
+  ].join("\n");
+}
+
+function vaultResolverSyncScript(): string {
+  const target = shellQuote(VAULT_SECRET_PROVIDER_RESOLVER_PATH);
+  return [
+    `if [ ! -f ${target} ]; then`,
+    `  vault_resolver="$(find ${OPENCLAW_RUNTIME_DIR}/git ${OPENCLAW_RUNTIME_DIR}/npm/node_modules -path '*/dist/vault-secret-ref-resolver.js' -type f 2>/dev/null | head -n 1 || true)"`,
+    `  if [ -n "$vault_resolver" ]; then`,
+    `    mkdir -p "$(dirname ${target})"`,
+    `    ln -sf "$vault_resolver" ${target} || cp "$vault_resolver" ${target}`,
+    `    chmod 0755 ${target} 2>/dev/null || true`,
+    `  else`,
+    `    echo "WARNING: Vault SecretRef resolver was not found; install the Vault plugin before using Vault SecretRefs." >&2`,
+    `  fi`,
+    `fi`,
+  ].join("\n");
+}
+
+function usesOpenShellSandbox(config: DeployConfig): boolean {
+  return Boolean(config.sandboxEnabled && config.sandboxBackend === "openshell");
+}
+
+function openShellGatewayRegistrationScript(): string {
+  return `
+if [ -z "\${OPENSHELL_GATEWAY_ENDPOINT:-}" ]; then
+  echo "OpenShell gateway endpoint is required when the OpenShell sandbox backend is enabled" >&2
+  exit 1
+fi
+if [ ! -x ${OPENSHELL_CLI_PATH} ]; then
+  echo "OpenShell CLI not found at ${OPENSHELL_CLI_PATH}; use the OpenShell PoC OpenClaw image" >&2
+  exit 1
+fi
+mkdir -p ${OPENCLAW_RUNTIME_HOME}/.config
+${OPENSHELL_CLI_PATH} gateway remove openshell >/dev/null 2>&1 || true
+${OPENSHELL_CLI_PATH} gateway add "\${OPENSHELL_GATEWAY_ENDPOINT}" --local --name openshell
+${OPENSHELL_CLI_PATH} -g openshell status
+`.trim();
+}
+
+function gatewayStartupScript(useOpenShell: boolean): string {
+  return [
+    "umask 007",
+    ...(useOpenShell ? [openShellGatewayRegistrationScript()] : []),
+    "exec node openclaw.mjs gateway run --bind lan --port 18789",
+  ].join("\n");
+}
+
+function pluginInstallEnv(): k8s.V1EnvVar[] {
+  return [
+    { name: "HOME", value: OPENCLAW_RUNTIME_HOME },
+    { name: "TMPDIR", value: OPENCLAW_RUNTIME_TMP_DIR },
+    { name: "OPENCLAW_CONFIG_DIR", value: OPENCLAW_RUNTIME_DIR },
+    { name: "OPENCLAW_STATE_DIR", value: OPENCLAW_RUNTIME_DIR },
+    { name: "NPM_CONFIG_CACHE", value: `${OPENCLAW_RUNTIME_HOME}/.npm` },
+    { name: "npm_config_cache", value: `${OPENCLAW_RUNTIME_HOME}/.npm` },
+    { name: "XDG_CACHE_HOME", value: `${OPENCLAW_RUNTIME_HOME}/.cache` },
+    { name: "XDG_CONFIG_HOME", value: `${OPENCLAW_RUNTIME_HOME}/.config` },
+  ];
+}
+
+function pluginInstallVolumeMounts(): k8s.V1VolumeMount[] {
+  return [
+    { name: "openclaw-home", mountPath: OPENCLAW_HOME_VOLUME_MOUNT },
+    { name: "tmp-volume", mountPath: "/tmp" },
+  ];
+}
+
+function pluginInstallInitContainer(name: string, image: string, script: string): k8s.V1Container {
+  return {
+    name,
+    image,
+    imagePullPolicy: "IfNotPresent",
+    command: ["sh", "-c", script],
+    env: pluginInstallEnv(),
+    resources: {
+      requests: { memory: "512Mi", cpu: "100m" },
+      limits: { memory: "1Gi", cpu: "500m" },
+    },
+    volumeMounts: pluginInstallVolumeMounts(),
+    securityContext: {
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+    },
+  };
+}
+
+function configuredPluginsInstallScript(specs: string[]): string {
+  return [
+    "set -eu",
+    `mkdir -p ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config`,
+    ...specs.map(pluginInstallCommand),
+    vaultResolverSyncScript(),
+    ...(specs.includes(OPENSHELL_PLUGIN_SPEC)
+      ? ["node openclaw.mjs plugins list | grep -q openshell"]
+      : []),
+    "node openclaw.mjs plugins list || true",
+  ].join("\n");
+}
+
+function configuredPluginsInitContainer(image: string, specs: string[]): k8s.V1Container {
+  return pluginInstallInitContainer(
+    "install-openclaw-plugins",
+    image,
+    configuredPluginsInstallScript(specs),
+  );
+}
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
   return {
@@ -207,6 +349,29 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
   };
 }
 
+function appendVaultPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): void {
+  if (!config.vaultSecretsEnabled) {
+    return;
+  }
+  envVars.push(
+    { name: "VAULT_ADDR", value: config.vaultAddr || DEFAULT_VAULT_ADDR },
+    { name: "CLAW_VAULT_KV_MOUNT", value: config.vaultKvMount || "secret" },
+    { name: "CLAW_VAULT_KV_VERSION", value: config.vaultKvVersion || "2" },
+    {
+      name: "VAULT_TOKEN",
+      valueFrom: {
+        secretKeyRef: {
+          name: config.vaultTokenSecretName || "openclaw-vault-token",
+          key: config.vaultTokenSecretKey || "VAULT_TOKEN",
+        },
+      },
+    },
+  );
+  if (config.vaultNamespace) {
+    envVars.push({ name: "VAULT_NAMESPACE", value: config.vaultNamespace });
+  }
+}
+
 export function serviceManifest(ns: string, config: DeployConfig): k8s.V1Service {
   const withA2a = Boolean(config.withA2a);
   return {
@@ -263,6 +428,23 @@ export function buildInitScript(config: DeployConfig): string {
   const authProfiles = buildManagedAgentAuthProfiles(config);
   const authProfilesSecretJson = buildManagedAgentAuthProfilesSecretJson(config);
   const managedAgentIds = Array.from(new Set([id, ...((bundle?.agents || []).map((entry) => entry.id).filter(Boolean))]));
+  const openShellPolicyLines = usesOpenShellSandbox(config)
+    ? [
+        `mkdir -p "$(dirname ${OPEN_SHELL_POLICY_PATH})"`,
+        `cat > ${OPEN_SHELL_POLICY_PATH} <<'EOF_OPENSHELL_POLICY'`,
+        OPEN_SHELL_POLICY_YAML.trimEnd(),
+        "EOF_OPENSHELL_POLICY",
+        `chmod 0644 ${OPEN_SHELL_POLICY_PATH}`,
+      ].join("\n")
+    : "";
+  const workspaceSetupLines = managedAgentIds
+    .map((agentId) => [
+      `mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace-${agentId}`,
+      `mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace-${agentId}/memory`,
+      `mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace-${agentId}/skills`,
+      `touch ${OPENCLAW_RUNTIME_DIR}/workspace-${agentId}/.env`,
+    ].join("\n"))
+    .join("\n");
   const sessionStoreLines = managedAgentIds
     .map((agentId) => `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/sessions`)
     .join("\n");
@@ -287,7 +469,7 @@ export function buildInitScript(config: DeployConfig): string {
       : "";
 
   return `
-mkdir -p ${OPENCLAW_RUNTIME_HOME} ${OPENCLAW_RUNTIME_DIR}
+mkdir -p ${OPENCLAW_RUNTIME_HOME} ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR}
 if [ -f ${OPENCLAW_HOME_VOLUME_MOUNT}/openclaw.json ] || [ -d ${OPENCLAW_HOME_VOLUME_MOUNT}/workspace ]; then
   for path in ${OPENCLAW_HOME_VOLUME_MOUNT}/* ${OPENCLAW_HOME_VOLUME_MOUNT}/.[!.]* ${OPENCLAW_HOME_VOLUME_MOUNT}/..?*; do
     [ -e "$path" ] || continue
@@ -297,16 +479,16 @@ if [ -f ${OPENCLAW_HOME_VOLUME_MOUNT}/openclaw.json ] || [ -d ${OPENCLAW_HOME_VO
     mv "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || cp -R "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || true
   done
 fi
-mkdir -p ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config
-chmod 700 ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config 2>/dev/null || true
+mkdir -p ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config
+chmod 700 ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config 2>/dev/null || true
 cp /config/openclaw.json ${OPENCLAW_RUNTIME_DIR}/openclaw.json
 chmod 600 ${OPENCLAW_RUNTIME_DIR}/openclaw.json
 mkdir -p ${OPENCLAW_RUNTIME_DIR}/bin
 mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace
 mkdir -p ${OPENCLAW_RUNTIME_DIR}/skills
 mkdir -p ${OPENCLAW_RUNTIME_DIR}/cron
-mkdir -p ${OPENCLAW_RUNTIME_DIR}/workspace-${id}
-touch ${OPENCLAW_RUNTIME_DIR}/workspace-${id}/.env
+${openShellPolicyLines}
+${workspaceSetupLines}
 cat > ${MANAGED_VAULT_HELPER_PATH} <<'EOF_VAULT_HELPER'
 ${vaultHelperScript}
 EOF_VAULT_HELPER
@@ -317,6 +499,7 @@ for dir in /agents-tree/workspace-*; do
   base="$(basename "$dir")"
   ${workspaceRouting}
   mkdir -p "$dest"
+  mkdir -p "$dest/memory" "$dest/skills"
   cp -r "$dir"/. "$dest"/ 2>/dev/null || true
 done
 cp -r /skills-src/. ${OPENCLAW_RUNTIME_DIR}/skills/ 2>/dev/null || true
@@ -324,6 +507,7 @@ cp /cron-src/jobs.json ${OPENCLAW_RUNTIME_DIR}/cron/jobs.json 2>/dev/null || tru
 cp /exec-approvals-src/exec-approvals.json ${OPENCLAW_RUNTIME_DIR}/exec-approvals.json 2>/dev/null || true
 ${sessionStoreLines}
 ${authProfileLines}
+${config.vaultSecretsEnabled ? vaultResolverSyncScript() : ""}
 chown -R 1000:0 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R g=u ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R o-rwx ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
@@ -347,6 +531,7 @@ export function deploymentManifest(
 
   const envVars: k8s.V1EnvVar[] = [
     { name: "HOME", value: OPENCLAW_RUNTIME_HOME },
+    { name: "TMPDIR", value: OPENCLAW_RUNTIME_TMP_DIR },
     { name: "NODE_ENV", value: "production" },
     { name: "OPENCLAW_CONFIG_DIR", value: OPENCLAW_RUNTIME_DIR },
     { name: "OPENCLAW_STATE_DIR", value: OPENCLAW_RUNTIME_DIR },
@@ -366,6 +551,8 @@ export function deploymentManifest(
   // Direct sidecar only when OTEL is enabled and operator is NOT handling it
   const useOtelDirect = useOtel && !otelViaOperator;
   const useChromium = shouldUseChromiumSidecar(config);
+  const useOpenShell = usesOpenShellSandbox(config);
+  const pluginInstallSpecs = configuredPluginInstallSpecs(config);
 
   const optionalKeys = [
     // Gateway always gets provider API keys so it can route to OpenAI/Anthropic
@@ -390,6 +577,7 @@ export function deploymentManifest(
       valueFrom: { secretKeyRef: { name: "openclaw-secrets", key, optional: true } },
     });
   }
+  appendVaultPluginEnv(envVars, config);
 
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtel) {
@@ -403,6 +591,10 @@ export function deploymentManifest(
     for (const [key, val] of Object.entries(chromiumAgentEnv())) {
       envVars.push({ name: key, value: val });
     }
+  }
+
+  if (useOpenShell) {
+    envVars.push({ name: "OPENSHELL_GATEWAY_ENDPOINT", value: config.sandboxOpenShellGatewayEndpoint?.trim() || "" });
   }
 
   if (config.vertexEnabled && useProxy) {
@@ -497,16 +689,16 @@ export function deploymentManifest(
                 { name: "exec-approvals-config", mountPath: "/exec-approvals-src", readOnly: true },
               ],
             },
+            ...(pluginInstallSpecs.length > 0
+              ? [configuredPluginsInitContainer(image, pluginInstallSpecs)]
+              : []),
           ],
           containers: [
             {
               name: "gateway",
               image,
               imagePullPolicy: "IfNotPresent",
-              command: [
-                "sh", "-c",
-                "umask 007 && exec node dist/index.js gateway run --bind lan --port 18789",
-              ],
+              command: ["sh", "-c", gatewayStartupScript(useOpenShell)],
               ports: [
                 { name: "gateway", containerPort: 18789, protocol: "TCP" },
                 ...(withA2a ? [{ name: "bridge", containerPort: 18790, protocol: "TCP" as const }] : []),

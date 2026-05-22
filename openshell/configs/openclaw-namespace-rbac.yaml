@@ -1,0 +1,24 @@
+# Minimal user OpenClaw namespace objects for the PoC.
+#
+# Apply after replacing namespace/name values for the user:
+#   oc apply -f openshell/configs/openclaw-namespace-rbac.yaml
+#
+# This intentionally does not grant privileged SCC. OpenClaw runs as a normal
+# app workload; OpenShell sandbox pods run in the separate openshell-<user>
+# namespace where the cluster admin grants the sandbox SCC.
+#
+# The OpenShell backend does not require the OpenClaw pod to create Kubernetes
+# resources directly. Sandbox lifecycle goes through the OpenShell gateway.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openclaw-alice
+  labels:
+    app.kubernetes.io/part-of: openclaw-openshell-poc
+    openshell.openclaw.ai/user: alice
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openclaw
+  namespace: openclaw-alice

@@ -1,25 +1,27 @@
 # Sandbox
 
-This installer currently supports OpenClaw's `ssh` sandbox backend.
+This installer supports two OpenClaw sandbox backends:
+
+- `ssh` for local, Kubernetes, and OpenShift deployments
+- `openshell` for Kubernetes and OpenShift deployments when a platform admin has provisioned an OpenShell gateway
 
 For upstream sandbox concepts and backend behavior, start with the OpenClaw docs:
 
 - [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md)
 
-## Why this installer uses SSH
+## Backend Choice
 
-For this installer, `ssh` is the practical sandbox path because it works across:
+Use `ssh` when you want a simple remote Linux sandbox host that works from local containers and clusters.
 
-- local podman/docker deployments
-- Kubernetes deployments
+Use `openshell` when the platform provides a shared OpenShell gateway and sandbox image for per-user or per-team cluster deployments.
 
-It avoids Docker-in-Docker, nested container runtime setup inside the gateway, and privileged cluster requirements.
+Both backends avoid giving the OpenClaw gateway container its own nested container runtime. OpenShell setup is platform-owned because the gateway and sandbox runtime need cluster-side installation and policy.
 
 ## What it does
 
-When enabled, OpenClaw runs sandboxed tool execution on a separate SSH-reachable host instead of inside the main gateway container.
+When enabled, OpenClaw runs sandboxed tool execution outside the main gateway container.
 
-That remote host becomes the sandbox runtime for:
+The sandbox runtime handles:
 
 - `exec`
 - file tools like `read`, `write`, `edit`, `apply_patch`
@@ -27,16 +29,18 @@ That remote host becomes the sandbox runtime for:
 
 Important behavior:
 
-- the SSH sandbox is remote-canonical after the initial seed
-- OpenClaw copies the local workspace to the remote sandbox on first use
-- later sandboxed changes happen on the remote side
-- if you change host files and want the sandbox to see them again, recreate the sandbox runtime from inside OpenClaw
+- with SSH, the remote sandbox is remote-canonical after the initial seed
+- with OpenShell mirror mode, the OpenClaw PVC remains the canonical workspace and changes are mirrored into the sandbox
+- OpenClaw copies or mirrors the workspace to the sandbox on first use
+- sandboxed changes happen inside the sandbox runtime and are synchronized according to the selected backend and workspace mode
+- if you change host files and want an existing SSH sandbox to see them again, recreate the sandbox runtime from inside OpenClaw
 
-## Recommended first setup
+## Recommended SSH Setup
 
 Use these deploy form values:
 
-- `Enable SSH sandbox backend`: checked
+- `Enable sandbox backend`: checked
+- `Sandbox Backend`: `SSH`
 - `Sandbox Mode`: `all`
 - `Sandbox Scope`: `session`
 - `Workspace Access`: `rw`
@@ -45,7 +49,24 @@ Use these deploy form values:
 
 Start with `mode=all` and `scope=session` unless you have a reason to optimize for reuse.
 
-## Credentials
+## Recommended OpenShell Setup
+
+OpenShell is available for Kubernetes and OpenShift deploy targets.
+
+Use these deploy form values:
+
+- `Enable sandbox backend`: checked
+- `Sandbox Backend`: `OpenShell`
+- `Sandbox Mode`: `non-main` when a trusted manager agent should run on the gateway and worker sessions should be sandboxed, or `all` when every agent session should be sandboxed
+- `Sandbox Scope`: `agent` for one sandbox per agent, or `session` for one sandbox per session
+- `Workspace Access`: `rw`
+- `OpenShell Gateway Endpoint`: cluster-internal URL for the provisioned OpenShell gateway, for example `http://openshell.openshell-alice.svc.cluster.local:8080`
+- `OpenShell Workspace Mode`: `mirror`
+- `OpenShell Sandbox Source`: a full sandbox image reference, or leave the default when the approved image is already configured
+
+When OpenShell is enabled, the installer automatically installs the `@openclaw/openshell-sandbox` OpenClaw runtime plugin before gateway startup and writes a managed OpenShell policy file at `/home/node/.openclaw/openshell/policy.yaml`.
+
+## SSH Credentials
 
 Required:
 
@@ -72,7 +93,16 @@ Kubernetes deployments:
 - the gateway container receives it through environment variables
 - OpenClaw maps those env vars into sandbox SSH config
 
-## Remote host requirements
+## How this installer configures OpenShell
+
+Kubernetes and OpenShift deployments:
+
+- the OpenShell gateway endpoint is written into the generated OpenClaw plugin config
+- the installer installs the OpenShell runtime plugin automatically
+- the init container writes a managed OpenShell policy file into the OpenClaw PVC
+- the policy keeps `/sandbox`, `/tmp`, and `/dev/null` writable, and allows read-only access to standard runtime paths plus `/home/sandbox` for shell startup files
+
+## SSH Remote Host Requirements
 
 Your sandbox host should provide:
 
@@ -90,14 +120,18 @@ Common checks:
 - `Known Hosts` matches the target when strict checking is enabled
 - the remote user can create directories under `Remote Workspace Root`
 - the OpenClaw image actually contains the `ssh` client
+- for OpenShell, the gateway endpoint is reachable from the OpenClaw pod
+- for OpenShell, the OpenClaw image contains the OpenShell CLI at `/opt/openshell/bin/openshell`
+- for OpenShell, the `@openclaw/openshell-sandbox` plugin install init container completed successfully
 
 Typical failure patterns:
 
 - host verification failures: add the server entry to `Known Hosts`
 - auth failures: verify the key path, cert, and remote user
-- host file changes not appearing in sandbox: recreate the sandbox runtime after the first seed
+- host file changes not appearing in an SSH sandbox: recreate the sandbox runtime after the first seed
+- OpenShell `.bash_profile` permission warnings: ensure the generated policy includes read-only `/home/sandbox`, then recreate the affected sandbox so the new policy applies
 
 ## Related docs
 
-- [Local deployment guide](docs/deploy-local.md)
-- [Kubernetes deployment guide](docs/deploy-kubernetes.md)
+- [Local deployment guide](deploy-local.md)
+- [Kubernetes deployment guide](deploy-kubernetes.md)

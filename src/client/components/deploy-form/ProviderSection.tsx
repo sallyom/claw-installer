@@ -65,29 +65,6 @@ function secretInputPreferenceHint(mode: string): string {
   return "Optional. If provided here, the installer stores it in the managed Kubernetes Secret. Leave this blank when using an external SecretRef provider.";
 }
 
-const CURATED_MODEL_OPTIONS: Partial<Record<InferenceProvider, Array<{ id: string; name: string }>>> = {
-  anthropic: [
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
-  ],
-  openai: [
-    { id: "gpt-5", name: "GPT-5" },
-    { id: "gpt-5.4", name: "GPT-5.4" },
-    { id: "gpt-5-mini", name: "GPT-5 Mini" },
-  ],
-  "openai-codex": [
-    { id: "gpt-5.5", name: "GPT-5.5 Codex" },
-    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini" },
-    { id: "gpt-5.2", name: "GPT-5.2" },
-  ],
-  google: [
-    { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-  ],
-};
-
 function formatModelOptionLabel(option: ProviderModelOption): string {
   return option.name === option.id ? option.id : `${option.name} (${option.id})`;
 }
@@ -221,9 +198,7 @@ export function ProviderSection({
 
     switch (provider) {
       case "anthropic": {
-        const visibleAnthropicOptions = anthropicModelOptions.length > 0
-          ? anthropicModelOptions
-          : CURATED_MODEL_OPTIONS.anthropic || [];
+        const visibleAnthropicOptions = anthropicModelOptions;
         const additionalAnthropicOptions = visibleAnthropicOptions.filter(
           (option) => option.id !== config.anthropicModel,
         );
@@ -253,7 +228,7 @@ export function ProviderSection({
                 <div className="hint">Loading models...</div>
               )}
               {anthropicModelsError && (
-                <div className="hint" style={{ color: "#e74c3c" }}>{anthropicModelsError}</div>
+                <div className="hint" style={{ color: "var(--danger)" }}>{anthropicModelsError}</div>
               )}
               {visibleAnthropicOptions.length > 0 && (
                 <select
@@ -281,7 +256,7 @@ export function ProviderSection({
               )}
               {anthropicModelOptions.length === 0 && (
                 <div className="hint" style={{ marginBottom: "0.5rem" }}>
-                  Showing curated Anthropic models. Enter an API key in the form or expose one in server env for a live model list.
+                  Enter an API key in the form or expose one in server env for a live model list, or type the model ID.
                 </div>
               )}
               <input
@@ -291,7 +266,7 @@ export function ProviderSection({
                 onChange={(e) => update("anthropicModel", e.target.value)}
               />
               <div className="hint">
-                Use the dropdown or enter a custom Anthropic model ID. The primary model is used as <code>anthropic/&lt;model&gt;</code>.
+                Select a discovered model or enter an Anthropic model ID. The primary model is used as <code>anthropic/&lt;model&gt;</code>.
               </div>
             </div>
             <div className="form-group">
@@ -371,9 +346,7 @@ export function ProviderSection({
       }
 
       case "openai": {
-        const visibleOpenaiOptions = openaiModelOptions.length > 0
-          ? openaiModelOptions
-          : CURATED_MODEL_OPTIONS.openai || [];
+        const visibleOpenaiOptions = openaiModelOptions;
         const additionalOpenaiOptions = visibleOpenaiOptions.filter(
           (option) => option.id !== config.openaiModel,
         );
@@ -403,7 +376,7 @@ export function ProviderSection({
                 <div className="hint">Loading models...</div>
               )}
               {openaiModelsError && (
-                <div className="hint" style={{ color: "#e74c3c" }}>{openaiModelsError}</div>
+                <div className="hint" style={{ color: "var(--danger)" }}>{openaiModelsError}</div>
               )}
               {visibleOpenaiOptions.length > 0 && (
                 <select
@@ -431,17 +404,17 @@ export function ProviderSection({
               )}
               {openaiModelOptions.length === 0 && (
                 <div className="hint" style={{ marginBottom: "0.5rem" }}>
-                  Showing curated OpenAI models. Enter an API key in the form or expose one in server env for a live model list.
+                  Enter an API key in the form or expose one in server env for a live model list, or type the model ID.
                 </div>
               )}
               <input
                 type="text"
-                placeholder="e.g., gpt-5"
+                placeholder="e.g., gpt-5.5"
                 value={config.openaiModel}
                 onChange={(e) => update("openaiModel", e.target.value)}
               />
               <div className="hint">
-                Use the dropdown or enter a custom OpenAI model ID. The primary model is used as <code>openai/&lt;model&gt;</code>.
+                Select a discovered model or enter an OpenAI model ID. The primary model is used as <code>openai/&lt;model&gt;</code>.
               </div>
             </div>
             <div className="form-group">
@@ -472,7 +445,7 @@ export function ProviderSection({
                 <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.25rem" }}>
                   <input
                     type="text"
-                    placeholder="e.g., gpt-5.3"
+                    placeholder="e.g., gpt-5.4"
                     value={modelId}
                     onChange={(e) => {
                       setConfig((prev) => ({
@@ -520,7 +493,7 @@ export function ProviderSection({
       }
 
       case "openai-codex": {
-        const visibleCodexOptions = CURATED_MODEL_OPTIONS["openai-codex"] || [];
+        const visibleCodexOptions: ProviderModelOption[] = [];
         const additionalCodexOptions = visibleCodexOptions.filter(
           (option) => option.id !== config.codexModel,
         );
@@ -654,7 +627,7 @@ export function ProviderSection({
       }
 
       case "google": {
-        const visibleGoogleOptions = CURATED_MODEL_OPTIONS.google || [];
+        const visibleGoogleOptions: ProviderModelOption[] = [];
         const additionalGoogleOptions = visibleGoogleOptions.filter(
           (option) => option.id !== config.googleModel,
         );
@@ -704,9 +677,11 @@ export function ProviderSection({
                   </option>
                 </select>
               )}
-              <div className="hint" style={{ marginBottom: "0.5rem" }}>
-                Showing curated Gemini models.
-              </div>
+              {visibleGoogleOptions.length === 0 && (
+                <div className="hint" style={{ marginBottom: "0.5rem" }}>
+                  Type the Gemini model ID.
+                </div>
+              )}
               <input
                 type="text"
                 placeholder="e.g., gemini-3.1-pro-preview"
@@ -714,7 +689,7 @@ export function ProviderSection({
                 onChange={(e) => update("googleModel", e.target.value)}
               />
               <div className="hint">
-                Use the dropdown or enter a custom Gemini model ID. The primary model is used as <code>google/&lt;model&gt;</code>.
+                Select a discovered model or enter a Gemini model ID. The primary model is used as <code>google/&lt;model&gt;</code>.
               </div>
             </div>
             <div className="form-group">
@@ -888,11 +863,11 @@ export function ProviderSection({
               <div style={{
                 marginBottom: "1rem",
                 padding: "0.5rem 0.75rem",
-                background: "rgba(231, 76, 60, 0.1)",
-                border: "1px solid rgba(231, 76, 60, 0.3)",
-                borderRadius: "6px",
+                background: "var(--danger-soft)",
+                border: "1px solid var(--border-focus)",
+                borderRadius: "var(--radius-sm)",
                 fontSize: "0.85rem",
-                color: "#e74c3c",
+                color: "var(--danger)",
               }}>
                 Your environment credentials are Application Default Credentials (from <code>gcloud auth</code>),
                 which are not supported by Gemini on Vertex. Either upload a Service Account JSON below,
@@ -1040,7 +1015,7 @@ export function ProviderSection({
                       <div className="hint">Loading models...</div>
                     )}
                     {error && (
-                      <div className="hint" style={{ color: "#e74c3c" }}>{error}</div>
+                      <div className="hint" style={{ color: "var(--danger)" }}>{error}</div>
                     )}
                     {warning && !error && (
                       <div className="hint">{warning}</div>
@@ -1174,7 +1149,7 @@ export function ProviderSection({
                 Runs a LiteLLM sidecar that handles Vertex AI authentication.
                 GCP credentials stay in the proxy container and are never exposed to the agent.
                 {!config.litellmProxy && (
-                  <span style={{ color: "#e67e22" }}>
+                  <span style={{ color: "var(--warning)" }}>
                     {" "}Disabled: credentials will be passed directly to the agent container.
                   </span>
                 )}
@@ -1183,9 +1158,9 @@ export function ProviderSection({
                 <div style={{
                   marginTop: "0.5rem",
                   padding: "0.5rem 0.75rem",
-                  background: "rgba(52, 152, 219, 0.1)",
-                  border: "1px solid rgba(52, 152, 219, 0.3)",
-                  borderRadius: "6px",
+                  background: "var(--accent-soft)",
+                  border: "1px solid var(--border-focus)",
+                  borderRadius: "var(--radius-sm)",
                   fontSize: "0.85rem",
                   color: "var(--text-secondary)",
                 }}>
@@ -1228,7 +1203,7 @@ export function ProviderSection({
                 If you paste just the service URL, the installer will normalize it to a <code>/v1</code> API base for runtime requests.
               </div>
               {modelEndpointOptionsError && (
-                <div className="hint" style={{ color: "#e74c3c", marginTop: "0.35rem" }}>
+                <div className="hint" style={{ color: "var(--danger)", marginTop: "0.35rem" }}>
                   {modelEndpointOptionsError}
                 </div>
               )}

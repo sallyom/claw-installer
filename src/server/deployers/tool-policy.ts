@@ -13,12 +13,23 @@ export function buildSandboxToolPolicy(config: DeployConfig): Record<string, unk
   if (config.sandboxToolAllowBrowser) allow.push("group:ui");
   if (config.sandboxToolAllowAutomation) allow.push("group:automation");
   if (config.sandboxToolAllowMessaging) allow.push("group:messaging");
+  if (config.sandboxToolAllowWebFetch) allow.push("web_fetch");
 
-  return {
+  const policy: Record<string, unknown> = {
     sandbox: {
       tools: {
         allow,
       },
     },
   };
+  if (config.sandboxToolAllowWebFetch) {
+    policy.web = {
+      fetch: {
+        enabled: true,
+        readability: true,
+        maxChars: 50000,
+      },
+    };
+  }
+  return policy;
 }

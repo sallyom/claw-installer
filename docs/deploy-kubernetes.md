@@ -36,7 +36,9 @@ For Kubernetes deploys, the installer now uses the safer upstream-compatible sec
 - generated `openclaw.json` references them with env-backed OpenClaw SecretRefs instead of embedding raw secret values
 - OpenAI Codex uses Codex CLI OAuth: the installer reads the selected Codex CLI `auth.json`, writes the imported OpenClaw auth profile store into `openclaw-secrets`, and the init container copies it into each managed agent directory as `auth-profiles.json`
 
-You can still provide optional `secrets.providers` JSON and explicit SecretRef overrides when you want `file` or `exec`-based providers such as Vault.
+You can enable HashiCorp Vault SecretRef wiring from the **External Secret Providers** section. Add the Vault OpenClaw runtime plugin in the **Plugins** section unless it is already installed in the OpenClaw home volume.
+
+You can still provide optional `secrets.providers` JSON and explicit SecretRef overrides when you want other `file` or `exec`-based providers.
 
 The browser never receives the raw Codex OAuth JSON. The installer stores the imported Codex OAuth profile in the Kubernetes Secret and saves only non-secret deploy metadata locally. Anyone with permission to read the `openclaw-secrets` Secret or the OpenClaw persistent volume can read runtime credentials, so keep normal cluster RBAC and Secret access controls in place.
 
@@ -64,9 +66,13 @@ kubectl port-forward svc/openclaw 18789:18789 -n <namespace>
 
 Then visit `http://localhost:18789`.
 
-## SSH Sandbox
+## Sandbox
 
-For Kubernetes deployments, the installer stores SSH sandbox material in the generated `openclaw-secrets` Secret and passes it to the gateway container.
+For Kubernetes deployments, the installer supports both SSH and OpenShell sandbox backends.
+
+SSH sandbox material is stored in the generated `openclaw-secrets` Secret and passed to the gateway container.
+
+OpenShell sandboxing requires an existing OpenShell gateway endpoint, usually provisioned by a cluster admin. When enabled, the installer installs the OpenShell runtime plugin before gateway startup, writes a managed OpenShell policy file, and points OpenClaw at the provided gateway endpoint.
 
 See [SANDBOX.md](SANDBOX.md) for the recommended form values, secret handling, and troubleshooting.
 

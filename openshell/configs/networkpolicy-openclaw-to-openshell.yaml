@@ -1,0 +1,27 @@
+# Optional NetworkPolicy for clusters with default-deny egress.
+#
+# This allows OpenClaw in openclaw-alice to reach the OpenShell gateway Service
+# in openshell-alice on port 8080. If your cluster does not enforce egress
+# NetworkPolicy, this file is not required.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-openshell-gateway-egress
+  namespace: openclaw-alice
+spec:
+  podSelector:
+    matchLabels:
+      app: openclaw
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshell-alice
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openshell
+      ports:
+        - protocol: TCP
+          port: 8080

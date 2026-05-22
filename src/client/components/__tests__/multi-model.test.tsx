@@ -125,6 +125,93 @@ describe("Multi-model per provider", () => {
         { secretName: "openai_api_key", targetEnv: "OPENAI_API_KEY" },
       ]);
     });
+
+    it("includes plugin install specs when configured", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.pluginInstallSpecsText = "\ngit:github.com/sallyom/claw-vault\n# comment\n/app/extensions/vault\n";
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(body.pluginInstallSpecs).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
+    });
+
+    it("includes Vault plugin deployment settings when enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vaultSecretsEnabled = true;
+      config.vaultAddr = "http://vault.vault.svc:8200";
+      config.vaultTokenSecretName = "openclaw-vault-token";
+      config.vaultTokenSecretKey = "token";
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "openai",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        openaiApiKeyRef: {
+          source: "exec",
+          provider: "vault",
+          id: "providers/openai/apiKey",
+        },
+      });
+
+      expect(body.vaultSecretsEnabled).toBe(true);
+      expect(body.vaultAddr).toBe("http://vault.vault.svc:8200");
+      expect(body.vaultTokenSecretName).toBe("openclaw-vault-token");
+      expect(body.vaultTokenSecretKey).toBe("token");
+      expect(body.openaiApiKeyRef).toEqual({
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      });
+      expect(body.openaiApiKey).toBeUndefined();
+    });
+
+    it("defaults selected provider SecretRefs to Vault when Vault is enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vaultSecretsEnabled = true;
+      config.openaiApiKey = "sk-should-not-be-sent";
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "openai",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["openai"],
+      });
+
+      expect(body.openaiApiKeyRef).toEqual({
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      });
+      expect(body.openaiApiKey).toBeUndefined();
+      expect(body.anthropicApiKeyRef).toBeUndefined();
+    });
+
+    it("includes custom OpenShell sandbox source when the OpenShell backend is enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.sandboxEnabled = true;
+      config.sandboxBackend = "openshell";
+      config.sandboxOpenShellFrom = "quay.io/sallyom/openclaw-openshell-sandbox:slim";
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(body.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
+    });
   });
 
   describe("buildEnvFileContent", () => {
@@ -196,6 +283,95 @@ describe("Multi-model per provider", () => {
       expect(match).toBeTruthy();
       const decoded = JSON.parse(window.atob(match![1]));
       expect(decoded).toEqual([{ secretName: "joy_token", targetEnv: "JOY_TELEGRAM_BOT_TOKEN" }]);
+    });
+
+    it("exports Vault plugin settings into the env file", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vaultSecretsEnabled = true;
+      config.vaultAddr = "http://vault.vault.svc:8200";
+      config.vaultTokenSecretName = "openclaw-vault-token";
+      config.vaultTokenSecretKey = "token";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "openai",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(env).toContain("VAULT_SECRETS_ENABLED=true");
+      expect(env).toContain("VAULT_ADDR=http://vault.vault.svc:8200");
+      expect(env).toContain("VAULT_TOKEN_SECRET_NAME=openclaw-vault-token");
+      expect(env).toContain("VAULT_TOKEN_SECRET_KEY=token");
+    });
+
+    it("exports selected provider Vault SecretRefs into the env file", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.vaultSecretsEnabled = true;
+      config.openaiApiKey = "sk-should-not-be-sent";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "openai",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["openai"],
+      });
+
+      expect(env).toContain("OPENAI_API_KEY=\n");
+      const match = env.match(/OPENAI_API_KEY_REF_B64=(.+)/);
+      expect(match).toBeTruthy();
+      expect(JSON.parse(window.atob(match![1]))).toEqual({
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      });
+      expect(env).not.toContain("ANTHROPIC_API_KEY_REF_B64=");
+    });
+
+    it("exports plugin install specs into the env file", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.pluginInstallSpecsText = "git:github.com/sallyom/claw-vault\n/app/extensions/vault";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      const match = env.match(/OPENCLAW_PLUGIN_INSTALL_SPECS_B64=(.+)/);
+      expect(match).toBeTruthy();
+      const decoded = JSON.parse(window.atob(match![1]));
+      expect(decoded).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
+    });
+
+    it("round-trips the OpenShell sandbox source through env files", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.sandboxEnabled = true;
+      config.sandboxBackend = "openshell";
+      config.sandboxOpenShellFrom = "quay.io/sallyom/openclaw-openshell-sandbox:slim";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      const vars = Object.fromEntries(
+        env
+          .split("\n")
+          .filter((line) => line && !line.startsWith("#") && line.includes("="))
+          .map((line) => {
+            const index = line.indexOf("=");
+            return [line.slice(0, index), line.slice(index + 1)];
+          }),
+      );
+
+      const { config: restored } = applySavedVarsToConfig(vars, createInitialDeployFormConfig());
+
+      expect(env).toContain("SANDBOX_OPENSHELL_FROM=quay.io/sallyom/openclaw-openshell-sandbox:slim");
+      expect(restored.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
     });
   });
 

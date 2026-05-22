@@ -21,7 +21,7 @@ import {
 } from "./deploy-form/serialization.js";
 import { ProviderSection } from "./deploy-form/ProviderSection.js";
 import { SandboxSection } from "./deploy-form/SandboxSection.js";
-import { SecretRefsSection } from "./deploy-form/SecretRefsSection.js";
+import { PluginInstallSection } from "./deploy-form/PluginInstallSection.js";
 import { ExternalSecretProvidersSection } from "./deploy-form/ExternalSecretProvidersSection.js";
 import type {
   DeployFormConfig,
@@ -601,6 +601,50 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     setSelectedProviders(providers);
   }, []);
 
+  const handleVaultEnabledChange = useCallback((enabled: boolean) => {
+    setConfig((prev) => {
+      const next: DeployFormConfig = { ...prev, vaultSecretsEnabled: enabled };
+      if (!enabled) {
+        return next;
+      }
+
+      const selected = new Set(selectedProviders);
+      if (selected.has("anthropic") && !prev.anthropicApiKeyRefId.trim()) {
+        next.anthropicApiKeyRefSource = "exec";
+        next.anthropicApiKeyRefProvider = "vault";
+        next.anthropicApiKeyRefId = "providers/anthropic/apiKey";
+      }
+      if (selected.has("openai") && !prev.openaiApiKeyRefId.trim()) {
+        next.openaiApiKeyRefSource = "exec";
+        next.openaiApiKeyRefProvider = "vault";
+        next.openaiApiKeyRefId = "providers/openai/apiKey";
+      }
+      if (selected.has("google") && !prev.googleApiKeyRefId.trim()) {
+        next.googleApiKeyRefSource = "exec";
+        next.googleApiKeyRefProvider = "vault";
+        next.googleApiKeyRefId = "providers/google/apiKey";
+      }
+      if (selected.has("openrouter") && !prev.openrouterApiKeyRefId.trim()) {
+        next.openrouterApiKeyRefSource = "exec";
+        next.openrouterApiKeyRefProvider = "vault";
+        next.openrouterApiKeyRefId = "providers/openrouter/apiKey";
+      }
+      if (selected.has("custom-endpoint") && !prev.modelEndpointApiKeyRefId.trim()) {
+        next.modelEndpointApiKeyRefSource = "exec";
+        next.modelEndpointApiKeyRefProvider = "vault";
+        next.modelEndpointApiKeyRefId = "providers/endpoint/apiKey";
+      }
+
+      if (prev.telegramEnabled && !prev.telegramBotTokenRefId.trim()) {
+        next.telegramBotTokenRefSource = "exec";
+        next.telegramBotTokenRefProvider = "vault";
+        next.telegramBotTokenRefId = "channels/telegram/botToken";
+      }
+
+      return next;
+    });
+  }, [selectedProviders]);
+
   const handleDeploy = async () => {
     if (!isValid) {
       return;
@@ -671,7 +715,8 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     || config.sandboxToolAllowRuntime
     || config.sandboxToolAllowBrowser
     || config.sandboxToolAllowAutomation
-    || config.sandboxToolAllowMessaging;
+    || config.sandboxToolAllowMessaging
+    || config.sandboxToolAllowWebFetch;
 
   const anthropicApiKeyRef = buildSecretRef(
     config.anthropicApiKeyRefSource,
@@ -703,55 +748,6 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     config.telegramBotTokenRefProvider,
     config.telegramBotTokenRefId,
   );
-  const podmanSecretMappingsParse = useMemo(
-    () => parsePodmanSecretMappingsText(config.podmanSecretMappingsText),
-    [config.podmanSecretMappingsText],
-  );
-  const inferredAnthropicApiKeyRef = !anthropicApiKeyRef
-    ? (
-      podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "ANTHROPIC_API_KEY")
-        || Boolean(config.anthropicApiKey.trim())
-    )
-      ? { source: "env", provider: "default", id: "ANTHROPIC_API_KEY" as const }
-      : undefined
-    : undefined;
-  const inferredOpenaiApiKeyRef = !openaiApiKeyRef
-    ? (
-      podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "OPENAI_API_KEY")
-        || Boolean(config.openaiApiKey.trim())
-    )
-      ? { source: "env", provider: "default", id: "OPENAI_API_KEY" as const }
-      : undefined
-    : undefined;
-  const inferredGoogleApiKeyRef = !googleApiKeyRef
-    ? (() => {
-      const mappedTargetEnv = podmanSecretMappingsParse.mappings.find((mapping) =>
-        mapping.targetEnv === "GEMINI_API_KEY" || mapping.targetEnv === "GOOGLE_API_KEY",
-      )?.targetEnv;
-      const inferredId = mappedTargetEnv || (config.googleApiKey.trim() ? "GEMINI_API_KEY" : "");
-      return inferredId
-        ? { source: "env", provider: "default", id: inferredId as "GEMINI_API_KEY" | "GOOGLE_API_KEY" }
-        : undefined;
-    })()
-    : undefined;
-  const inferredOpenrouterApiKeyRef = !openrouterApiKeyRef
-    ? (
-      podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "OPENROUTER_API_KEY")
-        || Boolean(config.openrouterApiKey.trim())
-    )
-      ? { source: "env", provider: "default", id: "OPENROUTER_API_KEY" as const }
-      : undefined
-    : undefined;
-  const inferredModelEndpointApiKeyRef = !modelEndpointApiKeyRef && (
-    config.modelEndpoint.trim() && !config.modelEndpointApiKey.trim()
-      ? undefined
-      : (
-        podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "MODEL_ENDPOINT_API_KEY")
-          || Boolean(config.modelEndpointApiKey.trim())
-      )
-        ? { source: "env", provider: "default", id: "MODEL_ENDPOINT_API_KEY" as const }
-        : undefined
-  );
   const agentNameError = validateAgentName(config.agentName);
   const validationErrors: string[] = [];
   if (!config.agentName.trim()) {
@@ -759,11 +755,17 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   } else if (agentNameError) {
     validationErrors.push(agentNameError);
   }
-  if (config.sandboxEnabled && !config.sandboxSshTarget.trim()) {
+  if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshTarget.trim()) {
     validationErrors.push("SSH Target is required when the SSH sandbox backend is enabled.");
   }
-  if (config.sandboxEnabled && !config.sandboxSshIdentityPath.trim()) {
+  if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshIdentityPath.trim()) {
     validationErrors.push("SSH Private Key is required when the SSH sandbox backend is enabled.");
+  }
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !isClusterMode) {
+    validationErrors.push("OpenShell sandbox backend is only available for Kubernetes and OpenShift deployments.");
+  }
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint.trim()) {
+    validationErrors.push("OpenShell Gateway Endpoint is required when the OpenShell sandbox backend is enabled.");
   }
   if (config.sandboxEnabled && !hasSandboxToolSelection) {
     validationErrors.push("Select at least one sandbox tool group or disable custom sandbox tool baseline.");
@@ -771,14 +773,37 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   if (isClusterMode && !defaults?.k8sAvailable) {
     validationErrors.push("No Kubernetes cluster detected.");
   }
+  let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson.trim()) {
     try {
       const parsed = JSON.parse(config.secretsProvidersJson);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         validationErrors.push("Secret providers JSON must be a JSON object.");
+      } else {
+        customSecretProviders = parsed as Record<string, unknown>;
       }
     } catch {
       validationErrors.push("Secret providers JSON is invalid.");
+    }
+  }
+  if (config.vaultSecretsEnabled) {
+    if (!config.vaultAddr.trim()) {
+      validationErrors.push("Vault Address is required when the Vault plugin is enabled.");
+    }
+    if (!config.vaultKvMount.trim()) {
+      validationErrors.push("Vault KV Mount is required when the Vault plugin is enabled.");
+    }
+    if (config.vaultKvVersion !== "1" && config.vaultKvVersion !== "2") {
+      validationErrors.push("Vault KV Version must be 1 or 2.");
+    }
+    if (isClusterMode && !config.vaultTokenSecretName.trim()) {
+      validationErrors.push("Vault Token Secret Name is required when the Vault plugin is enabled.");
+    }
+    if (isClusterMode && !config.vaultTokenSecretKey.trim()) {
+      validationErrors.push("Vault Token Secret Key is required when the Vault plugin is enabled.");
+    }
+    if (customSecretProviders && "vault" in customSecretProviders) {
+      validationErrors.push("Remove the custom vault provider JSON when the bundled Vault plugin is enabled.");
     }
   }
   if (config.anthropicApiKeyRefId.trim() && !anthropicApiKeyRef) {
@@ -799,7 +824,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   if (config.telegramBotTokenRefId.trim() && !telegramBotTokenRef) {
     validationErrors.push("Telegram SecretRef requires source, provider, and id.");
   }
-  validationErrors.push(...podmanSecretMappingsParse.errors);
+  validationErrors.push(...parsePodmanSecretMappingsText(config.podmanSecretMappingsText).errors);
 
   const isValid = validationErrors.length === 0;
 
@@ -853,8 +878,8 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           style={{
             marginBottom: "1rem",
             padding: "0.6rem 1rem",
-            background: "rgba(52, 152, 219, 0.1)",
-            border: "1px solid rgba(52, 152, 219, 0.3)",
+            background: "var(--accent-soft)",
+            border: "1px solid var(--border-focus)",
             borderRadius: "var(--radius-sm)",
             fontSize: "0.85rem",
             color: "var(--text-secondary)",
@@ -890,7 +915,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               Connected to cluster: <strong>{defaults.k8sContext}</strong>
             </div>
           ) : (
-            <div style={{ color: "#e74c3c", fontSize: "0.85rem" }}>
+            <div style={{ color: "var(--danger)", fontSize: "0.85rem" }}>
               No Kubernetes cluster detected. Configure kubectl and ensure you are logged in.
             </div>
           )}
@@ -960,10 +985,10 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               placeholder="e.g., lynx"
               value={config.agentName}
               onChange={(e) => update("agentName", e.target.value)}
-              style={agentNameError ? { borderColor: "#e74c3c" } : undefined}
+              style={agentNameError ? { borderColor: "var(--danger)" } : undefined}
             />
             {agentNameError ? (
-              <div className="hint" style={{ color: "#e74c3c" }}>{agentNameError}</div>
+              <div className="hint" style={{ color: "var(--danger)" }}>{agentNameError}</div>
             ) : (
               <div className="hint">Lowercase letters, numbers, and hyphens (e.g., my-agent)</div>
             )}
@@ -1404,34 +1429,27 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
 
         <SandboxSection
           config={config}
+          isClusterMode={isClusterMode}
           update={update}
           setConfig={setConfig}
         />
 
-        <SecretRefsSection
+        <PluginInstallSection
           config={config}
           update={update}
-          mode={mode}
-          effectiveAnthropicApiKeyRef={anthropicApiKeyRef || inferredAnthropicApiKeyRef}
-          effectiveOpenaiApiKeyRef={openaiApiKeyRef || inferredOpenaiApiKeyRef}
-          effectiveGoogleApiKeyRef={googleApiKeyRef || inferredGoogleApiKeyRef}
-          effectiveOpenrouterApiKeyRef={openrouterApiKeyRef || inferredOpenrouterApiKeyRef}
-          effectiveModelEndpointApiKeyRef={modelEndpointApiKeyRef || inferredModelEndpointApiKeyRef}
-          anthropicApiKeyRefIsInferred={!anthropicApiKeyRef && Boolean(inferredAnthropicApiKeyRef)}
-          openaiApiKeyRefIsInferred={!openaiApiKeyRef && Boolean(inferredOpenaiApiKeyRef)}
-          googleApiKeyRefIsInferred={!googleApiKeyRef && Boolean(inferredGoogleApiKeyRef)}
-          openrouterApiKeyRefIsInferred={!openrouterApiKeyRef && Boolean(inferredOpenrouterApiKeyRef)}
-          modelEndpointApiKeyRefIsInferred={!modelEndpointApiKeyRef && Boolean(inferredModelEndpointApiKeyRef)}
         />
 
         <ExternalSecretProvidersSection
-          secretsProvidersJson={config.secretsProvidersJson}
+          config={config}
+          isClusterMode={isClusterMode}
+          selectedProviders={selectedProviders}
           update={update}
+          onVaultEnabledChange={handleVaultEnabledChange}
         />
 
         <div style={{ marginTop: "1.5rem" }}>
           {!isValid && (
-            <div style={{ color: "#e74c3c", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+            <div style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
               {validationErrors.join(" ")}
             </div>
           )}

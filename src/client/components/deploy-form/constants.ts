@@ -20,7 +20,7 @@ export const PROVIDER_OPTIONS: Array<{ id: InferenceProvider; label: string; des
 
 export const MODEL_DEFAULTS: Record<InferenceProvider, string> = {
   "anthropic": "claude-sonnet-4-6",
-  "openai": "openai/gpt-5",
+  "openai": "openai/gpt-5.5",
   "openai-codex": "openai/gpt-5.5",
   "google": "google/gemini-3.1-pro-preview",
   "openrouter": "openrouter/auto",
@@ -31,7 +31,7 @@ export const MODEL_DEFAULTS: Record<InferenceProvider, string> = {
 
 export const MODEL_HINTS: Record<InferenceProvider, string> = {
   "anthropic": "Examples: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5",
-  "openai": "Examples: openai/gpt-5, openai/gpt-5.3",
+  "openai": "Examples: openai/gpt-5.5, openai/gpt-5.4",
   "openai-codex": "Examples: gpt-5.5, gpt-5.4-mini",
   "google": "Examples: google/gemini-3.1-pro-preview, google/gemini-2.5-flash",
   "openrouter": "Examples: openrouter/auto, openrouter/anthropic/claude-sonnet-4-6",

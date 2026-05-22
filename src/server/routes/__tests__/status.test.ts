@@ -42,6 +42,7 @@ describe("parseSavedLocalInstanceConfig", () => {
         { secretName: "gemini_api_key", targetEnv: "GEMINI_API_KEY" },
         { secretName: "openrouter_api_key", targetEnv: "OPENROUTER_API_KEY" },
       ],
+      pluginInstallSpecs: ["git:github.com/sallyom/claw-vault", "/app/extensions/vault"],
     });
 
     const savedVars = parseEnvFile(buildSavedInstanceEnvContent(config, "openclaw-demo"));
@@ -68,6 +69,7 @@ describe("parseSavedLocalInstanceConfig", () => {
       { secretName: "gemini_api_key", targetEnv: "GEMINI_API_KEY" },
       { secretName: "openrouter_api_key", targetEnv: "OPENROUTER_API_KEY" },
     ]);
+    expect(parsed.pluginInstallSpecs).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
   });
 
   it("restores saved Codex OAuth fields", () => {
@@ -90,4 +92,5 @@ describe("parseSavedLocalInstanceConfig", () => {
     expect(parsed.codexModel).toBe("gpt-5.4");
     expect(parsed.codexModels).toEqual(["gpt-5.4-mini"]);
   });
+
 });

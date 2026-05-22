@@ -1,0 +1,27 @@
+{
+  "agents": {
+    "defaults": {
+      "sandbox": {
+        "mode": "all",
+        "backend": "openshell",
+        "scope": "session",
+        "workspaceAccess": "rw"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "openshell": {
+        "enabled": true,
+        "config": {
+          "command": "/opt/openshell/bin/openshell",
+          "gateway": "openshell",
+          "from": "quay.io/sallyom/openclaw-openshell-sandbox:latest",
+          "mode": "mirror",
+          "gatewayEndpoint": "http://openshell.openshell-alice.svc.cluster.local:8080",
+          "timeoutSeconds": 180
+        }
+      }
+    }
+  }
+}

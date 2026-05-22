@@ -17,6 +17,9 @@ import type {
   SecretRefValue,
 } from "./types.js";
 
+// TODO(openshell): pin this by digest once the Fedora sandbox image contract stabilizes.
+const DEFAULT_OPENSHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell-sandbox:latest";
+
 export function createInitialDeployFormConfig(): DeployFormConfig {
   return {
     prefix: "",
@@ -25,6 +28,14 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     image: "",
     containerRunArgs: "",
     podmanSecretMappingsText: DEFAULT_PROVIDER_PODMAN_SECRET_MAPPINGS_TEXT,
+    vaultSecretsEnabled: false,
+    vaultAddr: "http://vault.vault.svc:8200",
+    vaultNamespace: "",
+    vaultKvMount: "secret",
+    vaultKvVersion: "2",
+    vaultTokenSecretName: "openclaw-vault-token",
+    vaultTokenSecretKey: "VAULT_TOKEN",
+    pluginInstallSpecsText: "",
     secretsProvidersJson: "",
     anthropicApiKeyRefSource: "env",
     anthropicApiKeyRefProvider: "default",
@@ -45,9 +56,13 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     telegramBotTokenRefProvider: "default",
     telegramBotTokenRefId: "",
     sandboxEnabled: false,
+    sandboxBackend: "ssh",
     sandboxMode: "all",
     sandboxScope: "session",
     sandboxWorkspaceAccess: "rw",
+    sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+    sandboxOpenShellMode: "mirror",
+    sandboxOpenShellFrom: DEFAULT_OPENSHELL_SANDBOX_FROM,
     sandboxToolPolicyEnabled: false,
     sandboxToolAllowFiles: true,
     sandboxToolAllowSessions: true,
@@ -56,6 +71,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     sandboxToolAllowBrowser: false,
     sandboxToolAllowAutomation: false,
     sandboxToolAllowMessaging: false,
+    sandboxToolAllowWebFetch: false,
     sandboxSshTarget: "",
     sandboxSshWorkspaceRoot: "/tmp/openclaw-sandboxes",
     sandboxSshStrictHostKeyChecking: true,
@@ -154,6 +170,37 @@ function decodeSecretsProvidersJson(vars: Record<string, unknown>): string {
   const decoded = decodeBase64(vars.SECRETS_PROVIDERS_JSON_B64 as string | undefined);
   if (decoded) return decoded;
   return typeof vars.secretsProvidersJson === "string" ? vars.secretsProvidersJson : "";
+}
+
+export function parsePluginInstallSpecsText(value: string): string[] {
+  const seen = new Set<string>();
+  const specs: string[] = [];
+  for (const line of value.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    specs.push(trimmed);
+  }
+  return specs;
+}
+
+function formatPluginInstallSpecsText(specs: string[] | undefined): string {
+  return (specs ?? []).filter((spec) => typeof spec === "string" && spec.trim()).join("\n");
+}
+
+function decodePluginInstallSpecsText(vars: Record<string, unknown>): string {
+  const decoded = decodeJsonBase64<string[]>(
+    vars.OPENCLAW_PLUGIN_INSTALL_SPECS_B64 as string | undefined,
+  );
+  if (decoded) {
+    return formatPluginInstallSpecsText(decoded);
+  }
+  if (Array.isArray(vars.pluginInstallSpecs)) {
+    return formatPluginInstallSpecsText(vars.pluginInstallSpecs as string[]);
+  }
+  return typeof vars.pluginInstallSpecsText === "string" ? vars.pluginInstallSpecsText : "";
 }
 
 function decodePodmanSecretMappingsText(vars: Record<string, unknown>): string {
@@ -295,6 +342,7 @@ export function applySavedVarsToConfig(
   const telegramBotTokenRef = decodeSecretRefVar(vars, "TELEGRAM_BOT_TOKEN_REF_B64", "telegramBotTokenRef");
   const savedProvidersJson = decodeSecretsProvidersJson(vars);
   const savedPodmanSecretMappingsText = decodePodmanSecretMappingsText(vars);
+  const savedPluginInstallSpecsText = decodePluginInstallSpecsText(vars);
   const inferredAnthropicRef = anthropicApiKeyRef || inferredEnvSecretRefFromPodmanMappings(savedPodmanSecretMappingsText, "ANTHROPIC_API_KEY");
   const inferredOpenaiRef = openaiApiKeyRef || inferredEnvSecretRefFromPodmanMappings(savedPodmanSecretMappingsText, "OPENAI_API_KEY");
   const inferredGoogleRef = googleApiKeyRef
@@ -315,6 +363,20 @@ export function applySavedVarsToConfig(
       image: getStringVar(vars, "OPENCLAW_IMAGE", "image") || prev.image,
       containerRunArgs: getStringVar(vars, "OPENCLAW_CONTAINER_RUN_ARGS", "containerRunArgs") || prev.containerRunArgs,
       podmanSecretMappingsText: savedPodmanSecretMappingsText || prev.podmanSecretMappingsText,
+      vaultSecretsEnabled:
+        vars.VAULT_SECRETS_ENABLED === "true"
+          || vars.vaultSecretsEnabled === true
+          || vars.vaultSecretsEnabled === "true"
+          || prev.vaultSecretsEnabled,
+      vaultAddr: getStringVar(vars, "VAULT_ADDR", "vaultAddr") || prev.vaultAddr,
+      vaultNamespace: getStringVar(vars, "VAULT_NAMESPACE", "vaultNamespace") || prev.vaultNamespace,
+      vaultKvMount: getStringVar(vars, "CLAW_VAULT_KV_MOUNT", "vaultKvMount") || prev.vaultKvMount,
+      vaultKvVersion: getStringVar(vars, "CLAW_VAULT_KV_VERSION", "vaultKvVersion") || prev.vaultKvVersion,
+      vaultTokenSecretName:
+        getStringVar(vars, "VAULT_TOKEN_SECRET_NAME", "vaultTokenSecretName") || prev.vaultTokenSecretName,
+      vaultTokenSecretKey:
+        getStringVar(vars, "VAULT_TOKEN_SECRET_KEY", "vaultTokenSecretKey") || prev.vaultTokenSecretKey,
+      pluginInstallSpecsText: savedPluginInstallSpecsText || prev.pluginInstallSpecsText,
       secretsProvidersJson: savedProvidersJson || prev.secretsProvidersJson,
       anthropicApiKeyRefSource: inferredAnthropicRef?.source || prev.anthropicApiKeyRefSource,
       anthropicApiKeyRefProvider: inferredAnthropicRef?.provider || prev.anthropicApiKeyRefProvider,
@@ -336,6 +398,8 @@ export function applySavedVarsToConfig(
       telegramBotTokenRefId: telegramBotTokenRef?.id || prev.telegramBotTokenRefId,
       sandboxEnabled:
         vars.SANDBOX_ENABLED === "true" || vars.sandboxEnabled === "true" || prev.sandboxEnabled,
+      sandboxBackend:
+        getStringVar(vars, "SANDBOX_BACKEND", "sandboxBackend") === "openshell" ? "openshell" : prev.sandboxBackend,
       sandboxMode: getStringVar(vars, "SANDBOX_MODE", "sandboxMode") || prev.sandboxMode,
       sandboxScope: getStringVar(vars, "SANDBOX_SCOPE", "sandboxScope") || prev.sandboxScope,
       sandboxToolPolicyEnabled:
@@ -376,8 +440,21 @@ export function applySavedVarsToConfig(
         vars.SANDBOX_TOOL_ALLOW_MESSAGING === "true"
           || vars.sandboxToolAllowMessaging === "true"
           || prev.sandboxToolAllowMessaging,
+      sandboxToolAllowWebFetch:
+        vars.SANDBOX_TOOL_ALLOW_WEB_FETCH === "true"
+          || vars.sandboxToolAllowWebFetch === "true"
+          || prev.sandboxToolAllowWebFetch,
       sandboxWorkspaceAccess:
         getStringVar(vars, "SANDBOX_WORKSPACE_ACCESS", "sandboxWorkspaceAccess") || prev.sandboxWorkspaceAccess,
+      sandboxOpenShellGatewayEndpoint:
+        getStringVar(vars, "SANDBOX_OPENSHELL_GATEWAY_ENDPOINT", "sandboxOpenShellGatewayEndpoint")
+        || prev.sandboxOpenShellGatewayEndpoint,
+      sandboxOpenShellMode:
+        getStringVar(vars, "SANDBOX_OPENSHELL_MODE", "sandboxOpenShellMode") === "remote"
+          ? "remote"
+          : prev.sandboxOpenShellMode,
+      sandboxOpenShellFrom:
+        getStringVar(vars, "SANDBOX_OPENSHELL_FROM", "sandboxOpenShellFrom") || prev.sandboxOpenShellFrom,
       sandboxSshTarget:
         getStringVar(vars, "SANDBOX_SSH_TARGET", "sandboxSshTarget") || prev.sandboxSshTarget,
       sandboxSshWorkspaceRoot:
@@ -495,6 +572,14 @@ function isProviderSelected(
   return selectedProviders.includes(provider);
 }
 
+function vaultSecretRef(id: string): SecretRefValue {
+  return {
+    source: "exec",
+    provider: "vault",
+    id,
+  };
+}
+
 export function buildDeployRequestBody(params: {
   mode: string;
   inferenceProvider: InferenceProvider;
@@ -525,8 +610,29 @@ export function buildDeployRequestBody(params: {
   } = params;
   const vertexProvider = inferenceProvider === "vertex-google" ? "google" : "anthropic";
   const podmanSecretMappings = parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings;
+  const pluginInstallSpecs = parsePluginInstallSpecsText(config.pluginInstallSpecsText);
   const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
   const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
+  const effectiveAnthropicApiKeyRef =
+    anthropicApiKeyRef || (config.vaultSecretsEnabled && sel("anthropic")
+      ? vaultSecretRef("providers/anthropic/apiKey")
+      : undefined);
+  const effectiveOpenaiApiKeyRef =
+    openaiApiKeyRef || (config.vaultSecretsEnabled && sel("openai")
+      ? vaultSecretRef("providers/openai/apiKey")
+      : undefined);
+  const effectiveGoogleApiKeyRef =
+    googleApiKeyRef || (config.vaultSecretsEnabled && sel("google")
+      ? vaultSecretRef("providers/google/apiKey")
+      : undefined);
+  const effectiveOpenrouterApiKeyRef =
+    openrouterApiKeyRef || (config.vaultSecretsEnabled && sel("openrouter")
+      ? vaultSecretRef("providers/openrouter/apiKey")
+      : undefined);
+  const effectiveModelEndpointApiKeyRef =
+    modelEndpointApiKeyRef || (config.vaultSecretsEnabled && sel("custom-endpoint")
+      ? vaultSecretRef("providers/endpoint/apiKey")
+      : undefined);
 
   return {
     mode,
@@ -538,15 +644,23 @@ export function buildDeployRequestBody(params: {
     image: trimToUndefined(config.image),
     containerRunArgs: mode === "local" ? trimToUndefined(config.containerRunArgs) : undefined,
     podmanSecretMappings: mode === "local" && podmanSecretMappings.length > 0 ? podmanSecretMappings : undefined,
+    vaultSecretsEnabled: config.vaultSecretsEnabled || undefined,
+    vaultAddr: config.vaultSecretsEnabled ? trimToUndefined(config.vaultAddr) : undefined,
+    vaultNamespace: config.vaultSecretsEnabled ? trimToUndefined(config.vaultNamespace) : undefined,
+    vaultKvMount: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvMount) : undefined,
+    vaultKvVersion: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvVersion) : undefined,
+    vaultTokenSecretName: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretName) : undefined,
+    vaultTokenSecretKey: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretKey) : undefined,
+    pluginInstallSpecs: pluginInstallSpecs.length > 0 ? pluginInstallSpecs : undefined,
     secretsProvidersJson: trimToUndefined(config.secretsProvidersJson),
-    anthropicApiKeyRef: sel("anthropic") ? anthropicApiKeyRef : undefined,
-    openaiApiKeyRef: sel("openai") ? openaiApiKeyRef : undefined,
-    googleApiKeyRef: sel("google") ? googleApiKeyRef : undefined,
-    openrouterApiKeyRef: sel("openrouter") ? openrouterApiKeyRef : undefined,
-    modelEndpointApiKeyRef: sel("custom-endpoint") ? modelEndpointApiKeyRef : undefined,
+    anthropicApiKeyRef: sel("anthropic") ? effectiveAnthropicApiKeyRef : undefined,
+    openaiApiKeyRef: sel("openai") ? effectiveOpenaiApiKeyRef : undefined,
+    googleApiKeyRef: sel("google") ? effectiveGoogleApiKeyRef : undefined,
+    openrouterApiKeyRef: sel("openrouter") ? effectiveOpenrouterApiKeyRef : undefined,
+    modelEndpointApiKeyRef: sel("custom-endpoint") ? effectiveModelEndpointApiKeyRef : undefined,
     telegramBotTokenRef: config.telegramEnabled ? telegramBotTokenRef : undefined,
     sandboxEnabled: config.sandboxEnabled || undefined,
-    sandboxBackend: config.sandboxEnabled ? "ssh" : undefined,
+    sandboxBackend: config.sandboxEnabled ? config.sandboxBackend : undefined,
     sandboxMode: config.sandboxEnabled ? config.sandboxMode : undefined,
     sandboxScope: config.sandboxEnabled ? config.sandboxScope : undefined,
     sandboxToolPolicyEnabled:
@@ -558,31 +672,63 @@ export function buildDeployRequestBody(params: {
     sandboxToolAllowBrowser: config.sandboxEnabled ? config.sandboxToolAllowBrowser : undefined,
     sandboxToolAllowAutomation: config.sandboxEnabled ? config.sandboxToolAllowAutomation : undefined,
     sandboxToolAllowMessaging: config.sandboxEnabled ? config.sandboxToolAllowMessaging : undefined,
+    sandboxToolAllowWebFetch: config.sandboxEnabled ? config.sandboxToolAllowWebFetch : undefined,
     sandboxWorkspaceAccess: config.sandboxEnabled ? config.sandboxWorkspaceAccess : undefined,
-    sandboxSshTarget: config.sandboxEnabled ? config.sandboxSshTarget || undefined : undefined,
+    sandboxOpenShellGatewayEndpoint:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? config.sandboxOpenShellGatewayEndpoint || undefined
+        : undefined,
+    sandboxOpenShellMode:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? config.sandboxOpenShellMode
+        : undefined,
+    sandboxOpenShellFrom:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? trimToUndefined(config.sandboxOpenShellFrom)
+        : undefined,
+    sandboxSshTarget:
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshTarget || undefined
+        : undefined,
     sandboxSshWorkspaceRoot:
-      config.sandboxEnabled ? config.sandboxSshWorkspaceRoot || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshWorkspaceRoot || undefined
+        : undefined,
     sandboxSshIdentityPath:
-      config.sandboxEnabled ? config.sandboxSshIdentityPath || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshIdentityPath || undefined
+        : undefined,
     sandboxSshCertificatePath:
-      config.sandboxEnabled ? config.sandboxSshCertificatePath || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshCertificatePath || undefined
+        : undefined,
     sandboxSshKnownHostsPath:
-      config.sandboxEnabled ? config.sandboxSshKnownHostsPath || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshKnownHostsPath || undefined
+        : undefined,
     sandboxSshStrictHostKeyChecking:
-      config.sandboxEnabled ? config.sandboxSshStrictHostKeyChecking : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshStrictHostKeyChecking
+        : undefined,
     sandboxSshUpdateHostKeys:
-      config.sandboxEnabled ? config.sandboxSshUpdateHostKeys : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshUpdateHostKeys
+        : undefined,
     sandboxSshCertificate:
-      config.sandboxEnabled ? config.sandboxSshCertificate || undefined : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshCertificate || undefined
+        : undefined,
     sandboxSshKnownHosts:
-      config.sandboxEnabled ? config.sandboxSshKnownHosts || undefined : undefined,
-    anthropicApiKey: sel("anthropic") && !anthropicApiKeyRef ? trimToUndefined(config.anthropicApiKey) : undefined,
-    openaiApiKey: sel("openai") && !openaiApiKeyRef ? trimToUndefined(config.openaiApiKey) : undefined,
+      config.sandboxEnabled && config.sandboxBackend === "ssh"
+        ? config.sandboxSshKnownHosts || undefined
+        : undefined,
+    anthropicApiKey: sel("anthropic") && !effectiveAnthropicApiKeyRef ? trimToUndefined(config.anthropicApiKey) : undefined,
+    openaiApiKey: sel("openai") && !effectiveOpenaiApiKeyRef ? trimToUndefined(config.openaiApiKey) : undefined,
     codexOauthMode: sel("openai-codex") ? "codex-cli" : undefined,
     codexOauthProfileId: sel("openai-codex") ? trimToUndefined(config.codexOauthProfileId) : undefined,
     codexOauthAuthJsonPath: sel("openai-codex") ? trimToUndefined(config.codexOauthAuthJsonPath) : undefined,
-    googleApiKey: sel("google") && !googleApiKeyRef ? trimToUndefined(config.googleApiKey) : undefined,
-    openrouterApiKey: sel("openrouter") && !openrouterApiKeyRef ? trimToUndefined(config.openrouterApiKey) : undefined,
+    googleApiKey: sel("google") && !effectiveGoogleApiKeyRef ? trimToUndefined(config.googleApiKey) : undefined,
+    openrouterApiKey: sel("openrouter") && !effectiveOpenrouterApiKeyRef ? trimToUndefined(config.openrouterApiKey) : undefined,
     anthropicModel: sel("anthropic") ? trimToUndefined(config.anthropicModel) : undefined,
     anthropicModels: sel("anthropic") && config.anthropicModels.length > 0 ? config.anthropicModels : undefined,
     openaiModel: sel("openai") ? trimToUndefined(config.openaiModel) : undefined,
@@ -600,7 +746,7 @@ export function buildDeployRequestBody(params: {
     vertexGoogleModels: sel("vertex-google") && config.vertexGoogleModels.length > 0 ? config.vertexGoogleModels : undefined,
     openaiCompatibleEndpointsEnabled: config.openaiCompatibleEndpointsEnabled,
     modelEndpoint: sel("custom-endpoint") ? trimToUndefined(config.modelEndpoint) : undefined,
-    modelEndpointApiKey: sel("custom-endpoint") && !modelEndpointApiKeyRef ? trimToUndefined(config.modelEndpointApiKey) : undefined,
+    modelEndpointApiKey: sel("custom-endpoint") && !effectiveModelEndpointApiKeyRef ? trimToUndefined(config.modelEndpointApiKey) : undefined,
     modelEndpointModel: sel("custom-endpoint") ? trimToUndefined(config.modelEndpointModel) : undefined,
     modelEndpointModelLabel: sel("custom-endpoint") ? trimToUndefined(config.modelEndpointModelLabel) : undefined,
     modelEndpointModels: sel("custom-endpoint") && config.modelEndpointModels.length > 0 ? config.modelEndpointModels : undefined,
@@ -662,6 +808,27 @@ export function buildEnvFileContent(params: {
   } = params;
   const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
   const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
+  const pluginInstallSpecs = parsePluginInstallSpecsText(config.pluginInstallSpecsText);
+  const effectiveAnthropicApiKeyRef =
+    anthropicApiKeyRef || (config.vaultSecretsEnabled && sel("anthropic")
+      ? vaultSecretRef("providers/anthropic/apiKey")
+      : undefined);
+  const effectiveOpenaiApiKeyRef =
+    openaiApiKeyRef || (config.vaultSecretsEnabled && sel("openai")
+      ? vaultSecretRef("providers/openai/apiKey")
+      : undefined);
+  const effectiveGoogleApiKeyRef =
+    googleApiKeyRef || (config.vaultSecretsEnabled && sel("google")
+      ? vaultSecretRef("providers/google/apiKey")
+      : undefined);
+  const effectiveOpenrouterApiKeyRef =
+    openrouterApiKeyRef || (config.vaultSecretsEnabled && sel("openrouter")
+      ? vaultSecretRef("providers/openrouter/apiKey")
+      : undefined);
+  const effectiveModelEndpointApiKeyRef =
+    modelEndpointApiKeyRef || (config.vaultSecretsEnabled && sel("custom-endpoint")
+      ? vaultSecretRef("providers/endpoint/apiKey")
+      : undefined);
 
   const lines = [
     "# OpenClaw installer config",
@@ -671,17 +838,25 @@ export function buildEnvFileContent(params: {
     `OPENCLAW_IMAGE=${config.image}`,
     `OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`,
     `PODMAN_SECRET_MAPPINGS_B64=${encodeBase64(JSON.stringify(parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings))}`,
+    `VAULT_SECRETS_ENABLED=${config.vaultSecretsEnabled}`,
+    `VAULT_ADDR=${config.vaultAddr}`,
+    `VAULT_NAMESPACE=${config.vaultNamespace}`,
+    `CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`,
+    `CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`,
+    `VAULT_TOKEN_SECRET_NAME=${config.vaultTokenSecretName}`,
+    `VAULT_TOKEN_SECRET_KEY=${config.vaultTokenSecretKey}`,
+    `OPENCLAW_PLUGIN_INSTALL_SPECS_B64=${encodeBase64(JSON.stringify(pluginInstallSpecs))}`,
     `OPENCLAW_PORT=${config.port}`,
     `AGENT_SOURCE_DIR=${config.agentSourceDir}`,
     "",
     `INFERENCE_PROVIDER=${inferenceProvider}`,
-    `ANTHROPIC_API_KEY=${sel("anthropic") && !anthropicApiKeyRef ? config.anthropicApiKey : ""}`,
-    `OPENAI_API_KEY=${sel("openai") && !openaiApiKeyRef ? config.openaiApiKey : ""}`,
+    `ANTHROPIC_API_KEY=${sel("anthropic") && !effectiveAnthropicApiKeyRef ? config.anthropicApiKey : ""}`,
+    `OPENAI_API_KEY=${sel("openai") && !effectiveOpenaiApiKeyRef ? config.openaiApiKey : ""}`,
     `CODEX_OAUTH_MODE=${sel("openai-codex") ? "codex-cli" : ""}`,
     `CODEX_OAUTH_PROFILE_ID=${sel("openai-codex") ? config.codexOauthProfileId : ""}`,
     `CODEX_OAUTH_AUTH_JSON_PATH=${sel("openai-codex") ? config.codexOauthAuthJsonPath : ""}`,
-    `GEMINI_API_KEY=${sel("google") && !googleApiKeyRef ? config.googleApiKey : ""}`,
-    `OPENROUTER_API_KEY=${sel("openrouter") && !openrouterApiKeyRef ? config.openrouterApiKey : ""}`,
+    `GEMINI_API_KEY=${sel("google") && !effectiveGoogleApiKeyRef ? config.googleApiKey : ""}`,
+    `OPENROUTER_API_KEY=${sel("openrouter") && !effectiveOpenrouterApiKeyRef ? config.openrouterApiKey : ""}`,
     `ANTHROPIC_MODEL=${sel("anthropic") ? config.anthropicModel : ""}`,
     `ANTHROPIC_MODELS_B64=${encodeBase64(JSON.stringify(sel("anthropic") ? config.anthropicModels : []))}`,
     `OPENAI_MODEL=${sel("openai") ? config.openaiModel : ""}`,
@@ -694,7 +869,7 @@ export function buildEnvFileContent(params: {
     `OPENROUTER_MODELS_B64=${encodeBase64(JSON.stringify(sel("openrouter") ? config.openrouterModels : []))}`,
     `OPENAI_COMPATIBLE_ENDPOINTS_ENABLED=${config.openaiCompatibleEndpointsEnabled}`,
     `MODEL_ENDPOINT=${sel("custom-endpoint") ? config.modelEndpoint : ""}`,
-    `MODEL_ENDPOINT_API_KEY=${sel("custom-endpoint") && !modelEndpointApiKeyRef ? config.modelEndpointApiKey : ""}`,
+    `MODEL_ENDPOINT_API_KEY=${sel("custom-endpoint") && !effectiveModelEndpointApiKeyRef ? config.modelEndpointApiKey : ""}`,
     `MODEL_ENDPOINT_MODEL=${sel("custom-endpoint") ? config.modelEndpointModel : ""}`,
     `MODEL_ENDPOINT_MODEL_LABEL=${sel("custom-endpoint") ? config.modelEndpointModelLabel : ""}`,
     `MODEL_ENDPOINT_MODELS_B64=${encodeBase64(JSON.stringify(sel("custom-endpoint") ? config.modelEndpointModels : []))}`,
@@ -712,10 +887,13 @@ export function buildEnvFileContent(params: {
     `LITELLM_PROXY=${config.litellmProxy}`,
     "",
     `SANDBOX_ENABLED=${config.sandboxEnabled}`,
-    "SANDBOX_BACKEND=ssh",
+    `SANDBOX_BACKEND=${config.sandboxBackend}`,
     `SANDBOX_MODE=${config.sandboxMode}`,
     `SANDBOX_SCOPE=${config.sandboxScope}`,
     `SANDBOX_WORKSPACE_ACCESS=${config.sandboxWorkspaceAccess}`,
+    `SANDBOX_OPENSHELL_GATEWAY_ENDPOINT=${config.sandboxOpenShellGatewayEndpoint}`,
+    `SANDBOX_OPENSHELL_MODE=${config.sandboxOpenShellMode}`,
+    `SANDBOX_OPENSHELL_FROM=${config.sandboxOpenShellFrom}`,
     `SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`,
     `SANDBOX_SSH_WORKSPACE_ROOT=${config.sandboxSshWorkspaceRoot}`,
     `SANDBOX_SSH_IDENTITY_PATH=${config.sandboxSshIdentityPath}`,
@@ -731,6 +909,7 @@ export function buildEnvFileContent(params: {
     `SANDBOX_TOOL_ALLOW_BROWSER=${config.sandboxToolAllowBrowser}`,
     `SANDBOX_TOOL_ALLOW_AUTOMATION=${config.sandboxToolAllowAutomation}`,
     `SANDBOX_TOOL_ALLOW_MESSAGING=${config.sandboxToolAllowMessaging}`,
+    `SANDBOX_TOOL_ALLOW_WEB_FETCH=${config.sandboxToolAllowWebFetch}`,
     "",
     `TELEGRAM_ENABLED=${config.telegramEnabled}`,
     `TELEGRAM_BOT_TOKEN=${telegramBotTokenRef ? "" : config.telegramBotToken}`,
@@ -757,20 +936,20 @@ export function buildEnvFileContent(params: {
   if (config.secretsProvidersJson.trim()) {
     lines.push(`SECRETS_PROVIDERS_JSON_B64=${encodeBase64(config.secretsProvidersJson)}`);
   }
-  if (sel("anthropic") && anthropicApiKeyRef) {
-    lines.push(`ANTHROPIC_API_KEY_REF_B64=${encodeBase64(JSON.stringify(anthropicApiKeyRef))}`);
+  if (sel("anthropic") && effectiveAnthropicApiKeyRef) {
+    lines.push(`ANTHROPIC_API_KEY_REF_B64=${encodeBase64(JSON.stringify(effectiveAnthropicApiKeyRef))}`);
   }
-  if (sel("openai") && openaiApiKeyRef) {
-    lines.push(`OPENAI_API_KEY_REF_B64=${encodeBase64(JSON.stringify(openaiApiKeyRef))}`);
+  if (sel("openai") && effectiveOpenaiApiKeyRef) {
+    lines.push(`OPENAI_API_KEY_REF_B64=${encodeBase64(JSON.stringify(effectiveOpenaiApiKeyRef))}`);
   }
-  if (sel("google") && googleApiKeyRef) {
-    lines.push(`GOOGLE_API_KEY_REF_B64=${encodeBase64(JSON.stringify(googleApiKeyRef))}`);
+  if (sel("google") && effectiveGoogleApiKeyRef) {
+    lines.push(`GOOGLE_API_KEY_REF_B64=${encodeBase64(JSON.stringify(effectiveGoogleApiKeyRef))}`);
   }
-  if (sel("openrouter") && openrouterApiKeyRef) {
-    lines.push(`OPENROUTER_API_KEY_REF_B64=${encodeBase64(JSON.stringify(openrouterApiKeyRef))}`);
+  if (sel("openrouter") && effectiveOpenrouterApiKeyRef) {
+    lines.push(`OPENROUTER_API_KEY_REF_B64=${encodeBase64(JSON.stringify(effectiveOpenrouterApiKeyRef))}`);
   }
-  if (sel("custom-endpoint") && modelEndpointApiKeyRef) {
-    lines.push(`MODEL_ENDPOINT_API_KEY_REF_B64=${encodeBase64(JSON.stringify(modelEndpointApiKeyRef))}`);
+  if (sel("custom-endpoint") && effectiveModelEndpointApiKeyRef) {
+    lines.push(`MODEL_ENDPOINT_API_KEY_REF_B64=${encodeBase64(JSON.stringify(effectiveModelEndpointApiKeyRef))}`);
   }
   if (telegramBotTokenRef) {
     lines.push(`TELEGRAM_BOT_TOKEN_REF_B64=${encodeBase64(JSON.stringify(telegramBotTokenRef))}`);

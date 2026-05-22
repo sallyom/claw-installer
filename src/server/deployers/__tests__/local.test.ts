@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   applyGatewayRuntimeConfig,
+  buildOpenClawConfig,
+  buildRunArgs,
   parseContainerRunArgs,
+  redactCommandArgs,
   resolveLocalRuntimeModelEndpoint,
   runtimeOwnershipFixupCommand,
   shouldAlwaysPull,
 } from "../local.js";
+import { __testing as localPluginsTesting } from "../local-plugins.js";
 
 describe("shouldAlwaysPull", () => {
   it("returns true for :latest tag", () => {
@@ -119,6 +123,82 @@ describe("resolveLocalRuntimeModelEndpoint", () => {
   });
 });
 
+describe("local Vault SecretRef wiring", () => {
+  it("generates Vault and OpenAI provider config for local deploys", () => {
+    const rendered = JSON.parse(buildOpenClawConfig({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      inferenceProvider: "openai",
+      vaultSecretsEnabled: true,
+      vaultAddr: "https://vault.example.test",
+      vaultKvMount: "secret",
+      vaultKvVersion: "2",
+      openaiApiKeyRef: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      },
+    }, "gateway-token"));
+
+    expect(rendered.secrets.providers.vault).toMatchObject({
+      source: "exec",
+      command: "/usr/local/bin/node",
+      args: ["/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js"],
+    });
+    expect(rendered.models.providers.openai).toMatchObject({
+      baseUrl: "https://api.openai.com/v1",
+      api: "openai-responses",
+      agentRuntime: { id: "pi" },
+      apiKey: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      },
+      models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+    });
+  });
+
+  it("passes local Vault environment to the gateway container", () => {
+    const previousToken = process.env.VAULT_TOKEN;
+    process.env.VAULT_TOKEN = "test-vault-token";
+    try {
+      const args = buildRunArgs({
+        mode: "local",
+        agentName: "demo",
+        agentDisplayName: "Demo",
+        vaultSecretsEnabled: true,
+        vaultAddr: "https://vault.example.test",
+        vaultNamespace: "admin",
+        vaultKvMount: "secret",
+        vaultKvVersion: "2",
+      }, "podman", "openclaw-demo", 18789);
+
+      expect(args).toContain("VAULT_ADDR=https://vault.example.test");
+      expect(args).toContain("VAULT_NAMESPACE=admin");
+      expect(args).toContain("CLAW_VAULT_KV_MOUNT=secret");
+      expect(args).toContain("CLAW_VAULT_KV_VERSION=2");
+      expect(args).toContain("VAULT_TOKEN=test-vault-token");
+      expect(args).toContain("TMPDIR=/home/node/.openclaw/tmp");
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.VAULT_TOKEN;
+      } else {
+        process.env.VAULT_TOKEN = previousToken;
+      }
+    }
+  });
+
+  it("can sync an externally installed Vault resolver to the generated provider path", () => {
+    const script = localPluginsTesting.vaultResolverSyncScript();
+
+    expect(script).toContain("/home/node/.openclaw/git");
+    expect(script).toContain("/home/node/.openclaw/npm/node_modules");
+    expect(script).toContain("*/dist/vault-secret-ref-resolver.js");
+    expect(script).toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
+  });
+});
+
 describe("parseContainerRunArgs", () => {
   it("parses quoted runtime args into argv tokens", () => {
     expect(
@@ -134,6 +214,32 @@ describe("parseContainerRunArgs", () => {
 
   it("rejects unterminated quotes", () => {
     expect(() => parseContainerRunArgs("--label 'broken")).toThrow("unterminated quote");
+  });
+});
+
+describe("redactCommandArgs", () => {
+  it("redacts sensitive local container env vars in deploy logs", () => {
+    expect(redactCommandArgs([
+      "run",
+      "-e",
+      "VAULT_TOKEN=hvs.secret",
+      "-e",
+      "OPENROUTER_API_KEY=sk-or-secret",
+      "-e",
+      "MODEL_ENDPOINT_API_KEY=endpoint-secret",
+      "-e",
+      "VAULT_ADDR=https://vault.example.test",
+    ])).toEqual([
+      "run",
+      "-e",
+      "VAULT_TOKEN=***",
+      "-e",
+      "OPENROUTER_API_KEY=***",
+      "-e",
+      "MODEL_ENDPOINT_API_KEY=***",
+      "-e",
+      "VAULT_ADDR=https://vault.example.test",
+    ]);
   });
 });
 

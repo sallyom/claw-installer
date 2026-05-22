@@ -82,7 +82,7 @@ For local deploys, the installer now follows the upstream OpenClaw secret model 
 
 - secrets you enter in the form are injected into the container as environment variables
 - generated `openclaw.json` uses env-backed SecretRefs instead of storing those raw values directly
-- you can optionally provide `secrets.providers` JSON and explicit SecretRef overrides for `env`, `file`, or `exec` providers
+- you can enable Vault SecretRef wiring from the form, or provide `secrets.providers` JSON and explicit SecretRef overrides for other `env`, `file`, or `exec` providers
 - for Podman setups, you can also use the **Podman secret mappings** field to expand `podman secret create` entries into runtime `--secret` flags automatically
 - OpenAI Codex is OAuth-based: the installer reads the Codex CLI `auth.json` on the installer host, imports inline OAuth token material into the OpenClaw auth profile `openai-codex:default`, and configures canonical `openai/*` model refs with the Codex runtime
 
@@ -92,6 +92,8 @@ For local Podman Codex OAuth imports, the installer stages the generated auth pr
 
 For credentials like GitHub PATs, API keys, and bot tokens, see [podman-secrets.md](podman-secrets.md)
 for current options including Podman secrets, 1Password, and HashiCorp Vault.
+
+Runtime plugins listed in the deploy form's **Plugins** section are installed before the gateway starts. Supported specs include ClawHub, npm, git, and local paths. For local Podman/Docker deploys, existing host paths are mounted automatically.
 
 ## Using The OpenClaw CLI
 
@@ -253,6 +255,11 @@ Pass these to `run.sh` or `npm run dev` to set server-side defaults (users can l
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENAI_API_KEY` | OpenAI API key |
+| `GEMINI_API_KEY` | Google AI Studio Gemini API key |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to Google Cloud credentials for Vertex AI |
+| `GOOGLE_CLOUD_PROJECT` | Google Cloud project for Vertex AI |
+| `GOOGLE_CLOUD_LOCATION` | Google Cloud region for Vertex AI |
 | `MODEL_ENDPOINT` | OpenAI-compatible endpoint for self-hosted models |
 | `OPENCLAW_IMAGE` | Default container image |
 | `OPENCLAW_PREFIX` | Default name prefix |
@@ -260,7 +267,7 @@ Pass these to `run.sh` or `npm run dev` to set server-side defaults (users can l
 Starter templates:
 
 - `.env.example` at the repo root for a generic local or Kubernetes setup
-- `demos/openclaw-builder-research-ops/.env.example` for the bundled multi-agent SSH sandbox demo
+- `demos/builder-research-ops-ssh-sandbox/.env.example` for the bundled multi-agent SSH sandbox demo
 
 ## Troubleshooting SSH Sandbox
 

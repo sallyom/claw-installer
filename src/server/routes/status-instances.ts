@@ -93,6 +93,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
     containerRunArgs: savedVars.OPENCLAW_CONTAINER_RUN_ARGS || undefined,
     podmanSecretMappings: decodeSavedJson<PodmanSecretMapping[]>(savedVars.PODMAN_SECRET_MAPPINGS_B64),
+    pluginInstallSpecs: decodeSavedJson<string[]>(savedVars.OPENCLAW_PLUGIN_INSTALL_SPECS_B64),
     inferenceProvider: savedVars.INFERENCE_PROVIDER as InferenceProvider | undefined,
     agentSecurityMode:
       (savedVars.AGENT_SECURITY_MODE as "basic" | "secretrefs") || undefined,
@@ -144,7 +145,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     telegramBotToken: savedVars.TELEGRAM_BOT_TOKEN || undefined,
     telegramAllowFrom: savedVars.TELEGRAM_ALLOW_FROM || undefined,
     sandboxEnabled: savedVars.SANDBOX_ENABLED === "true" || undefined,
-    sandboxBackend: (savedVars.SANDBOX_BACKEND as "ssh") || undefined,
+    sandboxBackend: (savedVars.SANDBOX_BACKEND as "ssh" | "openshell") || undefined,
     sandboxMode:
       (savedVars.SANDBOX_MODE as "off" | "non-main" | "all") || undefined,
     sandboxScope:
@@ -165,8 +166,12 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
       savedVars.SANDBOX_TOOL_ALLOW_AUTOMATION === "true" || undefined,
     sandboxToolAllowMessaging:
       savedVars.SANDBOX_TOOL_ALLOW_MESSAGING === "true" || undefined,
+    sandboxToolAllowWebFetch:
+      savedVars.SANDBOX_TOOL_ALLOW_WEB_FETCH === "true" || undefined,
     sandboxWorkspaceAccess:
       (savedVars.SANDBOX_WORKSPACE_ACCESS as "none" | "ro" | "rw") || undefined,
+    sandboxOpenShellGatewayEndpoint: savedVars.SANDBOX_OPENSHELL_GATEWAY_ENDPOINT || undefined,
+    sandboxOpenShellMode: (savedVars.SANDBOX_OPENSHELL_MODE as "mirror" | "remote") || undefined,
     sandboxSshTarget: savedVars.SANDBOX_SSH_TARGET || undefined,
     sandboxSshWorkspaceRoot: savedVars.SANDBOX_SSH_WORKSPACE_ROOT || undefined,
     sandboxSshIdentityPath: savedVars.SANDBOX_SSH_IDENTITY_PATH || undefined,
