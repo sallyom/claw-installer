@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeployConfig } from "../../deployers/types.js";
-import { applyServerEnvFallbacks } from "../deploy.js";
+import { applyServerEnvFallbacks, applyVaultSecretRefDefaults, normalizeVaultAddr } from "../deploy.js";
 
 function makeConfig(overrides: Partial<DeployConfig> = {}): DeployConfig {
   return {
@@ -127,5 +127,60 @@ describe("applyServerEnvFallbacks", () => {
     expect(config.anthropicApiKey).toBe("sk-ant-env");
     expect(config.openaiApiKey).toBe("sk-openai-env");
     expect(config.googleApiKey).toBeUndefined();
+  });
+});
+
+describe("applyVaultSecretRefDefaults", () => {
+  it("defaults selected provider refs to Vault when Vault wiring is enabled", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      vaultSecretsEnabled: true,
+    });
+
+    applyVaultSecretRefDefaults(config, ["openai"]);
+
+    expect(config.openaiApiKeyRef).toEqual({
+      source: "exec",
+      provider: "vault",
+      id: "providers/openai/apiKey",
+    });
+    expect(config.anthropicApiKeyRef).toBeUndefined();
+  });
+
+  it("does not overwrite explicit SecretRefs", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      vaultSecretsEnabled: true,
+      openaiApiKeyRef: {
+        source: "exec",
+        provider: "custom",
+        id: "openai",
+      },
+    });
+
+    applyVaultSecretRefDefaults(config, ["openai"]);
+
+    expect(config.openaiApiKeyRef).toEqual({
+      source: "exec",
+      provider: "custom",
+      id: "openai",
+    });
+  });
+});
+
+describe("normalizeVaultAddr", () => {
+  it("normalizes the invalid Kubernetes service suffix seen in saved Vault config", () => {
+    expect(normalizeVaultAddr("http://vault.vault.svc.cluster:8200")).toBe(
+      "http://vault.vault.svc:8200",
+    );
+  });
+
+  it("leaves valid service addresses unchanged", () => {
+    expect(normalizeVaultAddr("http://vault.vault.svc:8200")).toBe(
+      "http://vault.vault.svc:8200",
+    );
+    expect(normalizeVaultAddr("http://vault.vault.svc.cluster.local:8200")).toBe(
+      "http://vault.vault.svc.cluster.local:8200",
+    );
   });
 });

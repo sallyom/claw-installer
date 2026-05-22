@@ -1,0 +1,4 @@
+interface:
+  display_name: "Set Up OpenShell Cluster"
+  short_description: "Install OpenShell cluster prerequisites."
+  default_prompt: "Set up cluster-scoped prerequisites for OpenShell-backed OpenClaw sandboxes."

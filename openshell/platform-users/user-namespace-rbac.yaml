@@ -1,0 +1,86 @@
+# Per-user RBAC template for the OpenShell/OpenClaw PoC.
+#
+# Replace USER with the lowercase RFC1123 user id, for example bob.
+# Intended groups before IdP integration:
+#   openclaw-platform-admins       cluster/platform operators, managed separately
+#   openclaw-USER-owners           users/operators who can manage OpenClaw in openclaw-USER
+#   openshell-USER-observers       optional read-only debug access to openshell-USER
+#
+# Default posture:
+# - OpenShell namespace writes are platform-owned only.
+# - Human users do not create/update/delete resources in openshell-USER.
+# - OpenClaw namespace owners can manage normal app resources in openclaw-USER.
+# - Sandbox cleanup should go through OpenClaw/OpenShell APIs, not direct pod/CR deletion.
+apiVersion: user.openshift.io/v1
+kind: Group
+metadata:
+  name: openclaw-USER-owners
+users: []
+---
+apiVersion: user.openshift.io/v1
+kind: Group
+metadata:
+  name: openshell-USER-observers
+users: []
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openclaw-USER
+  labels:
+    app.kubernetes.io/part-of: openclaw-openshell-poc
+    openshell.openclaw.ai/user: USER
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshell-USER
+  labels:
+    app.kubernetes.io/part-of: openclaw-openshell-poc
+    openshell.openclaw.ai/user: USER
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openclaw-USER-owners-admin
+  namespace: openclaw-USER
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: openclaw-USER-owners
+---
+# Optional read-only access for troubleshooting. Do not bind admin/edit in openshell-USER
+# for normal users; the namespace has privileged sandbox execution surface.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openshell-sandbox-observer
+  namespace: openshell-USER
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes", "sandboxes/status"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openshell-USER-observers-readonly
+  namespace: openshell-USER
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openshell-sandbox-observer
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: openshell-USER-observers

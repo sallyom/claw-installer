@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildManagedAgentAuthProfiles,
   buildOpenClawConfig,
+  defaultImage,
   deriveModel,
   detectUnavailableProvider,
   namespaceName,
@@ -172,7 +173,15 @@ describe("model config generation", () => {
     });
     expect(rendered.auth?.order?.["openai-codex"]).toEqual(["openai-codex:default"]);
     expect(rendered.secrets?.providers).toMatchObject({ default: { source: "env" } });
-    expect(rendered.models?.providers?.openai).toBeUndefined();
+    expect(rendered.models?.providers?.openai).toMatchObject({
+      baseUrl: "https://api.openai.com/v1",
+      api: "openai-responses",
+      apiKey: {
+        source: "env",
+        provider: "default",
+        id: "OPENAI_API_KEY",
+      },
+    });
     expect(authProfiles?.profiles["openai:default"]).toEqual({
       type: "api_key",
       provider: "openai",
@@ -184,6 +193,14 @@ describe("model config generation", () => {
     });
   });
 
+
+  it("uses the OpenShell PoC image by default when OpenShell sandboxing is enabled", () => {
+    expect(defaultImage(makeConfig({
+      sandboxEnabled: true,
+      sandboxBackend: "openshell",
+    }))).toBe("quay.io/sallyom/openclaw:latest");
+  });
+
   it("renders OpenShell sandbox plugin config for cluster deployments", () => {
     const config = makeConfig({
       sandboxEnabled: true,
@@ -193,6 +210,7 @@ describe("model config generation", () => {
       sandboxWorkspaceAccess: "rw",
       sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
       sandboxOpenShellMode: "mirror",
+      sandboxOpenShellFrom: "quay.io/sallyom/openclaw-openshell-sandbox:slim",
     });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
@@ -219,9 +237,10 @@ describe("model config generation", () => {
       config: {
         command: "/opt/openshell/bin/openshell",
         gateway: "openshell",
-        from: "openclaw",
+        from: "quay.io/sallyom/openclaw-openshell-sandbox:slim",
         mode: "mirror",
         gatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+        policy: "/home/node/.openclaw/openshell/policy.yaml",
         timeoutSeconds: 180,
       },
     });
@@ -428,7 +447,7 @@ describe("model config generation", () => {
 
     expect(rendered.agents?.defaults?.models).toMatchObject({
       "anthropic/claude-sonnet-4-6": { alias: "claude-sonnet-4-6" },
-      "openai/gpt-5.4": { alias: "gpt-5.4" },
+      "openai/gpt-5.5": { alias: "gpt-5.5" },
       "openrouter/auto": { alias: "openrouter/auto" },
       "endpoint/mistral-small-24b-w8a8": { alias: "Mistral Small 24B" },
     });
@@ -557,7 +576,7 @@ describe("model config generation", () => {
     };
 
     expect(rendered.agents?.list?.[0]).toMatchObject({
-      id: "openclaw_joe",
+      id: "openclaw-joe",
       identity: { name: "Joe" },
     });
   });
@@ -616,7 +635,7 @@ describe("model config generation", () => {
     expect(normalizeModelRef(config, "anthropic-vertex/my-model")).toBe("anthropic-vertex/my-model");
   });
 
-  it("writes external secret provider config without emitting an invalid plain OpenAI provider stub", () => {
+  it("writes external secret provider config with an OpenAI SecretRef provider", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
       secretsProvidersJson: JSON.stringify({
@@ -642,7 +661,14 @@ describe("model config generation", () => {
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       secrets?: { providers?: Record<string, unknown> };
-      models?: { providers?: Record<string, { apiKey?: unknown }> };
+      models?: {
+        providers?: Record<string, {
+          api?: string;
+          apiKey?: unknown;
+          baseUrl?: string;
+          models?: Array<{ id?: string; name?: string }>;
+        }>;
+      };
       channels?: { telegram?: { botToken?: unknown; allowFrom?: number[] } };
     };
 
@@ -653,7 +679,17 @@ describe("model config generation", () => {
         command: "/usr/local/bin/vault",
       },
     });
-    expect(rendered.models?.providers?.openai).toBeUndefined();
+    expect(rendered.models?.providers?.openai).toMatchObject({
+      baseUrl: "https://api.openai.com/v1",
+      api: "openai-responses",
+      agentRuntime: { id: "pi" },
+      apiKey: {
+        source: "exec",
+        provider: "vault_openai",
+        id: "value",
+      },
+      models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+    });
     expect(rendered.channels?.telegram?.botToken).toEqual({
       source: "env",
       provider: "default",
@@ -662,7 +698,7 @@ describe("model config generation", () => {
     expect(rendered.channels?.telegram?.allowFrom).toEqual([12345]);
   });
 
-  it("generates the bundled Vault plugin SecretRef provider", () => {
+  it("generates the installed Vault plugin SecretRef provider", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
       vaultSecretsEnabled: true,
@@ -687,6 +723,13 @@ describe("model config generation", () => {
           allowInsecurePath?: boolean;
         }>;
       };
+      models?: {
+        providers?: Record<string, {
+          api?: string;
+          apiKey?: unknown;
+          baseUrl?: string;
+        }>;
+      };
     };
 
     expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["vault"]));
@@ -694,7 +737,7 @@ describe("model config generation", () => {
     expect(rendered.secrets?.providers?.vault).toMatchObject({
       source: "exec",
       command: "/usr/local/bin/node",
-      args: ["/app/extensions/vault/vault-secret-ref-resolver.js"],
+      args: ["/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js"],
       allowInsecurePath: true,
       passEnv: expect.arrayContaining([
         "VAULT_ADDR",
@@ -702,6 +745,16 @@ describe("model config generation", () => {
         "CLAW_VAULT_KV_MOUNT",
         "CLAW_VAULT_KV_VERSION",
       ]),
+    });
+    expect(rendered.models?.providers?.openai).toMatchObject({
+      baseUrl: "https://api.openai.com/v1",
+      api: "openai-responses",
+      agentRuntime: { id: "pi" },
+      apiKey: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      },
     });
   });
 
@@ -995,7 +1048,7 @@ describe("model config generation", () => {
     });
   });
 
-  it("auto-generates env SecretRefs for supported cluster secrets without an invalid plain OpenAI provider stub", () => {
+  it("auto-generates env SecretRefs for supported cluster secrets with a usable OpenAI provider", () => {
     const config = makeConfig({
       mode: "kubernetes",
       inferenceProvider: "openai",
@@ -1007,14 +1060,28 @@ describe("model config generation", () => {
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       secrets?: { providers?: Record<string, unknown> };
-      models?: { providers?: Record<string, { apiKey?: unknown }> };
+      models?: {
+        providers?: Record<string, {
+          api?: string;
+          apiKey?: unknown;
+          baseUrl?: string;
+        }>;
+      };
       channels?: { telegram?: { botToken?: unknown } };
     };
 
     expect(rendered.secrets?.providers).toMatchObject({
       default: { source: "env" },
     });
-    expect(rendered.models?.providers?.openai).toBeUndefined();
+    expect(rendered.models?.providers?.openai).toMatchObject({
+      baseUrl: "https://api.openai.com/v1",
+      api: "openai-responses",
+      apiKey: {
+        source: "env",
+        provider: "default",
+        id: "OPENAI_API_KEY",
+      },
+    });
     expect(rendered.channels?.telegram?.botToken).toEqual({
       source: "env",
       provider: "default",
@@ -1347,6 +1414,56 @@ describe("MCP servers from agent source", () => {
     };
 
     expect(rendered.mcp).toBeUndefined();
+  });
+
+  it("loads global and per-agent workspace skill directories", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-k8s-agent-source-"));
+    tempDirs.push(dir);
+    writeFileSync(
+      join(dir, "openclaw-agents.json"),
+      JSON.stringify({
+        agents: [{ id: "builder", name: "Builder" }],
+      }),
+      "utf8",
+    );
+
+    const config = makeConfig({
+      prefix: "team",
+      agentName: "manager",
+      agentSourceDir: dir,
+    });
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      skills?: { load?: { extraDirs?: string[] } };
+    };
+
+    expect(rendered.skills?.load?.extraDirs).toEqual([
+      "~/.openclaw/skills",
+      "~/.openclaw/workspace-team-manager/skills",
+      "~/.openclaw/workspace-builder/skills",
+    ]);
+  });
+
+  it("can allow gateway web fetch in the sandbox tool policy", () => {
+    const rendered = buildOpenClawConfig(
+      makeConfig({
+        sandboxEnabled: true,
+        sandboxToolPolicyEnabled: true,
+        sandboxToolAllowWebFetch: true,
+      }),
+      "gateway-token",
+    ) as {
+      tools?: {
+        web?: { fetch?: { enabled?: boolean; readability?: boolean; maxChars?: number } };
+        sandbox?: { tools?: { allow?: string[] } };
+      };
+    };
+
+    expect(rendered.tools?.sandbox?.tools?.allow).toContain("web_fetch");
+    expect(rendered.tools?.web?.fetch).toEqual({
+      enabled: true,
+      readability: true,
+      maxChars: 50000,
+    });
   });
 
   it("omits mcp when agentSourceDir is not set", () => {

@@ -21,7 +21,7 @@ import {
 } from "./deploy-form/serialization.js";
 import { ProviderSection } from "./deploy-form/ProviderSection.js";
 import { SandboxSection } from "./deploy-form/SandboxSection.js";
-import { SecretRefsSection } from "./deploy-form/SecretRefsSection.js";
+import { PluginInstallSection } from "./deploy-form/PluginInstallSection.js";
 import { ExternalSecretProvidersSection } from "./deploy-form/ExternalSecretProvidersSection.js";
 import type {
   DeployFormConfig,
@@ -715,7 +715,8 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     || config.sandboxToolAllowRuntime
     || config.sandboxToolAllowBrowser
     || config.sandboxToolAllowAutomation
-    || config.sandboxToolAllowMessaging;
+    || config.sandboxToolAllowMessaging
+    || config.sandboxToolAllowWebFetch;
 
   const anthropicApiKeyRef = buildSecretRef(
     config.anthropicApiKeyRefSource,
@@ -746,55 +747,6 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     config.telegramBotTokenRefSource,
     config.telegramBotTokenRefProvider,
     config.telegramBotTokenRefId,
-  );
-  const podmanSecretMappingsParse = useMemo(
-    () => parsePodmanSecretMappingsText(config.podmanSecretMappingsText),
-    [config.podmanSecretMappingsText],
-  );
-  const inferredAnthropicApiKeyRef = !anthropicApiKeyRef
-    ? (
-      podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "ANTHROPIC_API_KEY")
-        || Boolean(config.anthropicApiKey.trim())
-    )
-      ? { source: "env", provider: "default", id: "ANTHROPIC_API_KEY" as const }
-      : undefined
-    : undefined;
-  const inferredOpenaiApiKeyRef = !openaiApiKeyRef
-    ? (
-      podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "OPENAI_API_KEY")
-        || Boolean(config.openaiApiKey.trim())
-    )
-      ? { source: "env", provider: "default", id: "OPENAI_API_KEY" as const }
-      : undefined
-    : undefined;
-  const inferredGoogleApiKeyRef = !googleApiKeyRef
-    ? (() => {
-      const mappedTargetEnv = podmanSecretMappingsParse.mappings.find((mapping) =>
-        mapping.targetEnv === "GEMINI_API_KEY" || mapping.targetEnv === "GOOGLE_API_KEY",
-      )?.targetEnv;
-      const inferredId = mappedTargetEnv || (config.googleApiKey.trim() ? "GEMINI_API_KEY" : "");
-      return inferredId
-        ? { source: "env", provider: "default", id: inferredId as "GEMINI_API_KEY" | "GOOGLE_API_KEY" }
-        : undefined;
-    })()
-    : undefined;
-  const inferredOpenrouterApiKeyRef = !openrouterApiKeyRef
-    ? (
-      podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "OPENROUTER_API_KEY")
-        || Boolean(config.openrouterApiKey.trim())
-    )
-      ? { source: "env", provider: "default", id: "OPENROUTER_API_KEY" as const }
-      : undefined
-    : undefined;
-  const inferredModelEndpointApiKeyRef = !modelEndpointApiKeyRef && (
-    config.modelEndpoint.trim() && !config.modelEndpointApiKey.trim()
-      ? undefined
-      : (
-        podmanSecretMappingsParse.mappings.some((mapping) => mapping.targetEnv === "MODEL_ENDPOINT_API_KEY")
-          || Boolean(config.modelEndpointApiKey.trim())
-      )
-        ? { source: "env", provider: "default", id: "MODEL_ENDPOINT_API_KEY" as const }
-        : undefined
   );
   const agentNameError = validateAgentName(config.agentName);
   const validationErrors: string[] = [];
@@ -835,9 +787,6 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     }
   }
   if (config.vaultSecretsEnabled) {
-    if (!isClusterMode) {
-      validationErrors.push("Vault plugin wiring is available for Kubernetes/OpenShift deploys.");
-    }
     if (!config.vaultAddr.trim()) {
       validationErrors.push("Vault Address is required when the Vault plugin is enabled.");
     }
@@ -847,10 +796,10 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     if (config.vaultKvVersion !== "1" && config.vaultKvVersion !== "2") {
       validationErrors.push("Vault KV Version must be 1 or 2.");
     }
-    if (!config.vaultTokenSecretName.trim()) {
+    if (isClusterMode && !config.vaultTokenSecretName.trim()) {
       validationErrors.push("Vault Token Secret Name is required when the Vault plugin is enabled.");
     }
-    if (!config.vaultTokenSecretKey.trim()) {
+    if (isClusterMode && !config.vaultTokenSecretKey.trim()) {
       validationErrors.push("Vault Token Secret Key is required when the Vault plugin is enabled.");
     }
     if (customSecretProviders && "vault" in customSecretProviders) {
@@ -875,7 +824,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   if (config.telegramBotTokenRefId.trim() && !telegramBotTokenRef) {
     validationErrors.push("Telegram SecretRef requires source, provider, and id.");
   }
-  validationErrors.push(...podmanSecretMappingsParse.errors);
+  validationErrors.push(...parsePodmanSecretMappingsText(config.podmanSecretMappingsText).errors);
 
   const isValid = validationErrors.length === 0;
 
@@ -1485,25 +1434,15 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           setConfig={setConfig}
         />
 
-        <SecretRefsSection
+        <PluginInstallSection
           config={config}
           update={update}
-          mode={mode}
-          effectiveAnthropicApiKeyRef={anthropicApiKeyRef || inferredAnthropicApiKeyRef}
-          effectiveOpenaiApiKeyRef={openaiApiKeyRef || inferredOpenaiApiKeyRef}
-          effectiveGoogleApiKeyRef={googleApiKeyRef || inferredGoogleApiKeyRef}
-          effectiveOpenrouterApiKeyRef={openrouterApiKeyRef || inferredOpenrouterApiKeyRef}
-          effectiveModelEndpointApiKeyRef={modelEndpointApiKeyRef || inferredModelEndpointApiKeyRef}
-          anthropicApiKeyRefIsInferred={!anthropicApiKeyRef && Boolean(inferredAnthropicApiKeyRef)}
-          openaiApiKeyRefIsInferred={!openaiApiKeyRef && Boolean(inferredOpenaiApiKeyRef)}
-          googleApiKeyRefIsInferred={!googleApiKeyRef && Boolean(inferredGoogleApiKeyRef)}
-          openrouterApiKeyRefIsInferred={!openrouterApiKeyRef && Boolean(inferredOpenrouterApiKeyRef)}
-          modelEndpointApiKeyRefIsInferred={!modelEndpointApiKeyRef && Boolean(inferredModelEndpointApiKeyRef)}
         />
 
         <ExternalSecretProvidersSection
           config={config}
           isClusterMode={isClusterMode}
+          selectedProviders={selectedProviders}
           update={update}
           onVaultEnabledChange={handleVaultEnabledChange}
         />

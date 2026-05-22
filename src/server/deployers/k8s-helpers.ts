@@ -24,6 +24,7 @@ import {
   ANTHROPIC_VERTEX_API,
   ANTHROPIC_VERTEX_DEFAULT_MODEL,
   ANTHROPIC_VERTEX_PROVIDER,
+  DEFAULT_OPENAI_MODEL,
   GCP_VERTEX_CREDENTIALS_MARKER,
   GOOGLE_VERTEX_API,
   GOOGLE_VERTEX_DEFAULT_MODEL,
@@ -31,15 +32,17 @@ import {
 } from "./openclaw-compat.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "ghcr.io/openclaw/openclaw:latest";
+export const DEFAULT_OPENSHELL_IMAGE = process.env.OPENCLAW_OPENSHELL_IMAGE || "quay.io/sallyom/openclaw:latest";
 export const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || DEFAULT_IMAGE;
 export const CUSTOM_ENDPOINT_PROVIDER = "endpoint";
 export const GOOGLE_PROVIDER = "google";
 export const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const OPENROUTER_PROVIDER = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const VAULT_SECRET_PROVIDER_ALIAS = "vault";
 export const VAULT_SECRET_PROVIDER_COMMAND = "/usr/local/bin/node";
-export const VAULT_SECRET_PROVIDER_RESOLVER_PATH = "/app/extensions/vault/vault-secret-ref-resolver.js";
+export const VAULT_SECRET_PROVIDER_RESOLVER_PATH = "/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js";
 const ANTHROPIC_VERTEX_MAX_TOKENS = 128000;
 
 type ModelCatalogEntry = {
@@ -49,6 +52,7 @@ type ModelCatalogEntry = {
 
 export function defaultImage(config: DeployConfig): string {
   if (config.image) return config.image;
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell") return DEFAULT_OPENSHELL_IMAGE;
   return config.vertexEnabled ? DEFAULT_VERTEX_IMAGE : DEFAULT_IMAGE;
 }
 
@@ -80,7 +84,7 @@ export function namespaceName(config: DeployConfig): string {
 
 export function agentId(config: DeployConfig): string {
   const prefix = config.prefix || "openclaw";
-  return `${prefix}_${config.agentName}`;
+  return sanitizeForRfc1123(`${prefix}-${config.agentName}`) || "openclaw-agent";
 }
 
 export function generateToken(): string {
@@ -236,10 +240,10 @@ export function buildConfiguredAgentModelCatalog(
         "openai",
         config.openaiModel
           || ((config.openaiApiKey || config.openaiApiKeyRef || hasLocalProviderSecret(config, "OPENAI_API_KEY"))
-            ? "gpt-5.4"
+            ? DEFAULT_OPENAI_MODEL
             : undefined),
       ),
-      alias: config.openaiModel?.trim() || "gpt-5.4",
+      alias: config.openaiModel?.trim() || DEFAULT_OPENAI_MODEL,
     },
     {
       ref: (config.codexModel?.trim() || config.inferenceProvider === OPENAI_CODEX_PROVIDER)
@@ -378,7 +382,7 @@ export function deriveModel(config: DeployConfig): string {
     return `anthropic/${config.anthropicModel?.trim() || "claude-sonnet-4-6"}`;
   }
   if (config.inferenceProvider === "openai") {
-    return `openai/${config.openaiModel?.trim() || "gpt-5.4"}`;
+    return `openai/${config.openaiModel?.trim() || DEFAULT_OPENAI_MODEL}`;
   }
   if (config.inferenceProvider === OPENAI_CODEX_PROVIDER) {
     return normalizeCodexModelRef(config.codexModel);
@@ -405,7 +409,7 @@ export function deriveModel(config: DeployConfig): string {
       ? `${ANTHROPIC_VERTEX_PROVIDER}/${ANTHROPIC_VERTEX_DEFAULT_MODEL}`
       : `${GOOGLE_VERTEX_PROVIDER}/${GOOGLE_VERTEX_DEFAULT_MODEL}`;
   }
-  if (config.openaiApiKey || config.openaiApiKeyRef) return "openai/gpt-5.4";
+  if (config.openaiApiKey || config.openaiApiKeyRef) return `openai/${DEFAULT_OPENAI_MODEL}`;
   if (config.codexOauthAuthJson || config.codexOauthProfileId) return normalizeCodexModelRef(config.codexModel);
   if (config.googleApiKey || config.googleApiKeyRef) return `${GOOGLE_PROVIDER}/gemini-3.1-pro-preview`;
   if (config.openrouterApiKey || config.openrouterApiKeyRef) return `${OPENROUTER_PROVIDER}/auto`;
@@ -683,6 +687,28 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
     if (openaiApiKeyRef.source === "env" && openaiApiKeyRef.provider === "default") {
       shouldDefineDefaultEnvProvider = true;
     }
+    const openaiProvider: Record<string, unknown> = {
+      ...((providersMap[OPENAI_PROVIDER] as Record<string, unknown> | undefined) || {}),
+      baseUrl: OPENAI_BASE_URL,
+      api: "openai-responses",
+      agentRuntime: { id: "pi" },
+      apiKey: cloneSecretRef(openaiApiKeyRef),
+    };
+    const openaiModels = new Map<string, DeployModelOption>();
+    const addOpenaiModel = (modelId?: string) => {
+      const trimmed = String(modelId || "").trim();
+      if (!trimmed) return;
+      const id = trimmed.startsWith(`${OPENAI_PROVIDER}/`) ? trimmed.slice(`${OPENAI_PROVIDER}/`.length) : trimmed;
+      openaiModels.set(id, { id, name: id });
+    };
+    addOpenaiModel(config.openaiModel || DEFAULT_OPENAI_MODEL);
+    for (const modelId of config.openaiModels || []) {
+      addOpenaiModel(modelId);
+    }
+    if (openaiModels.size > 0) {
+      openaiProvider.models = Array.from(openaiModels.values());
+    }
+    providersMap[OPENAI_PROVIDER] = openaiProvider;
   }
   if (googleApiKeyRef) {
     if (googleApiKeyRef.source === "env" && googleApiKeyRef.provider === "default") {
@@ -823,6 +849,14 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   const useOtel = shouldUseOtel(config);
   const useCodexOauth = shouldUseCodexOauth(config);
   const openShellPluginConfig = buildOpenShellPluginConfig(config);
+  const managedAgentIds = Array.from(new Set([
+    id,
+    ...((sourceBundle?.agents || []).map((entry) => entry.id).filter(Boolean)),
+  ]));
+  const skillExtraDirs = [
+    "~/.openclaw/skills",
+    ...managedAgentIds.map((agentId) => `~/.openclaw/workspace-${agentId}/skills`),
+  ];
   const ocConfig: Record<string, unknown> = {
     plugins: {
       ...((pluginAllowlist.length > 0 || openShellPluginConfig)
@@ -911,7 +945,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
       },
     } : {}),
     skills: {
-      load: { extraDirs: ["~/.openclaw/skills"], watch: true, watchDebounceMs: 1000 },
+      load: { extraDirs: skillExtraDirs, watch: true, watchDebounceMs: 1000 },
     },
     cron: { enabled: !!config.cronEnabled },
   };

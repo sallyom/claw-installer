@@ -34,6 +34,12 @@ function trimOptional(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+export function normalizeVaultAddr(value: string | undefined): string | undefined {
+  const trimmed = trimOptional(value);
+  if (!trimmed) return undefined;
+  return trimmed.replace(/^(https?:\/\/[^/?#]+\.svc)\.cluster(?=[:/?#]|$)/i, "$1");
+}
+
 function normalizeSecretRef(ref: DeploySecretRef | undefined): DeploySecretRef | undefined {
   if (!ref) return undefined;
   const source = ref.source;
@@ -44,6 +50,39 @@ function normalizeSecretRef(ref: DeploySecretRef | undefined): DeploySecretRef |
     throw new Error("SecretRef requires source, provider, and id");
   }
   return { source, provider, id };
+}
+
+function vaultSecretRef(id: string): DeploySecretRef {
+  return {
+    source: "exec",
+    provider: "vault",
+    id,
+  };
+}
+
+export function applyVaultSecretRefDefaults(
+  config: DeployConfig,
+  selectedProviders?: string[],
+): void {
+  if (!config.vaultSecretsEnabled) {
+    return;
+  }
+  const selected = (provider: string) => !selectedProviders || selectedProviders.includes(provider);
+  if (selected("anthropic") && !config.anthropicApiKeyRef) {
+    config.anthropicApiKeyRef = vaultSecretRef("providers/anthropic/apiKey");
+  }
+  if (selected("openai") && !config.openaiApiKeyRef) {
+    config.openaiApiKeyRef = vaultSecretRef("providers/openai/apiKey");
+  }
+  if (selected("google") && !config.googleApiKeyRef) {
+    config.googleApiKeyRef = vaultSecretRef("providers/google/apiKey");
+  }
+  if (selected("openrouter") && !config.openrouterApiKeyRef) {
+    config.openrouterApiKeyRef = vaultSecretRef("providers/openrouter/apiKey");
+  }
+  if (selected("custom-endpoint") && !config.modelEndpointApiKeyRef) {
+    config.modelEndpointApiKeyRef = vaultSecretRef("providers/endpoint/apiKey");
+  }
 }
 
 function normalizeModelFallbacks(modelFallbacks: string[] | undefined): string[] | undefined {
@@ -190,12 +229,13 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.modelFallbacks = normalizeModelFallbacks(config.modelFallbacks);
   config.otelEndpoint = trimOptional(config.otelEndpoint);
   config.otelExperimentId = trimOptional(config.otelExperimentId);
-  config.vaultAddr = trimOptional(config.vaultAddr);
+  config.vaultAddr = normalizeVaultAddr(config.vaultAddr);
   config.vaultNamespace = trimOptional(config.vaultNamespace);
   config.vaultKvMount = trimOptional(config.vaultKvMount);
   config.vaultKvVersion = trimOptional(config.vaultKvVersion);
   config.vaultTokenSecretName = trimOptional(config.vaultTokenSecretName);
   config.vaultTokenSecretKey = trimOptional(config.vaultTokenSecretKey);
+  config.pluginInstallSpecs = normalizeStringArray(config.pluginInstallSpecs);
   config.secretsProvidersJson = trimOptional(config.secretsProvidersJson);
 
   if (config.modelEndpoint) {
@@ -218,6 +258,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     return;
   }
+  applyVaultSecretRefDefaults(config, selectedProviders);
 
   let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson) {
@@ -236,10 +277,6 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   }
 
   if (config.vaultSecretsEnabled) {
-    if (config.mode !== "kubernetes" && config.mode !== "openshift") {
-      res.status(400).json({ error: "Vault plugin wiring is supported for Kubernetes/OpenShift deployments" });
-      return;
-    }
     if (!config.vaultAddr) {
       res.status(400).json({ error: "vaultAddr is required when vaultSecretsEnabled is true" });
       return;
@@ -252,7 +289,8 @@ router.post("/", deploymentRateLimit, async (req, res) => {
       res.status(400).json({ error: "vaultKvVersion must be 1 or 2" });
       return;
     }
-    if (!config.vaultTokenSecretName || !config.vaultTokenSecretKey) {
+    const isClusterMode = config.mode === "kubernetes" || config.mode === "openshift";
+    if (isClusterMode && (!config.vaultTokenSecretName || !config.vaultTokenSecretKey)) {
       res.status(400).json({ error: "vaultTokenSecretName and vaultTokenSecretKey are required when vaultSecretsEnabled is true" });
       return;
     }

@@ -41,6 +41,7 @@ export interface DeployConfig {
   vaultKvVersion?: string;
   vaultTokenSecretName?: string;
   vaultTokenSecretKey?: string;
+  pluginInstallSpecs?: string[];
   secretsProvidersJson?: string;
   anthropicApiKeyRef?: DeploySecretRef;
   openaiApiKeyRef?: DeploySecretRef;
@@ -56,6 +57,7 @@ export interface DeployConfig {
   sandboxBackend?: "ssh" | "openshell";
   sandboxOpenShellGatewayEndpoint?: string;
   sandboxOpenShellMode?: "mirror" | "remote";
+  sandboxOpenShellFrom?: string;
   sandboxToolPolicyEnabled?: boolean;
   sandboxToolAllowFiles?: boolean;
   sandboxToolAllowSessions?: boolean;
@@ -64,6 +66,7 @@ export interface DeployConfig {
   sandboxToolAllowBrowser?: boolean;
   sandboxToolAllowAutomation?: boolean;
   sandboxToolAllowMessaging?: boolean;
+  sandboxToolAllowWebFetch?: boolean;
   sandboxSshTarget?: string;
   sandboxSshWorkspaceRoot?: string;
   sandboxSshStrictHostKeyChecking?: boolean;

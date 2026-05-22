@@ -197,7 +197,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
     });
   });
 
-  it("shows Agent Options controls and model secret override targets", async () => {
+  it("shows Agent Options controls without raw SecretRef override fields", async () => {
     global.fetch = mockHealthResponse([
       { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
     ]);
@@ -211,13 +211,60 @@ describe("DeployForm agent name validation (issue #7)", () => {
     expect(screen.getAllByText("Enable Cron Jobs").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Subagent Spawning").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByText("Advanced: SecretRefs"));
+    expect(screen.queryByText("Advanced: SecretRefs")).toBeNull();
+    expect(screen.queryByText("Anthropic SecretRef Source")).toBeNull();
+    expect(screen.queryByText("OpenAI SecretRef Source")).toBeNull();
+  });
 
-    expect(await screen.findByText("Anthropic SecretRef Source")).toBeTruthy();
-    expect(screen.getByText("OpenAI SecretRef Source")).toBeTruthy();
-    expect(screen.getByText("Google SecretRef Source")).toBeTruthy();
-    expect(screen.getByText("OpenRouter SecretRef Source")).toBeTruthy();
-    expect(screen.getByText("OpenAI-Compatible Endpoint SecretRef Source")).toBeTruthy();
+  it("shows generated Vault ids instead of editable SecretRef fields", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false },
+    ], {
+      k8sAvailable: true,
+      k8sContext: "test-context",
+      isOpenShift: true,
+      defaults: {
+        hasAnthropicKey: true,
+        hasOpenaiKey: false,
+        hasGoogleKey: false,
+        hasOpenrouterKey: false,
+        hasTelegramToken: false,
+        telegramAllowFrom: "",
+        modelEndpoint: "",
+        prefix: "testuser",
+        image: "",
+      },
+    });
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    await screen.findAllByRole("button", { name: /deploy openclaw/i });
+
+    fireEvent.click(screen.getByText("External Secret Providers"));
+    fireEvent.click(screen.getByLabelText("Configure HashiCorp Vault SecretRefs"));
+
+    expect(await screen.findByText("Generated Vault SecretRefs")).toBeTruthy();
+    expect(screen.getByText("providers/anthropic/apiKey")).toBeTruthy();
+    expect(screen.queryByText("Anthropic SecretRef Source")).toBeNull();
+  });
+
+  it("hides cluster-only Vault token Secret fields for local deploys", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    await screen.findAllByRole("button", { name: /deploy openclaw/i });
+
+    fireEvent.click(screen.getByText("External Secret Providers"));
+    fireEvent.click(screen.getByLabelText("Configure HashiCorp Vault SecretRefs"));
+
+    expect(screen.queryByText("Token Env Secret Name")).toBeNull();
+    expect(screen.queryByText("Token Env Key")).toBeNull();
+    expect(screen.queryByText("Token Secret Name")).toBeNull();
+    expect(screen.queryByText("Token Secret Key")).toBeNull();
+    expect(screen.getByText(/the installer passes VAULT_TOKEN from its environment/i)).toBeTruthy();
   });
 
   it("shows OpenRouter as an available inference provider", async () => {
@@ -258,7 +305,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
     expect(screen.getByText("Google Model")).toBeTruthy();
   });
 
-  it("shows primary model dropdown options for Anthropic and OpenAI", async () => {
+  it("does not show hardcoded model dropdown options without live discovery", async () => {
     global.fetch = mockHealthResponse([
       { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
     ]);
@@ -267,13 +314,10 @@ describe("DeployForm agent name validation (issue #7)", () => {
 
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
 
-    const anthropicModelSelect = screen.getAllByRole("combobox").find((element) =>
+    const anthropicModelSelect = screen.queryAllByRole("combobox").find((element) =>
       Array.from((element as HTMLSelectElement).options).some((option) => option.value === "claude-sonnet-4-6"),
     ) as HTMLSelectElement | undefined;
-    expect(anthropicModelSelect).toBeTruthy();
-    expect(
-      Array.from(anthropicModelSelect!.options).some((option) => option.value === "claude-sonnet-4-6"),
-    ).toBe(true);
+    expect(anthropicModelSelect).toBeUndefined();
 
     const primaryProviderSelect = screen.getAllByRole("combobox").find((element) =>
       Array.from((element as HTMLSelectElement).options).some((option) => option.value === "openai"),
@@ -281,15 +325,11 @@ describe("DeployForm agent name validation (issue #7)", () => {
     expect(primaryProviderSelect).toBeTruthy();
     fireEvent.change(primaryProviderSelect!, { target: { value: "openai" } });
 
-    const openaiModelSelect = await screen.findAllByRole("combobox").then((elements) =>
-      elements.find((element) =>
-        Array.from((element as HTMLSelectElement).options).some((option) => option.value === "gpt-5"),
-      ) as HTMLSelectElement | undefined,
-    );
-    expect(openaiModelSelect).toBeTruthy();
-    expect(
-      Array.from(openaiModelSelect!.options).some((option) => option.value === "gpt-5"),
-    ).toBe(true);
+    await screen.findByText("OpenAI Model");
+    const openaiModelSelect = screen.queryAllByRole("combobox").find((element) =>
+      Array.from((element as HTMLSelectElement).options).some((option) => option.value === "gpt-5.5"),
+    ) as HTMLSelectElement | undefined;
+    expect(openaiModelSelect).toBeUndefined();
   });
 
   it("prefills the default Anthropic model when Anthropic is added as an additional provider", async () => {
@@ -382,7 +422,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
 
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
 
-    fireEvent.click(screen.getByText("Advanced: External Secret Providers"));
+    fireEvent.click(screen.getByText("External Secret Providers"));
     const secretProvidersTextarea = screen.getAllByRole("textbox").find((element) =>
       (element as HTMLTextAreaElement).placeholder.includes("{"),
     ) as HTMLTextAreaElement | undefined;
@@ -502,8 +542,8 @@ describe("DeployForm agent name validation (issue #7)", () => {
     fireEvent.change(primarySelect, { target: { value: "openai" } });
     fireEvent.change(screen.getByPlaceholderText("sk-..."), { target: { value: "sk-openai-demo" } });
     fireEvent.change(
-      screen.getByPlaceholderText("e.g., gpt-5"),
-      { target: { value: "gpt-5" } },
+      screen.getByPlaceholderText("e.g., gpt-5.5"),
+      { target: { value: "gpt-5.5" } },
     );
 
     // Switch primary to custom-endpoint, fill its fields, then switch back

@@ -30,7 +30,7 @@ If you only have access to an existing project, enter that exact project name in
 
 For a deeper architectural walkthrough, see [installing-openclaw-on-openshift.md](installing-openclaw-on-openshift.md).
 
-For SSH sandbox setup on cluster deployments, see [SANDBOX.md](/Users/somalley/git/ambient-code/openclaw-installer/docs/SANDBOX.md).
+For sandbox setup on cluster deployments, see [SANDBOX.md](../../../docs/SANDBOX.md).
 
 ### Deploy form
 
@@ -41,8 +41,10 @@ For SSH sandbox setup on cluster deployments, see [SANDBOX.md](/Users/somalley/g
 | **Owner prefix** | *(optional)* | Defaults to OS username; used in generated namespace names |
 | **Display name** | `My Agent` | Shown in the UI |
 | **Image** | `ghcr.io/openclaw/openclaw:latest` | Container image |
-| **Enable SSH sandbox backend** | checked | Recommended for cluster deploys |
-| **SSH Target** | `sandbox@gateway-host:22` | Remote sandbox runtime host |
+| **Enable sandbox backend** | checked | Choose SSH or OpenShell depending on what the platform provides |
+| **Sandbox Backend** | `OpenShell` or `SSH` | OpenShell needs a provisioned OpenShell gateway; SSH needs a remote sandbox host |
+| **OpenShell Gateway Endpoint** | `http://openshell.openshell-alice.svc.cluster.local:8080` | Required when OpenShell is selected |
+| **SSH Target** | `sandbox@gateway-host:22` | Required when SSH is selected |
 | **Provider credentials** | *(provider-specific)* | API key, Vertex credentials, or Codex CLI OAuth; same provider flow as generic Kubernetes deploys |
 
 ## What Gets Created

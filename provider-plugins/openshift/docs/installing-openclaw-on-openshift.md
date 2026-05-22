@@ -226,7 +226,7 @@ From the Instances tab, click Delete on the instance. The installer explicitly d
 | What | How |
 |------|-----|
 | Customize your agent | Edit files in `~/.openclaw/workspace-<id>/` and click Re-deploy |
-| Use Vertex AI with Claude | Upload credentials JSON, select Anthropic as the Vertex provider |
+| Use Vertex AI with Claude | Upload credentials JSON, select **Google Vertex AI (Claude)** as the provider |
 | Run locally first | The installer also supports local podman deployment - select "Local" mode |
 | View example YAMLs | See [`docs/examples/`](examples/) for annotated templates of every resource |
 

@@ -1,26 +1,40 @@
 import React from "react";
-import type { DeployFormConfig } from "./types.js";
+import type { DeployFormConfig, InferenceProvider } from "./types.js";
 
 interface ExternalSecretProvidersSectionProps {
   config: DeployFormConfig;
   isClusterMode: boolean;
+  selectedProviders: InferenceProvider[];
   update: (field: string, value: string) => void;
   onVaultEnabledChange: (enabled: boolean) => void;
 }
 
+const VAULT_PROVIDER_PATHS: Partial<Record<InferenceProvider, { label: string; path: string }>> = {
+  anthropic: { label: "Anthropic API key", path: "providers/anthropic/apiKey" },
+  openai: { label: "OpenAI API key", path: "providers/openai/apiKey" },
+  google: { label: "Google API key", path: "providers/google/apiKey" },
+  openrouter: { label: "OpenRouter API key", path: "providers/openrouter/apiKey" },
+  "custom-endpoint": { label: "OpenAI-compatible endpoint API key", path: "providers/endpoint/apiKey" },
+};
+
 export function ExternalSecretProvidersSection({
   config,
   isClusterMode,
+  selectedProviders,
   update,
   onVaultEnabledChange,
 }: ExternalSecretProvidersSectionProps) {
+  const vaultPaths = selectedProviders
+    .map((provider) => VAULT_PROVIDER_PATHS[provider])
+    .filter((entry): entry is { label: string; path: string } => Boolean(entry));
+
   return (
     <details style={{ marginTop: "1rem" }}>
       <summary style={{ cursor: "pointer", fontWeight: 600 }}>External Secret Providers</summary>
       <div className="card" style={{ marginTop: "0.75rem" }}>
         <div className="hint" style={{ marginBottom: "0.75rem" }}>
-          Configure OpenClaw to resolve credentials through a bundled plugin instead of writing provider API keys into
-          the installer-managed Secret.
+          Configure OpenClaw to resolve credentials through SecretRef providers instead of writing provider API keys
+          into the installer-managed Secret.
         </div>
 
         <div className="form-group">
@@ -28,16 +42,17 @@ export function ExternalSecretProvidersSection({
             <input
               type="checkbox"
               checked={config.vaultSecretsEnabled}
-              disabled={!isClusterMode}
               onChange={(e) => onVaultEnabledChange(e.target.checked)}
               style={{ width: "auto" }}
             />
-            Use bundled HashiCorp Vault plugin
+            Configure HashiCorp Vault SecretRefs
           </label>
           <div className="hint">
             Creates the <code>vault</code> SecretRef provider and points selected credential SecretRefs at Vault paths
-            such as <code>providers/openai/apiKey</code>. The Vault token must already exist as a Secret in the target
-            namespace.
+            such as <code>providers/openai/apiKey</code>. {isClusterMode
+              ? "The Vault token must already exist as a Secret in the target namespace."
+              : "For local deploys, the installer passes VAULT_TOKEN from its environment when present; otherwise provide it with container run args."}{" "}
+            Add the Vault plugin in the Plugins section unless it is already installed in OpenClaw's home volume.
           </div>
         </div>
 
@@ -86,26 +101,44 @@ export function ExternalSecretProvidersSection({
               </div>
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label>Token Secret Name</label>
-                <input
-                  type="text"
-                  placeholder="openclaw-vault-token"
-                  value={config.vaultTokenSecretName}
-                  onChange={(e) => update("vaultTokenSecretName", e.target.value)}
-                />
+            {isClusterMode && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Token Secret Name</label>
+                  <input
+                    type="text"
+                    placeholder="openclaw-vault-token"
+                    value={config.vaultTokenSecretName}
+                    onChange={(e) => update("vaultTokenSecretName", e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Token Secret Key</label>
+                  <input
+                    type="text"
+                    placeholder="token"
+                    value={config.vaultTokenSecretKey}
+                    onChange={(e) => update("vaultTokenSecretKey", e.target.value)}
+                  />
+                </div>
               </div>
+            )}
+
+            {vaultPaths.length > 0 && (
               <div className="form-group">
-                <label>Token Secret Key</label>
-                <input
-                  type="text"
-                  placeholder="VAULT_TOKEN"
-                  value={config.vaultTokenSecretKey}
-                  onChange={(e) => update("vaultTokenSecretKey", e.target.value)}
-                />
+                <label>Generated Vault SecretRefs</label>
+                <div className="hint">
+                  The installer will configure selected providers to resolve credentials from these Vault ids.
+                </div>
+                <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem", color: "var(--text-secondary)" }}>
+                  {vaultPaths.map((entry) => (
+                    <li key={entry.path}>
+                      {entry.label}: <code>{entry.path}</code>
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
+            )}
           </>
         )}
 
@@ -118,7 +151,7 @@ export function ExternalSecretProvidersSection({
             onChange={(e) => update("secretsProvidersJson", e.target.value)}
           />
           <div className="hint">
-            Do not define <code>vault</code> here when the bundled Vault plugin is enabled; the installer generates it.
+            Do not define <code>vault</code> here when Vault SecretRef wiring is enabled; the installer generates it.
           </div>
         </div>
       </div>

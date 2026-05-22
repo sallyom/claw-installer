@@ -164,8 +164,8 @@ compatibility issues with your model.
 ### Model naming with the proxy
 
 When the proxy is active, the model string changes from the Vertex format
-(e.g., `anthropic-vertex/claude-sonnet-4-6`) to an OpenAI-compatible
-format (e.g., `openai/claude-sonnet-4-6`). This is handled automatically
+(e.g., `anthropic-vertex/claude-sonnet-4-6`) to the installer-managed
+LiteLLM provider format (e.g., `litellm/claude-sonnet-4-6`). This is handled automatically
 when using the default model. If you override the model field, use the
 model name as registered in LiteLLM (e.g., `claude-sonnet-4-6` without
 any prefix).

@@ -92,6 +92,7 @@ export interface DeployFormConfig {
   vaultKvVersion: string;
   vaultTokenSecretName: string;
   vaultTokenSecretKey: string;
+  pluginInstallSpecsText: string;
   secretsProvidersJson: string;
   anthropicApiKeyRefSource: SecretRefSource;
   anthropicApiKeyRefProvider: string;
@@ -118,6 +119,7 @@ export interface DeployFormConfig {
   sandboxWorkspaceAccess: string;
   sandboxOpenShellGatewayEndpoint: string;
   sandboxOpenShellMode: OpenShellSandboxMode;
+  sandboxOpenShellFrom: string;
   sandboxToolPolicyEnabled: boolean;
   sandboxToolAllowFiles: boolean;
   sandboxToolAllowSessions: boolean;
@@ -126,6 +128,7 @@ export interface DeployFormConfig {
   sandboxToolAllowBrowser: boolean;
   sandboxToolAllowAutomation: boolean;
   sandboxToolAllowMessaging: boolean;
+  sandboxToolAllowWebFetch: boolean;
   sandboxSshTarget: string;
   sandboxSshWorkspaceRoot: string;
   sandboxSshStrictHostKeyChecking: boolean;

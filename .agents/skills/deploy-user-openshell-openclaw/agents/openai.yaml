@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy OpenShell/OpenClaw User"
+  short_description: "Deploy one user's OpenShell/OpenClaw."
+  default_prompt: "Deploy one human user's OpenShell-backed OpenClaw PoC environment."

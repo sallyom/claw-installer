@@ -56,41 +56,59 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                 value={config.sandboxMode}
                 onChange={(e) => update("sandboxMode", e.target.value)}
               >
-                <option value="all">all</option>
-                <option value="non-main">non-main</option>
-                <option value="off">off</option>
+                <option value="all">All agent sessions</option>
+                <option value="non-main">Non-main sessions only</option>
+                <option value="off">Off</option>
               </select>
+              <div className="hint">
+                Use non-main to let the manager run on the gateway while worker sessions run in the sandbox.
+              </div>
             </div>
           </div>
 
           {backend === "openshell" && (
-            <div className="form-row">
+            <>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>OpenShell Gateway Endpoint</label>
+                  <input
+                    type="text"
+                    placeholder="http://openshell.openshell-alice.svc.cluster.local:8080"
+                    value={config.sandboxOpenShellGatewayEndpoint}
+                    onChange={(e) => update("sandboxOpenShellGatewayEndpoint", e.target.value)}
+                  />
+                  <div className="hint">
+                    Cluster-internal URL for the user's admin-provisioned OpenShell gateway service.
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>OpenShell Workspace Mode</label>
+                  <select
+                    value={config.sandboxOpenShellMode}
+                    onChange={(e) => update("sandboxOpenShellMode", e.target.value)}
+                  >
+                    <option value="mirror">mirror</option>
+                    <option value="remote">remote</option>
+                  </select>
+                  <div className="hint">
+                    Start with mirror so the OpenClaw PVC remains the canonical workspace.
+                  </div>
+                </div>
+              </div>
+
               <div className="form-group">
-                <label>OpenShell Gateway Endpoint</label>
+                <label>OpenShell Sandbox Source</label>
                 <input
                   type="text"
-                  placeholder="http://openshell.openshell-alice.svc.cluster.local:8080"
-                  value={config.sandboxOpenShellGatewayEndpoint}
-                  onChange={(e) => update("sandboxOpenShellGatewayEndpoint", e.target.value)}
+                  placeholder="quay.io/sallyom/openclaw-openshell-sandbox:latest"
+                  value={config.sandboxOpenShellFrom}
+                  onChange={(e) => update("sandboxOpenShellFrom", e.target.value)}
                 />
                 <div className="hint">
-                  Cluster-internal URL for the user's admin-provisioned OpenShell gateway service.
+                  Bare names resolve to OpenShell community sandbox images. Use a full image reference for a custom slim sandbox image.
                 </div>
               </div>
-              <div className="form-group">
-                <label>OpenShell Workspace Mode</label>
-                <select
-                  value={config.sandboxOpenShellMode}
-                  onChange={(e) => update("sandboxOpenShellMode", e.target.value)}
-                >
-                  <option value="mirror">mirror</option>
-                  <option value="remote">remote</option>
-                </select>
-                <div className="hint">
-                  Start with mirror so the OpenClaw PVC remains the canonical workspace.
-                </div>
-              </div>
-            </div>
+            </>
           )}
 
           <div className="form-row">
@@ -217,6 +235,16 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                   }
                 />
                 Messaging tools
+              </label>
+              <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={config.sandboxToolAllowWebFetch}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, sandboxToolAllowWebFetch: e.target.checked }))
+                  }
+                />
+                Gateway web fetch
               </label>
             </div>
           )}

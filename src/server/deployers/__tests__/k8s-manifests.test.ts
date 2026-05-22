@@ -95,13 +95,102 @@ describe("k8s state sync manifests", () => {
     const env = gatewayEnvMap(deployment);
 
     expect(initContainer?.volumeMounts?.find((mount) => mount.name === "openclaw-home")?.mountPath).toBe("/home/node");
+    expect(initContainer?.command?.[2]).toContain("mkdir -p /home/node /home/node/.openclaw /home/node/.openclaw/tmp");
     expect(gatewayContainer?.volumeMounts?.find((mount) => mount.name === "openclaw-home")?.mountPath).toBe("/home/node");
     expect(env.HOME).toBe("/home/node");
+    expect(env.TMPDIR).toBe("/home/node/.openclaw/tmp");
     expect(env.OPENCLAW_CONFIG_DIR).toBe("/home/node/.openclaw");
     expect(env.OPENCLAW_STATE_DIR).toBe("/home/node/.openclaw");
     expect(env.NPM_CONFIG_CACHE).toBe("/home/node/.npm");
     expect(env.XDG_CACHE_HOME).toBe("/home/node/.cache");
     expect(env.XDG_CONFIG_HOME).toBe("/home/node/.config");
+  });
+
+  it("installs the external OpenShell plugin and registers the baked OpenShell CLI when enabled", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        sandboxEnabled: true,
+        sandboxBackend: "openshell",
+        sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alpha.svc.cluster.local:8080",
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const gatewayContainer = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+    const volumes = deployment.spec?.template.spec?.volumes ?? [];
+
+    expect(pluginInit?.image).toBe("quay.io/sallyom/openclaw:latest");
+    expect(gatewayContainer?.image).toBe("quay.io/sallyom/openclaw:latest");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/openshell-sandbox' --force");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list | grep -q openshell");
+    expect(initContainers.find((container) => container.name === "install-openshell-plugin")).toBeUndefined();
+    expect(initContainers.find((container) => container.name === "install-openshell-cli")).toBeUndefined();
+    expect(pluginInit?.env).toEqual(
+      expect.arrayContaining([
+        { name: "HOME", value: "/home/node" },
+        { name: "TMPDIR", value: "/home/node/.openclaw/tmp" },
+        { name: "OPENCLAW_CONFIG_DIR", value: "/home/node/.openclaw" },
+        { name: "OPENCLAW_STATE_DIR", value: "/home/node/.openclaw" },
+      ]),
+    );
+    expect(pluginInit?.volumeMounts).toEqual(
+      expect.arrayContaining([
+        { name: "openclaw-home", mountPath: "/home/node" },
+        { name: "tmp-volume", mountPath: "/tmp" },
+      ]),
+    );
+    expect(gatewayContainer?.command?.[2]).toContain("/opt/openshell/bin/openshell gateway remove openshell");
+    expect(gatewayContainer?.command?.[2]).toContain("/opt/openshell/bin/openshell gateway add \"${OPENSHELL_GATEWAY_ENDPOINT}\" --local --name openshell");
+    expect(gatewayContainer?.command?.[2]).toContain("/opt/openshell/bin/openshell -g openshell status");
+    expect(deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2]).toContain("cat > /home/node/.openclaw/openshell/policy.yaml");
+    expect(deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2]).toContain("- /home/sandbox");
+    expect(gatewayContainer?.env).toEqual(
+      expect.arrayContaining([
+        {
+          name: "OPENSHELL_GATEWAY_ENDPOINT",
+          value: "http://openshell.openshell-alpha.svc.cluster.local:8080",
+        },
+      ]),
+    );
+    expect(gatewayContainer?.volumeMounts).not.toEqual(
+      expect.arrayContaining([{ name: "openshell-cli", mountPath: "/opt/openshell", readOnly: true }]),
+    );
+    expect(volumes).not.toEqual(expect.arrayContaining([{ name: "openshell-cli", emptyDir: {} }]));
+  });
+
+  it("installs configured OpenClaw plugins before gateway startup", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        pluginInstallSpecs: ["git:github.com/sallyom/claw-vault", "/app/extensions/vault"],
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+
+    expect(pluginInit?.image).toBe("ghcr.io/openclaw/openclaw:latest");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-vault' --force");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '/app/extensions/vault' --force");
+    expect(pluginInit?.command?.[2]).toContain("continuing. Run openclaw doctor after install.");
+    expect(pluginInit?.command?.[2]).toContain("vault-secret-ref-resolver.js");
+    expect(pluginInit?.command?.[2]).toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list || true");
+    expect(pluginInit?.env).toEqual(
+      expect.arrayContaining([
+        { name: "HOME", value: "/home/node" },
+        { name: "OPENCLAW_CONFIG_DIR", value: "/home/node/.openclaw" },
+        { name: "OPENCLAW_STATE_DIR", value: "/home/node/.openclaw" },
+      ]),
+    );
+    expect(pluginInit?.volumeMounts).toEqual(
+      expect.arrayContaining([
+        { name: "openclaw-home", mountPath: "/home/node" },
+        { name: "tmp-volume", mountPath: "/tmp" },
+      ]),
+    );
   });
 
   it("migrates the legacy PVC-root state layout into the runtime home", () => {
@@ -126,6 +215,20 @@ describe("k8s state sync manifests", () => {
     expect(initScript).toContain("chmod 0755 /home/node/.openclaw/bin/openclaw-vault");
   });
 
+  it("links a preinstalled external Vault resolver into the generated SecretRef provider path", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        vaultSecretsEnabled: true,
+      }),
+    );
+    const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
+    const initScript = initContainer?.command?.[2] ?? "";
+
+    expect(initScript).toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
+    expect(initScript).toContain("find /home/node/.openclaw/git /home/node/.openclaw/npm/node_modules");
+  });
+
   it("writes SecretRef-backed auth profiles into each managed agent directory", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
@@ -145,8 +248,8 @@ describe("k8s state sync manifests", () => {
     const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
     const initScript = initContainer?.command?.[2] ?? "";
 
-    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw_alpha/agent");
-    expect(initScript).toContain("/home/node/.openclaw/agents/openclaw_alpha/agent/auth-profiles.json");
+    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw-alpha/agent");
+    expect(initScript).toContain("/home/node/.openclaw/agents/openclaw-alpha/agent/auth-profiles.json");
     expect(initScript).toContain('"anthropic:default"');
     expect(initScript).toContain('"openai:default"');
     expect(initScript).toContain('"provider": "vault"');
@@ -166,7 +269,7 @@ describe("k8s state sync manifests", () => {
     );
     const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
 
-    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw_alpha/sessions");
+    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw-alpha/sessions");
   });
 
   it("stores imported Codex OAuth profiles in the Secret instead of the init command", () => {
@@ -285,6 +388,16 @@ describe("workspace copy in init script", () => {
     expect(initScript).toContain("chmod -R g=u /home/node/.openclaw");
     expect(initScript).toContain("chmod 0755 /home/node/.openclaw/bin/openclaw-vault");
     expect(initScript).not.toContain("chown -R 1000:1000 /home/node/.openclaw");
+  });
+
+  it("creates per-agent memory and skills directories in workspaces", () => {
+    const deployment = deploymentManifest("ns", makeConfig());
+    const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
+    const initScript = initContainer?.command?.[2] ?? "";
+
+    expect(initScript).toContain("mkdir -p /home/node/.openclaw/workspace-openclaw-alpha/memory");
+    expect(initScript).toContain("mkdir -p /home/node/.openclaw/workspace-openclaw-alpha/skills");
+    expect(initScript).toContain('mkdir -p "$dest/memory" "$dest/skills"');
   });
 
   // Regression test for https://github.com/sallyom/openclaw-installer/issues/71:
