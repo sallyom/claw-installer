@@ -143,9 +143,13 @@ describe("local Vault SecretRef wiring", () => {
 
     expect(rendered.secrets.providers.vault).toMatchObject({
       source: "exec",
-      command: "/usr/local/bin/node",
-      args: ["/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js"],
+      pluginIntegration: {
+        pluginId: "vault",
+        integrationId: "vault",
+      },
     });
+    expect(rendered.plugins.allow).toEqual(expect.arrayContaining(["vault"]));
+    expect(rendered.plugins.entries.vault).toEqual({ enabled: true });
     expect(rendered.models.providers.openai).toMatchObject({
       baseUrl: "https://api.openai.com/v1",
       api: "openai-responses",
@@ -189,13 +193,16 @@ describe("local Vault SecretRef wiring", () => {
     }
   });
 
-  it("can sync an externally installed Vault resolver to the generated provider path", () => {
-    const script = localPluginsTesting.vaultResolverSyncScript();
+  it("keeps plugin installs plugin-root owned for plugin-managed Vault providers", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      pluginInstallSpecs: ["git:github.com/sallyom/claw-vault"],
+      vaultSecretsEnabled: true,
+    });
 
-    expect(script).toContain("/home/node/.openclaw/git");
-    expect(script).toContain("/home/node/.openclaw/npm/node_modules");
-    expect(script).toContain("*/dist/vault-secret-ref-resolver.js");
-    expect(script).toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
+    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-vault"]);
   });
 });
 

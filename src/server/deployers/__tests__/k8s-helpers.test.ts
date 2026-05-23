@@ -717,10 +717,10 @@ describe("model config generation", () => {
       secrets?: {
         providers?: Record<string, {
           source?: string;
-          command?: string;
-          args?: string[];
-          passEnv?: string[];
-          allowInsecurePath?: boolean;
+          pluginIntegration?: {
+            pluginId?: string;
+            integrationId?: string;
+          };
         }>;
       };
       models?: {
@@ -736,15 +736,10 @@ describe("model config generation", () => {
     expect(rendered.plugins?.entries?.vault).toEqual({ enabled: true });
     expect(rendered.secrets?.providers?.vault).toMatchObject({
       source: "exec",
-      command: "/usr/local/bin/node",
-      args: ["/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js"],
-      allowInsecurePath: true,
-      passEnv: expect.arrayContaining([
-        "VAULT_ADDR",
-        "VAULT_TOKEN",
-        "CLAW_VAULT_KV_MOUNT",
-        "CLAW_VAULT_KV_VERSION",
-      ]),
+      pluginIntegration: {
+        pluginId: "vault",
+        integrationId: "vault",
+      },
     });
     expect(rendered.models?.providers?.openai).toMatchObject({
       baseUrl: "https://api.openai.com/v1",

@@ -49,6 +49,7 @@ import {
   OPENROUTER_BASE_URL,
   OPENROUTER_PROVIDER,
   VAULT_SECRET_PROVIDER_ALIAS,
+  VAULT_SECRET_PROVIDER_PLUGIN_ID,
   detectUnavailableProvider,
   generateToken,
   normalizeModelRef,
@@ -899,6 +900,9 @@ function requiredBundledPluginAllowlist(config: DeployConfig): string[] {
   if (shouldUseOtel(config)) {
     allow.add("diagnostics-otel");
   }
+  if (config.vaultSecretsEnabled) {
+    allow.add(VAULT_SECRET_PROVIDER_PLUGIN_ID);
+  }
   if (config.telegramBotToken || config.telegramBotTokenRef) {
     allow.add("telegram");
   }
@@ -920,6 +924,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
       entries: {
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
+        ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
       },
     },
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces

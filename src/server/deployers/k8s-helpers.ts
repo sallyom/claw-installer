@@ -41,8 +41,8 @@ export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const OPENROUTER_PROVIDER = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const VAULT_SECRET_PROVIDER_ALIAS = "vault";
-export const VAULT_SECRET_PROVIDER_COMMAND = "/usr/local/bin/node";
-export const VAULT_SECRET_PROVIDER_RESOLVER_PATH = "/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js";
+export const VAULT_SECRET_PROVIDER_PLUGIN_ID = "vault";
+export const VAULT_SECRET_PROVIDER_INTEGRATION_ID = "vault";
 const ANTHROPIC_VERTEX_MAX_TOKENS = 128000;
 
 type ModelCatalogEntry = {
@@ -552,19 +552,10 @@ export function buildVaultSecretProviderConfig(config: DeployConfig): Record<str
   }
   return {
     source: "exec",
-    command: VAULT_SECRET_PROVIDER_COMMAND,
-    args: [VAULT_SECRET_PROVIDER_RESOLVER_PATH],
-    timeoutMs: 5000,
-    noOutputTimeoutMs: 5000,
-    maxOutputBytes: 1048576,
-    allowInsecurePath: true,
-    passEnv: [
-      "VAULT_ADDR",
-      "VAULT_TOKEN",
-      "VAULT_NAMESPACE",
-      "CLAW_VAULT_KV_MOUNT",
-      "CLAW_VAULT_KV_VERSION",
-    ],
+    pluginIntegration: {
+      pluginId: VAULT_SECRET_PROVIDER_PLUGIN_ID,
+      integrationId: VAULT_SECRET_PROVIDER_INTEGRATION_ID,
+    },
   };
 }
 
@@ -839,7 +830,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   const pluginAllowlist = Array.from(new Set<string>([
     ...(shouldUseCodexOauth(config) ? [OPENAI_PROVIDER, CODEX_PLUGIN_ID] : []),
     ...(shouldUseOtel(config) ? ["diagnostics-otel"] : []),
-    ...(config.vaultSecretsEnabled ? [VAULT_SECRET_PROVIDER_ALIAS] : []),
+    ...(config.vaultSecretsEnabled ? [VAULT_SECRET_PROVIDER_PLUGIN_ID] : []),
     ...((config.telegramBotToken || config.telegramBotTokenRef) ? ["telegram"] : []),
   ]));
   const controlUi: Record<string, unknown> = {
@@ -865,7 +856,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
       entries: {
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, [CODEX_PLUGIN_ID]: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
-        ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_ALIAS]: { enabled: true } } : {}),
+        ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
         ...(openShellPluginConfig ? { openshell: { enabled: true, config: openShellPluginConfig } } : {}),
       },
     },

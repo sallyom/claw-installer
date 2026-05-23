@@ -175,8 +175,7 @@ describe("k8s state sync manifests", () => {
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-vault' --force");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '/app/extensions/vault' --force");
     expect(pluginInit?.command?.[2]).toContain("continuing. Run openclaw doctor after install.");
-    expect(pluginInit?.command?.[2]).toContain("vault-secret-ref-resolver.js");
-    expect(pluginInit?.command?.[2]).toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
+    expect(pluginInit?.command?.[2]).not.toContain("vault-secret-ref-resolver.js");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list || true");
     expect(pluginInit?.env).toEqual(
       expect.arrayContaining([
@@ -215,7 +214,7 @@ describe("k8s state sync manifests", () => {
     expect(initScript).toContain("chmod 0755 /home/node/.openclaw/bin/openclaw-vault");
   });
 
-  it("links a preinstalled external Vault resolver into the generated SecretRef provider path", () => {
+  it("does not copy external Vault resolver files into generated provider paths", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
@@ -225,8 +224,8 @@ describe("k8s state sync manifests", () => {
     const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
     const initScript = initContainer?.command?.[2] ?? "";
 
-    expect(initScript).toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
-    expect(initScript).toContain("find /home/node/.openclaw/git /home/node/.openclaw/npm/node_modules");
+    expect(initScript).not.toContain("/home/node/.openclaw/extensions/vault/vault-secret-ref-resolver.js");
+    expect(initScript).not.toContain("find /home/node/.openclaw/git /home/node/.openclaw/npm/node_modules");
   });
 
   it("writes SecretRef-backed auth profiles into each managed agent directory", () => {

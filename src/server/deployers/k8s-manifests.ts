@@ -7,7 +7,6 @@ import {
   buildManagedAgentAuthProfiles,
   buildManagedAgentAuthProfilesSecretJson,
   resolveEnvSecretRefId,
-  VAULT_SECRET_PROVIDER_RESOLVER_PATH,
 } from "./k8s-helpers.js";
 import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
@@ -59,22 +58,6 @@ function pluginInstallCommand(spec: string): string {
     `  echo "WARNING: OpenClaw plugin install failed for ${quotedSpec}; continuing. Run openclaw doctor after install." >&2`,
     "  true",
     "}",
-  ].join("\n");
-}
-
-function vaultResolverSyncScript(): string {
-  const target = shellQuote(VAULT_SECRET_PROVIDER_RESOLVER_PATH);
-  return [
-    `if [ ! -f ${target} ]; then`,
-    `  vault_resolver="$(find ${OPENCLAW_RUNTIME_DIR}/git ${OPENCLAW_RUNTIME_DIR}/npm/node_modules -path '*/dist/vault-secret-ref-resolver.js' -type f 2>/dev/null | head -n 1 || true)"`,
-    `  if [ -n "$vault_resolver" ]; then`,
-    `    mkdir -p "$(dirname ${target})"`,
-    `    ln -sf "$vault_resolver" ${target} || cp "$vault_resolver" ${target}`,
-    `    chmod 0755 ${target} 2>/dev/null || true`,
-    `  else`,
-    `    echo "WARNING: Vault SecretRef resolver was not found; install the Vault plugin before using Vault SecretRefs." >&2`,
-    `  fi`,
-    `fi`,
   ].join("\n");
 }
 
@@ -151,7 +134,6 @@ function configuredPluginsInstallScript(specs: string[]): string {
     "set -eu",
     `mkdir -p ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config`,
     ...specs.map(pluginInstallCommand),
-    vaultResolverSyncScript(),
     ...(specs.includes(OPENSHELL_PLUGIN_SPEC)
       ? ["node openclaw.mjs plugins list | grep -q openshell"]
       : []),
@@ -507,7 +489,6 @@ cp /cron-src/jobs.json ${OPENCLAW_RUNTIME_DIR}/cron/jobs.json 2>/dev/null || tru
 cp /exec-approvals-src/exec-approvals.json ${OPENCLAW_RUNTIME_DIR}/exec-approvals.json 2>/dev/null || true
 ${sessionStoreLines}
 ${authProfileLines}
-${config.vaultSecretsEnabled ? vaultResolverSyncScript() : ""}
 chown -R 1000:0 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R g=u ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R o-rwx ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
