@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { ContainerRuntime } from "../services/container.js";
 import type { DeployConfig, LogCallback } from "./types.js";
-import { VAULT_SECRET_PROVIDER_RESOLVER_PATH } from "./k8s-helpers.js";
 import { bindMountSpec, runCommand, runtimeOwnershipFixupCommand } from "./local-runtime.js";
 
 const OPENCLAW_LOCAL_HOME = "/home/node";
@@ -31,7 +30,6 @@ export async function installLocalPlugins(params: {
     "set -eu",
     `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR} ${OPENCLAW_LOCAL_TMP_DIR} ${OPENCLAW_LOCAL_HOME}/.npm ${OPENCLAW_LOCAL_HOME}/.cache ${OPENCLAW_LOCAL_HOME}/.config`,
     ...plan.specs.map(nonFatalPluginInstallCommand),
-    ...(params.config.vaultSecretsEnabled ? [vaultResolverSyncScript()] : []),
     runtimeOwnershipFixupCommand(),
   ].join("\n");
 
@@ -66,22 +64,6 @@ function nonFatalPluginInstallCommand(spec: string): string {
     `  echo "WARNING: OpenClaw plugin install failed for ${quotedSpec}; continuing. Run openclaw doctor after install." >&2`,
     "  true",
     "}",
-  ].join("\n");
-}
-
-function vaultResolverSyncScript(): string {
-  const target = shellQuote(VAULT_SECRET_PROVIDER_RESOLVER_PATH);
-  return [
-    `if [ ! -f ${target} ]; then`,
-    `  vault_resolver="$(find ${OPENCLAW_LOCAL_STATE_DIR}/git ${OPENCLAW_LOCAL_STATE_DIR}/npm/node_modules -path '*/dist/vault-secret-ref-resolver.js' -type f 2>/dev/null | head -n 1 || true)"`,
-    `  if [ -n "$vault_resolver" ]; then`,
-    `    mkdir -p "$(dirname ${target})"`,
-    `    ln -sf "$vault_resolver" ${target} || cp "$vault_resolver" ${target}`,
-    `    chmod 0755 ${target} 2>/dev/null || true`,
-    `  else`,
-    `    echo "WARNING: Vault SecretRef resolver was not found; install the Vault plugin before using Vault SecretRefs." >&2`,
-    `  fi`,
-    `fi`,
   ].join("\n");
 }
 
@@ -132,5 +114,5 @@ function localPluginInstallPlan(config: DeployConfig): {
 }
 
 export const __testing = {
-  vaultResolverSyncScript,
+  localPluginInstallPlan,
 };

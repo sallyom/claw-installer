@@ -48,11 +48,11 @@ export function ExternalSecretProvidersSection({
             Configure HashiCorp Vault SecretRefs
           </label>
           <div className="hint">
-            Creates the <code>vault</code> SecretRef provider and points selected credential SecretRefs at Vault paths
-            such as <code>providers/openai/apiKey</code>. {isClusterMode
+            Creates the <code>vault</code> SecretRef provider backed by the <code>vault</code> plugin and points
+            selected credential SecretRefs at Vault paths such as <code>providers/openai/apiKey</code>. {isClusterMode
               ? "The Vault token must already exist as a Secret in the target namespace."
               : "For local deploys, the installer passes VAULT_TOKEN from its environment when present; otherwise provide it with container run args."}{" "}
-            Add the Vault plugin in the Plugins section unless it is already installed in OpenClaw's home volume.
+            Add <code>git:github.com/sallyom/claw-vault</code>, a ClawHub Vault plugin, or bundled <code>extensions/vault</code> in the Plugins section unless it is already installed in OpenClaw's home volume.
           </div>
         </div>
 
