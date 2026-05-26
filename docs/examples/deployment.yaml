@@ -1,5 +1,6 @@
 # Plain Kubernetes deployment for OpenClaw.
-# LiteLLM and OTEL sidecars are optional and omitted from this baseline example.
+# LiteLLM, OTEL, Chromium, OpenShell, and A2A sidecars are optional and omitted
+# from this baseline example.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,6 +25,7 @@ spec:
       annotations:
         openclaw.io/restart-at: "2026-03-17T00:00:00.000Z"
     spec:
+      serviceAccountName: openclaw
       initContainers:
         - name: init-config
           image: registry.access.redhat.com/ubi9-minimal:latest
@@ -32,45 +34,94 @@ spec:
             - sh
             - -c
             - |
+              mkdir -p /home/node /home/node/.openclaw /home/node/.openclaw/tmp
+              if [ -f /home/node/openclaw.json ] || [ -d /home/node/workspace ]; then
+                for path in /home/node/* /home/node/.[!.]* /home/node/..?*; do
+                  [ -e "$path" ] || continue
+                  base="$(basename "$path")"
+                  case "$base" in .|..|.openclaw|gcp|lost+found) continue ;; esac
+                  [ -e "/home/node/.openclaw/$base" ] && continue
+                  mv "$path" "/home/node/.openclaw/$base" 2>/dev/null || cp -R "$path" "/home/node/.openclaw/$base" 2>/dev/null || true
+                done
+              fi
+              mkdir -p /home/node/.openclaw/tmp /home/node/.npm /home/node/.cache /home/node/.config
+              chmod 700 /home/node/.openclaw /home/node/.openclaw/tmp /home/node/.npm /home/node/.cache /home/node/.config 2>/dev/null || true
               cp /config/openclaw.json /home/node/.openclaw/openclaw.json
-              chmod 644 /home/node/.openclaw/openclaw.json
+              chmod 600 /home/node/.openclaw/openclaw.json
+              mkdir -p /home/node/.openclaw/bin
               mkdir -p /home/node/.openclaw/workspace
               mkdir -p /home/node/.openclaw/skills
               mkdir -p /home/node/.openclaw/cron
               mkdir -p /home/node/.openclaw/workspace-alice_myagent
+              mkdir -p /home/node/.openclaw/workspace-alice_myagent/memory
+              mkdir -p /home/node/.openclaw/workspace-alice_myagent/skills
+              touch /home/node/.openclaw/workspace-alice_myagent/.env
+              cat > /home/node/.openclaw/bin/openclaw-vault <<'EOF_VAULT_HELPER'
+              #!/usr/local/bin/node
+              console.error("openclaw-vault helper is managed by openclaw-installer");
+              process.exit(2);
+              EOF_VAULT_HELPER
+              chmod 0755 /home/node/.openclaw/bin/openclaw-vault
               cp /agents/AGENTS.md /home/node/.openclaw/workspace-alice_myagent/AGENTS.md 2>/dev/null || true
               cp /agents/agent.json /home/node/.openclaw/workspace-alice_myagent/agent.json 2>/dev/null || true
               cp /agents/SOUL.md /home/node/.openclaw/workspace-alice_myagent/SOUL.md 2>/dev/null || true
-              find -L /agents-tree -mindepth 1 -type d -name 'workspace-*' -exec sh -c 'base="$(basename "$1")"; dest="/home/node/.openclaw/$base"; mkdir -p "$dest"; cp -r "$1"/* "$dest"/ 2>/dev/null || true' _ {} \;
+              for dir in /agents-tree/workspace-*; do
+                [ -d "$dir" ] || continue
+                base="$(basename "$dir")"
+                dest="/home/node/.openclaw/$base"
+                mkdir -p "$dest"
+                mkdir -p "$dest/memory" "$dest/skills"
+                cp -r "$dir"/. "$dest"/ 2>/dev/null || true
+              done
               cp -r /skills-src/. /home/node/.openclaw/skills/ 2>/dev/null || true
               cp /cron-src/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true
+              cp /exec-approvals-src/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true
+              chown -R 1000:0 /home/node/.openclaw 2>/dev/null || true
+              chmod -R g=u /home/node/.openclaw 2>/dev/null || true
+              chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true
+              chmod 700 /home/node/.openclaw 2>/dev/null || true
+              chmod 600 /home/node/.openclaw/openclaw.json 2>/dev/null || true
+              chmod 0755 /home/node/.openclaw/bin/openclaw-vault 2>/dev/null || true
               echo "Config initialized"
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 200m
           volumeMounts:
             - name: openclaw-home
-              mountPath: /home/node/.openclaw
+              mountPath: /home/node
             - name: config-template
               mountPath: /config
+            - name: openclaw-secrets
+              mountPath: /openclaw-secrets
+              readOnly: true
             - name: agent-config
               mountPath: /agents
             - name: agent-tree-config
               mountPath: /agents-tree
+              readOnly: true
             - name: skills-config
               mountPath: /skills-src
+              readOnly: true
             - name: cron-config
               mountPath: /cron-src
+              readOnly: true
+            - name: exec-approvals-config
+              mountPath: /exec-approvals-src
+              readOnly: true
       containers:
         - name: gateway
           image: ghcr.io/openclaw/openclaw:latest
           imagePullPolicy: IfNotPresent
           command:
-            - node
-            - dist/index.js
-            - gateway
-            - run
-            - --bind
-            - lan
-            - --port
-            - "18789"
+            - sh
+            - -c
+            - |
+              umask 007
+              exec node openclaw.mjs gateway run --bind lan --port 18789
           ports:
             - name: gateway
               containerPort: 18789
@@ -78,12 +129,22 @@ spec:
           env:
             - name: HOME
               value: /home/node
+            - name: TMPDIR
+              value: /home/node/.openclaw/tmp
             - name: NODE_ENV
               value: production
             - name: OPENCLAW_CONFIG_DIR
               value: /home/node/.openclaw
             - name: OPENCLAW_STATE_DIR
               value: /home/node/.openclaw
+            - name: NPM_CONFIG_CACHE
+              value: /home/node/.npm
+            - name: npm_config_cache
+              value: /home/node/.npm
+            - name: XDG_CACHE_HOME
+              value: /home/node/.cache
+            - name: XDG_CONFIG_HOME
+              value: /home/node/.config
             - name: OPENCLAW_GATEWAY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -100,6 +161,48 @@ spec:
                 secretKeyRef:
                   name: openclaw-secrets
                   key: OPENAI_API_KEY
+                  optional: true
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: GEMINI_API_KEY
+                  optional: true
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: OPENROUTER_API_KEY
+                  optional: true
+            - name: MODEL_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: MODEL_ENDPOINT
+                  optional: true
+            - name: MODEL_ENDPOINT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: MODEL_ENDPOINT_API_KEY
+                  optional: true
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: TELEGRAM_BOT_TOKEN
+                  optional: true
+            - name: GOOGLE_CLOUD_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: GOOGLE_CLOUD_PROJECT
+                  optional: true
+            - name: GOOGLE_CLOUD_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: openclaw-secrets
+                  key: GOOGLE_CLOUD_LOCATION
                   optional: true
             - name: SSH_IDENTITY
               valueFrom:
@@ -119,29 +222,69 @@ spec:
                   name: openclaw-secrets
                   key: SSH_KNOWN_HOSTS
                   optional: true
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 250m
+            limits:
+              memory: 4Gi
+              cpu: 1000m
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - require('http').get('http://127.0.0.1:18789/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - require('http').get('http://127.0.0.1:18789/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
           volumeMounts:
             - name: openclaw-home
-              mountPath: /home/node/.openclaw
+              mountPath: /home/node
             - name: tmp-volume
               mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
       volumes:
         - name: openclaw-home
           persistentVolumeClaim:
             claimName: openclaw-home-pvc
+        - name: openclaw-secrets
+          secret:
+            secretName: openclaw-secrets
         - name: config-template
           configMap:
             name: openclaw-config
         - name: agent-config
           configMap:
             name: openclaw-agent
-        - name: agent-tree-config
-          configMap:
-            name: openclaw-agent-tree
         - name: skills-config
           configMap:
             name: openclaw-skills
         - name: cron-config
           configMap:
             name: openclaw-cron
+        - name: exec-approvals-config
+          configMap:
+            name: openclaw-exec-approvals
+            optional: true
+        - name: agent-tree-config
+          configMap:
+            name: openclaw-agent-tree
         - name: tmp-volume
           emptyDir: {}

@@ -16,6 +16,12 @@ data:
           "mode": "token",
           "token": "<generated-gateway-token>"
         },
+        "http": {
+          "endpoints": {
+            "chatCompletions": { "enabled": true },
+            "responses": { "enabled": true }
+          }
+        },
         "controlUi": {
           "allowedOrigins": [
             "http://localhost:18789"
@@ -34,6 +40,7 @@ data:
           {
             "id": "alice_myagent",
             "name": "My Agent",
+            "identity": { "name": "My Agent" },
             "workspace": "~/.openclaw/workspace-alice_myagent",
             "model": { "primary": "anthropic/claude-sonnet-4-6" },
             "subagents": { "allowAgents": ["*"] }
@@ -42,7 +49,10 @@ data:
       },
       "skills": {
         "load": {
-          "extraDirs": ["~/.openclaw/skills"],
+          "extraDirs": [
+            "~/.openclaw/skills",
+            "~/.openclaw/workspace-alice_myagent/skills"
+          ],
           "watch": true,
           "watchDebounceMs": 1000
         }
