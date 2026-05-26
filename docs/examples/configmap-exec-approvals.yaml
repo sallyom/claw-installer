@@ -1,0 +1,10 @@
+# Optional exec approvals copied into /home/node/.openclaw/exec-approvals.json
+# by the init container when present.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-exec-approvals
+  namespace: alice-myagent-openclaw
+  labels:
+    app: openclaw
+data: {}
