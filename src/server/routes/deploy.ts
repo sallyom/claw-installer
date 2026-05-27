@@ -354,6 +354,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.sshUser = trimOptional(config.sshUser);
   config.agentSourceDir = trimOptional(config.agentSourceDir);
   config.containerRunArgs = trimOptional(config.containerRunArgs);
+  config.localFileOwner = trimOptional(config.localFileOwner);
   config.sandboxOpenShellGatewayEndpoint = trimOptional(config.sandboxOpenShellGatewayEndpoint);
   config.podmanSecretMappings = normalizePodmanSecretMappings(config.podmanSecretMappings);
   config.modelFallbacks = normalizeModelFallbacks(config.modelFallbacks);

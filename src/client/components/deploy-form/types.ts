@@ -46,6 +46,7 @@ export interface ServerDefaults {
   image: string;
   runMode?: "desktop" | "hosted";
   allowedDeployModes?: string[];
+  localFileOwner?: string;
   containerRuntime?: string;
   k8sAvailable?: boolean;
   k8sContext?: string;
@@ -86,6 +87,7 @@ export interface DeployFormConfig {
   agentDisplayName: string;
   image: string;
   containerRunArgs: string;
+  localFileOwner: string;
   podmanSecretMappingsText: string;
   vaultSecretsEnabled: boolean;
   vaultAddr: string;

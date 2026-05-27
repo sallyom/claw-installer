@@ -784,6 +784,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
               prefix: "testuser",
               image: "",
               containerRuntime: "podman",
+              localFileOwner: "501:20",
             },
           }),
         };
@@ -807,6 +808,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
       screen.getByPlaceholderText("e.g., --userns=keep-id --security-opt label=disable"),
       { target: { value: "--userns=keep-id -v '/tmp/my data:/data:Z'" } },
     );
+    fireEvent.click(screen.getByRole("button", { name: "Use my UID:GID" }));
     fireEvent.click(screen.getAllByRole("button", { name: /deploy openclaw/i }).at(-1)!);
 
     await waitFor(() => {
@@ -819,6 +821,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
     const deployCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/deploy");
     const body = JSON.parse(String((deployCall?.[1] as RequestInit | undefined)?.body || "{}"));
     expect(body.containerRunArgs).toBe("--userns=keep-id -v '/tmp/my data:/data:Z'");
+    expect(body.localFileOwner).toBe("501:20");
   });
 
   it("fetches models from the OpenAI-compatible endpoint and selects the returned label", async () => {

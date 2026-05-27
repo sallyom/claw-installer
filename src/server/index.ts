@@ -119,6 +119,9 @@ app.get("/api/health", async (_req, res) => {
       prefix: process.env.OPENCLAW_PREFIX || hostedUserPrefix() || userInfo().username,
       image: process.env.OPENCLAW_IMAGE || "",
       hostedUser: currentHostedUser()?.username || "",
+      localFileOwner: typeof process.getuid === "function"
+        ? `${process.getuid()}:${typeof process.getgid === "function" ? process.getgid() : process.getuid()}`
+        : "",
     },
   });
 });
