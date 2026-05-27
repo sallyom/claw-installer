@@ -22,6 +22,9 @@ interface DeviceCommandResult {
 interface PendingDevicePairingRequest {
   requestId?: unknown;
   ts?: unknown;
+  clientId?: unknown;
+  clientMode?: unknown;
+  isRepair?: unknown;
 }
 
 interface DevicePairingList {
@@ -65,7 +68,11 @@ function parseDevicePairingList(stdout: string): DevicePairingList {
 }
 
 export function selectLatestPendingDeviceRequestId(list: DevicePairingList): string | null {
-  const pending = Array.isArray(list.pending) ? list.pending : [];
+  const pending = Array.isArray(list.pending)
+    ? list.pending.filter((request) =>
+      request.clientId !== "cli" && request.clientMode !== "cli" && request.isRepair !== true
+    )
+    : [];
   const selected = pending.reduce<PendingDevicePairingRequest | null>((latest, current) => {
     if (!latest) {
       return current;

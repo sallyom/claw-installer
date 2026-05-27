@@ -12,7 +12,7 @@ OpenClaw runs on any Kubernetes cluster, but OpenShift adds security layers that
 
 ### What OpenShift gives you for free
 
-**OAuth integration** - The deployment includes an [oauth-proxy](https://github.com/openshift/oauth-proxy) sidecar that authenticates users against OpenShift's built-in OAuth server. No external identity provider to configure. If you can `oc login`, you can access your agent. No cluster-admin is required - the installer uses SA-based OAuth with the `user:info` scope.
+**OAuth integration** - The deployment includes an [oauth-proxy](https://github.com/openshift/oauth-proxy) sidecar that authenticates users against OpenShift's built-in OAuth server. No external identity provider to configure. If you can `oc login`, you can access your agent. The installer uses SA-based OAuth with the `user:info` scope. Non-cluster-admin users can deploy when OpenShift project self-provisioning is enabled for them.
 
 **Security Context Constraints (SCCs)** - OpenShift's default `restricted-v2` SCC enforces a strict posture on every container:
 
@@ -69,7 +69,7 @@ A few things worth noting:
 
 ## Prerequisites
 
-- An OpenShift cluster where you can create a namespace (no cluster-admin required)
+- An OpenShift cluster where you can create projects through OpenShift self-provisioning, or an existing project where you have admin/edit
 - `oc` CLI authenticated (`oc login`) on the machine running the installer
 - A credential source for at least one model provider: API key, GCP service account JSON, or Codex CLI OAuth
 

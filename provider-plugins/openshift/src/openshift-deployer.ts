@@ -7,7 +7,7 @@ import type {
   LogCallback,
 } from "../../../src/server/deployers/types.js";
 import { namespaceName } from "../../../src/server/deployers/k8s-helpers.js";
-import { coreApi, appsApi, k8sApiHttpCode } from "../../../src/server/services/k8s.js";
+import { coreApi, appsApi, k8sApiHttpCode, loadKubeConfig } from "../../../src/server/services/k8s.js";
 import { oauthServiceAccount, oauthConfigSecret, oauthProxyContainer } from "./oauth-proxy.js";
 import { applyRoute, getRouteUrl, deleteRoute } from "./route.js";
 
@@ -41,6 +41,53 @@ async function applyResource<T>(
     await createFn();
   }
   log(`${name} applied`);
+}
+
+async function createProjectRequest(ns: string, log: LogCallback): Promise<void> {
+  const customApi = loadKubeConfig().makeApiClient(k8s.CustomObjectsApi);
+  log(`Creating OpenShift project ${ns}...`);
+  try {
+    await customApi.createClusterCustomObject({
+      group: "project.openshift.io",
+      version: "v1",
+      plural: "projectrequests",
+      body: {
+        apiVersion: "project.openshift.io/v1",
+        kind: "ProjectRequest",
+        metadata: { name: ns },
+        displayName: ns,
+      },
+    });
+    log(`Project ${ns} created`);
+  } catch (err: unknown) {
+    if (k8sApiHttpCode(err) === 409) {
+      log(`Project ${ns} already exists`);
+      return;
+    }
+    throw err;
+  }
+}
+
+async function labelProjectIfAllowed(core: k8s.CoreV1Api, ns: string, log: LogCallback): Promise<void> {
+  try {
+    await core.patchNamespace(
+      {
+        name: ns,
+        body: {
+          metadata: {
+            labels: { "app.kubernetes.io/managed-by": "openclaw-installer" },
+          },
+        },
+      },
+      k8s.setHeaderOptions("Content-Type", k8s.PatchStrategy.MergePatch),
+    );
+  } catch (err: unknown) {
+    if (k8sApiHttpCode(err) === 403) {
+      log(`Project ${ns} created, but namespace labeling is forbidden; continuing without discovery label`);
+      return;
+    }
+    throw err;
+  }
 }
 
 // ── OpenShift Deployer ─────────────────────────────────────────────
@@ -79,22 +126,27 @@ export class OpenShiftDeployer implements Deployer {
     } catch (e: unknown) {
       const status = k8sApiHttpCode(e);
       if (status === 403) {
-        log(`Cannot verify project "${ns}" at cluster scope (forbidden) — using it as the deploy target. Ensure it already exists and you have admin/edit there.`);
-      } else if (status === 404) {
-        log(`Creating namespace ${ns}...`);
+        log(`Cannot verify project "${ns}" at cluster scope (forbidden) — attempting OpenShift project self-provisioning.`);
         try {
-          await core.createNamespace({
-            body: {
-              apiVersion: "v1",
-              kind: "Namespace",
-              metadata: { name: ns, labels: { "app.kubernetes.io/managed-by": "openclaw-installer" } },
-            },
-          });
-          log(`Namespace ${ns} created`);
+          await createProjectRequest(ns, log);
+          await labelProjectIfAllowed(core, ns, log);
         } catch (createErr: unknown) {
           if (k8sApiHttpCode(createErr) === 403) {
             throw new Error(
-              `Cannot create namespace "${ns}": forbidden. Create the project first (for example: oc new-project ${ns}) and set it in the deploy form, or ask a cluster admin.`,
+              `Cannot create or verify OpenShift project "${ns}": forbidden. Ask a cluster admin to grant self-provisioner to your OpenShift group, or create the project first and grant you admin/edit there.`,
+              { cause: createErr },
+            );
+          }
+          throw createErr;
+        }
+      } else if (status === 404) {
+        try {
+          await createProjectRequest(ns, log);
+          await labelProjectIfAllowed(core, ns, log);
+        } catch (createErr: unknown) {
+          if (k8sApiHttpCode(createErr) === 403) {
+            throw new Error(
+              `Cannot create OpenShift project "${ns}": forbidden. Ask a cluster admin to grant self-provisioner to your OpenShift group, or create the project first and set it in the deploy form.`,
               { cause: createErr },
             );
           }
