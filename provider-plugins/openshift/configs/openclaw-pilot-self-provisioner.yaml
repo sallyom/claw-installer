@@ -1,0 +1,27 @@
+# OpenClaw pilot project self-provisioning.
+#
+# Apply once as cluster-admin when members of OPENCLAW_GROUP should be able to
+# create their own OpenShift projects for OpenClaw deployments.
+#
+# Replace:
+#   OPENCLAW_GROUP  OpenShift group, for example openclaw-pilot-users
+#
+# Apply:
+#   sed -e 's/OPENCLAW_GROUP/openclaw-pilot-users/g' \
+#       provider-plugins/openshift/configs/openclaw-pilot-self-provisioner.yaml | oc apply -f -
+#
+# This uses OpenShift's built-in self-provisioner ClusterRole. It grants project
+# creation through projectrequests.project.openshift.io, not broad permissions
+# across every existing namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openclaw-pilot-self-provisioners
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: self-provisioner
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: OPENCLAW_GROUP

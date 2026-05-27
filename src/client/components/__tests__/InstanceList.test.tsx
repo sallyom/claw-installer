@@ -450,6 +450,55 @@ describe("InstanceList", () => {
     expect(approveCalls).toBe(1);
   });
 
+  it("retries auto-approval after a no-pending polling window", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+
+    let approveCalls = 0;
+    globalThis.fetch = vi.fn((url: string, opts?: RequestInit) => {
+      if (url === "/api/health") {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ k8sAvailable: false }) });
+      }
+      if ((url === "/api/instances" || url === "/api/instances?includeK8s=1") && !opts?.method) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([runningInstance]) });
+      }
+      if (url === "/api/instances/inst-1/token") {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ token: "my-token" }) });
+      }
+      if (url === "/api/instances/inst-1/approve-device") {
+        approveCalls += 1;
+        if (approveCalls <= 15) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ status: "noop", error: "No pending device pairing requests" }),
+          });
+        }
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ status: "approved" }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    }) as unknown as typeof globalThis.fetch;
+
+    render(<InstanceList active />);
+    await waitFor(() => {
+      expect(screen.getByText("http://localhost:18789")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("http://localhost:18789"));
+    await vi.advanceTimersByTimeAsync(15000);
+    await waitFor(() => {
+      expect(screen.getByText(/opened the gateway, but no pairing request appeared yet/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("http://localhost:18789"));
+    await waitFor(() => {
+      expect(screen.getByText(/opened the gateway and approved the pending pairing request/i)).toBeInTheDocument();
+    });
+    expect(openSpy).toHaveBeenCalledTimes(2);
+    expect(approveCalls).toBe(16);
+  });
+
   it("does not auto-approve again after the installer UI reloads for the same running instance", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const openSpy = vi.fn();

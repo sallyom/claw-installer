@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import jsYaml from "js-yaml";
-import { coreApi } from "../../../src/server/services/k8s.js";
+import { coreApi, k8sApiHttpCode } from "../../../src/server/services/k8s.js";
 
 // Resolve templates relative to this file's compiled location.
 // At runtime this file is at provider-plugins/openshift/src/oauth-proxy.ts,
@@ -49,7 +49,14 @@ export async function oauthConfigSecret(ns: string): Promise<k8s.V1Secret> {
       body: tokenRequest,
     });
     clientSecret = result.status?.token || "";
-  } catch {
+  } catch (err: unknown) {
+    if (k8sApiHttpCode(err) === 403) {
+      throw new Error(
+        `Cannot create OAuth token for ServiceAccount "openclaw-oauth-proxy" in namespace "${ns}": `
+        + "forbidden. Grant create on serviceaccounts/token in the target namespace before deploying.",
+        { cause: err },
+      );
+    }
     // Fallback: use a generated token (requires OAuthClient cluster resource)
     clientSecret = randomBytes(32).toString("base64");
   }

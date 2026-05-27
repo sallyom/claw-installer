@@ -50,6 +50,15 @@ describe("selectLatestPendingDeviceRequestId", () => {
     })).toBe("req-new");
   });
 
+  it("ignores CLI repair requests when selecting a browser pairing request", () => {
+    expect(selectLatestPendingDeviceRequestId({
+      pending: [
+        { requestId: "cli-new", ts: 3000, clientId: "cli", clientMode: "cli", isRepair: true },
+        { requestId: "browser-old", ts: 1000, clientId: "openclaw-control-ui", clientMode: "webchat" },
+      ],
+    })).toBe("browser-old");
+  });
+
   it("returns null when there is no pending request id", () => {
     expect(selectLatestPendingDeviceRequestId({ pending: [] })).toBeNull();
     expect(selectLatestPendingDeviceRequestId({ pending: [{ ts: 1000 }] })).toBeNull();

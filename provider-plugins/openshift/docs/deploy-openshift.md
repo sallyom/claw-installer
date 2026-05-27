@@ -1,14 +1,16 @@
 # Deploying OpenClaw on OpenShift
 
-This plugin extends openclaw-installer with OpenShift support. When installed, it automatically detects OpenShift clusters and adds an OAuth proxy sidecar so your instance is protected by OpenShift SSO -- no cluster-admin required.
+This plugin extends openclaw-installer with OpenShift support. When installed, it automatically detects OpenShift clusters and adds an OAuth proxy sidecar so your instance is protected by OpenShift SSO. Non-cluster-admin users can deploy when OpenShift project self-provisioning is enabled for them.
 
 For plain Kubernetes deployments (without OAuth proxy, Route, and ServiceAccount), the base openclaw-installer handles everything.
 
 ## Prerequisites
 
-- An OpenShift cluster: either permission to create namespaces/projects, or a pre-created project where you have admin (or equivalent). If you only have namespace-scoped access, set the Project / Namespace field in the deploy form to that existing project.
+- An OpenShift cluster where you can create projects through OpenShift self-provisioning, or an existing project where you have admin/edit. If you only have namespace-scoped access, set the Project / Namespace field in the deploy form to that existing project.
 - `oc` CLI authenticated (`oc login`) on the machine running the installer
 - A credential source for at least one model provider: API key, GCP service account JSON, or Codex CLI OAuth
+
+For delegated user setup, see [non-cluster-admin-rbac.md](non-cluster-admin-rbac.md).
 
 **Storage:** OpenClaw uses SQLite, which requires POSIX file locking. Block storage classes (gp3-csi, managed-csi, thin-csi) work. Avoid NFS.
 
@@ -26,7 +28,7 @@ npm run dev
 
 Open `http://localhost:3000`. If the cluster is OpenShift, the plugin auto-detects it and deploys with OAuth proxy support.
 
-If you only have access to an existing project, enter that exact project name in the Project / Namespace field. The installer skips cluster-level namespace creation when the API returns `Forbidden` on namespace checks.
+If the target project does not exist, the installer creates it through the OpenShift ProjectRequest API. If you only have access to an existing project, enter that exact project name in the Project / Namespace field.
 
 For a deeper architectural walkthrough, see [installing-openclaw-on-openshift.md](installing-openclaw-on-openshift.md).
 

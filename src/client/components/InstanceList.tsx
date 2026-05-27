@@ -339,6 +339,10 @@ export default function InstanceList({ active }: { active: boolean }) {
     clearPairingMessage(id);
     const result = await approveDevice(id);
     if (result.kind === "approved") {
+      setAutoApproveAttempted((prev) => ({
+        ...prev,
+        [id]: "__manual__",
+      }));
       setPairingMessage(id, {
         tone: "success",
         text: "Approved the latest pending pairing request.",
@@ -426,10 +430,6 @@ export default function InstanceList({ active }: { active: boolean }) {
     }
 
     setActing(inst.id);
-    setAutoApproveAttempted((prev) => ({
-      ...prev,
-      [inst.id]: inst.startedAt || "__attempted__",
-    }));
     setPairingMessage(inst.id, {
       tone: "info",
       text: "Opened the gateway and waiting for the browser pairing request...",
@@ -438,6 +438,10 @@ export default function InstanceList({ active }: { active: boolean }) {
       for (let attempt = 0; attempt < AUTO_APPROVE_ATTEMPTS; attempt += 1) {
         const result = await approveDevice(inst.id);
         if (result.kind === "approved") {
+          setAutoApproveAttempted((prev) => ({
+            ...prev,
+            [inst.id]: inst.startedAt || "__attempted__",
+          }));
           setPairingMessage(inst.id, {
             tone: "success",
             text: "Opened the gateway and approved the pending pairing request.",
