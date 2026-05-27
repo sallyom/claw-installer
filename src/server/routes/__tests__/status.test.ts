@@ -43,6 +43,7 @@ describe("parseSavedLocalInstanceConfig", () => {
         { secretName: "openrouter_api_key", targetEnv: "OPENROUTER_API_KEY" },
       ],
       pluginInstallSpecs: ["git:github.com/sallyom/claw-vault", "/app/extensions/vault"],
+      localFileOwner: "501:20",
     });
 
     const savedVars = parseEnvFile(buildSavedInstanceEnvContent(config, "openclaw-demo"));
@@ -70,6 +71,7 @@ describe("parseSavedLocalInstanceConfig", () => {
       { secretName: "openrouter_api_key", targetEnv: "OPENROUTER_API_KEY" },
     ]);
     expect(parsed.pluginInstallSpecs).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
+    expect(parsed.localFileOwner).toBe("501:20");
   });
 
   it("restores saved Codex OAuth fields", () => {

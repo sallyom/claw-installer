@@ -92,6 +92,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     image: savedVars.OPENCLAW_IMAGE || undefined,
     port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
     containerRunArgs: savedVars.OPENCLAW_CONTAINER_RUN_ARGS || undefined,
+    localFileOwner: savedVars.OPENCLAW_LOCAL_FILE_OWNER || undefined,
     podmanSecretMappings: decodeSavedJson<PodmanSecretMapping[]>(savedVars.PODMAN_SECRET_MAPPINGS_B64),
     pluginInstallSpecs: decodeSavedJson<string[]>(savedVars.OPENCLAW_PLUGIN_INSTALL_SPECS_B64),
     inferenceProvider: savedVars.INFERENCE_PROVIDER as InferenceProvider | undefined,

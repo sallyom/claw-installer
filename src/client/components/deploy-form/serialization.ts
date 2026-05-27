@@ -27,6 +27,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     agentDisplayName: "",
     image: "",
     containerRunArgs: "",
+    localFileOwner: "",
     podmanSecretMappingsText: DEFAULT_PROVIDER_PODMAN_SECRET_MAPPINGS_TEXT,
     vaultSecretsEnabled: false,
     vaultAddr: "http://vault.vault.svc:8200",
@@ -362,6 +363,7 @@ export function applySavedVarsToConfig(
       agentDisplayName: getStringVar(vars, "OPENCLAW_DISPLAY_NAME", "agentDisplayName") || prev.agentDisplayName,
       image: getStringVar(vars, "OPENCLAW_IMAGE", "image") || prev.image,
       containerRunArgs: getStringVar(vars, "OPENCLAW_CONTAINER_RUN_ARGS", "containerRunArgs") || prev.containerRunArgs,
+      localFileOwner: getStringVar(vars, "OPENCLAW_LOCAL_FILE_OWNER", "localFileOwner") || prev.localFileOwner,
       podmanSecretMappingsText: savedPodmanSecretMappingsText || prev.podmanSecretMappingsText,
       vaultSecretsEnabled:
         vars.VAULT_SECRETS_ENABLED === "true"
@@ -643,6 +645,7 @@ export function buildDeployRequestBody(params: {
     agentDisplayName: config.agentDisplayName || config.agentName,
     image: trimToUndefined(config.image),
     containerRunArgs: mode === "local" ? trimToUndefined(config.containerRunArgs) : undefined,
+    localFileOwner: mode === "local" ? trimToUndefined(config.localFileOwner) : undefined,
     podmanSecretMappings: mode === "local" && podmanSecretMappings.length > 0 ? podmanSecretMappings : undefined,
     vaultSecretsEnabled: config.vaultSecretsEnabled || undefined,
     vaultAddr: config.vaultSecretsEnabled ? trimToUndefined(config.vaultAddr) : undefined,
@@ -837,6 +840,7 @@ export function buildEnvFileContent(params: {
     `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName}`,
     `OPENCLAW_IMAGE=${config.image}`,
     `OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`,
+    `OPENCLAW_LOCAL_FILE_OWNER=${config.localFileOwner}`,
     `PODMAN_SECRET_MAPPINGS_B64=${encodeBase64(JSON.stringify(parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings))}`,
     `VAULT_SECRETS_ENABLED=${config.vaultSecretsEnabled}`,
     `VAULT_ADDR=${config.vaultAddr}`,

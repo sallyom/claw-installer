@@ -44,6 +44,7 @@ export interface ServerDefaults {
   modelEndpoint: string;
   prefix: string;
   image: string;
+  localFileOwner?: string;
   containerRuntime?: string;
   k8sAvailable?: boolean;
   k8sContext?: string;
@@ -84,6 +85,7 @@ export interface DeployFormConfig {
   agentDisplayName: string;
   image: string;
   containerRunArgs: string;
+  localFileOwner: string;
   podmanSecretMappingsText: string;
   vaultSecretsEnabled: boolean;
   vaultAddr: string;

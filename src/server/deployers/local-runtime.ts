@@ -119,12 +119,34 @@ export function bindMountSpec(hostPath: string, containerPath: string, options?:
   return `${hostPath}:${containerPath}${suffix}`;
 }
 
-export function runtimeOwnershipFixupCommand(): string {
+export function normalizeLocalFileOwner(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (!/^[0-9]+(?::[0-9]+)?$/.test(trimmed)) {
+    throw new Error("Invalid local file owner: expected UID or UID:GID");
+  }
+  return trimmed;
+}
+
+export function localGatewayUserArgs(value?: string): string[] {
+  const owner = normalizeLocalFileOwner(value);
+  return owner ? ["--user", owner] : [];
+}
+
+export function localStateMaintenanceUserArgs(value?: string): string[] {
+  normalizeLocalFileOwner(value);
+  return ["--user", "0"];
+}
+
+export function runtimeOwnershipFixupCommand(localFileOwner?: string): string {
+  const owner = normalizeLocalFileOwner(localFileOwner) || "node:node";
   // Fix for #71: strip world bits after chown so other users/processes on the
   // host cannot read credentials (gateway tokens, API key refs) from openclaw.json
   // or traverse the state directory.
   return [
-    "chown -R node:node /home/node/.openclaw 2>/dev/null || true",
+    `chown -R ${owner} /home/node/.openclaw 2>/dev/null || true`,
     "chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true",
     "chmod 700 /home/node/.openclaw 2>/dev/null || true",
     "chmod 600 /home/node/.openclaw/openclaw.json 2>/dev/null || true",

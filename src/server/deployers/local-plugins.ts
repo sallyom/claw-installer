@@ -3,7 +3,12 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { ContainerRuntime } from "../services/container.js";
 import type { DeployConfig, LogCallback } from "./types.js";
-import { bindMountSpec, runCommand, runtimeOwnershipFixupCommand } from "./local-runtime.js";
+import {
+  bindMountSpec,
+  localStateMaintenanceUserArgs,
+  runCommand,
+  runtimeOwnershipFixupCommand,
+} from "./local-runtime.js";
 
 const OPENCLAW_LOCAL_HOME = "/home/node";
 const OPENCLAW_LOCAL_STATE_DIR = `${OPENCLAW_LOCAL_HOME}/.openclaw`;
@@ -30,11 +35,12 @@ export async function installLocalPlugins(params: {
     "set -eu",
     `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR} ${OPENCLAW_LOCAL_TMP_DIR} ${OPENCLAW_LOCAL_HOME}/.npm ${OPENCLAW_LOCAL_HOME}/.cache ${OPENCLAW_LOCAL_HOME}/.config`,
     ...plan.specs.map(nonFatalPluginInstallCommand),
-    runtimeOwnershipFixupCommand(),
+    runtimeOwnershipFixupCommand(params.config.localFileOwner),
   ].join("\n");
 
   const result = await runCommand(params.runtime, [
     "run", "--rm",
+    ...localStateMaintenanceUserArgs(params.config.localFileOwner),
     ...params.stateMountArgs,
     ...plan.mountArgs,
     "-e", `HOME=${OPENCLAW_LOCAL_HOME}`,

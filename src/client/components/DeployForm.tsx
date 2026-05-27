@@ -1230,6 +1230,33 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               </div>
             </div>
 
+            <div className="form-group">
+              <label>Local file owner <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>(optional)</span></label>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder={defaults?.localFileOwner || "e.g., 501:20"}
+                  spellCheck={false}
+                  value={config.localFileOwner}
+                  onChange={(e) => update("localFileOwner", e.target.value)}
+                />
+                {defaults?.localFileOwner && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => update("localFileOwner", defaults.localFileOwner || "")}
+                  >
+                    Use my UID:GID
+                  </button>
+                )}
+              </div>
+              <div className="hint">
+                Makes OpenClaw run as the same host user so both you and OpenClaw can edit bind-mounted files.
+                Use this for mounted repos or workspaces; leave blank to use the image default.
+              </div>
+            </div>
+
             {(defaults?.containerRuntime || "podman") === "podman" && (
               <div className="form-group">
                 <label>Podman secret mappings <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>(optional)</span></label>

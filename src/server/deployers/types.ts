@@ -138,6 +138,7 @@ export interface DeployConfig {
   // Local mode
   containerRuntime?: "podman" | "docker";
   containerRunArgs?: string;
+  localFileOwner?: string;
   podmanSecretMappings?: PodmanSecretMapping[];
   image?: string;
   port?: number;
