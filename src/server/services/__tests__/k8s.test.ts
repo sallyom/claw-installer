@@ -1,13 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockGetCode, mockCreateSelfSubjectRulesReview } = vi.hoisted(() => ({
+const { mockGetCode, mockCreateSelfSubjectRulesReview, mockLoadFromOptions } = vi.hoisted(() => ({
   mockGetCode: vi.fn(),
   mockCreateSelfSubjectRulesReview: vi.fn(),
+  mockLoadFromOptions: vi.fn(),
 }));
 
 vi.mock("@kubernetes/client-node", () => {
   class KubeConfig {
+    clusters: unknown[] = [{ name: "test-cluster", server: "https://api.example.test", skipTLSVerify: false }];
+    users: unknown[] = [];
+    contexts: unknown[] = [];
+    currentContext = "default";
+
     loadFromDefault(): void {}
+    loadFromOptions(options: unknown): void {
+      mockLoadFromOptions(options);
+      this.clusters = (options as { clusters: [] }).clusters;
+      this.users = (options as { users: [] }).users;
+      this.contexts = (options as { contexts: [] }).contexts;
+      this.currentContext = (options as { currentContext: string }).currentContext;
+    }
+    getCurrentCluster(): unknown {
+      return this.clusters[0];
+    }
+    getCurrentContext(): string {
+      return this.currentContext;
+    }
+    getContextObject(name: string): unknown {
+      return this.contexts.find((ctx) => (ctx as { name: string }).name === name) || null;
+    }
 
     makeApiClient(client: unknown): unknown {
       if (client === VersionApi) {
@@ -63,6 +85,36 @@ describe("isClusterReachable", () => {
 
     const mod = await import("../k8s.js");
     await expect(mod.isClusterReachable()).resolves.toBe(false);
+  });
+});
+
+describe("loadKubeConfig", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const mod = await import("../k8s.js");
+    mod.resetKubeConfig();
+  });
+
+  it("uses the hosted request token when request context provides one", async () => {
+    const { runWithRequestContext } = await import("../../request-context.js");
+    const mod = await import("../k8s.js");
+
+    runWithRequestContext({
+      hostedUser: {
+        username: "sallyom",
+        token: "user-token",
+        groups: ["openclaw-pilot-users"],
+      },
+    }, () => {
+      mod.loadKubeConfig();
+    });
+
+    expect(mockLoadFromOptions).toHaveBeenCalledWith({
+      clusters: [{ name: "test-cluster", server: "https://api.example.test", skipTLSVerify: false }],
+      users: [{ name: "hosted:sallyom", token: "user-token" }],
+      contexts: [{ name: "hosted-user", cluster: "test-cluster", user: "hosted:sallyom" }],
+      currentContext: "hosted-user",
+    });
   });
 });
 

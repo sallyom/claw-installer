@@ -59,7 +59,8 @@ export function defaultImage(config: DeployConfig): string {
 export function tryParseProjectId(saJson: string): string {
   try {
     const parsed = JSON.parse(saJson);
-    return typeof parsed.project_id === "string" ? parsed.project_id : "";
+    if (typeof parsed.project_id === "string") return parsed.project_id;
+    return typeof parsed.quota_project_id === "string" ? parsed.quota_project_id : "";
   } catch {
     return "";
   }

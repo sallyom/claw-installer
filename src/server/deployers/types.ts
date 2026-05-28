@@ -41,6 +41,7 @@ export interface DeployConfig {
   vaultKvVersion?: string;
   vaultTokenSecretName?: string;
   vaultTokenSecretKey?: string;
+  providerSecretName?: string;
   pluginInstallSpecs?: string[];
   secretsProvidersJson?: string;
   anthropicApiKeyRef?: DeploySecretRef;

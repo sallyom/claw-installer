@@ -19,6 +19,7 @@ interface ProviderSectionProps {
   gcpDefaults: GcpDefaults | null;
   inferenceProvider: InferenceProvider;
   initialAdditionalProviders?: InferenceProvider[];
+  isHostedMode: boolean;
   loadingModelEndpointOptions: boolean;
   mode: string;
   modelEndpointOptions: ModelEndpointOption[];
@@ -118,6 +119,7 @@ export function ProviderSection({
   gcpDefaults,
   inferenceProvider,
   initialAdditionalProviders,
+  isHostedMode,
   loadingModelEndpointOptions,
   mode,
   modelEndpointOptions,
@@ -143,6 +145,7 @@ export function ProviderSection({
 }: ProviderSectionProps) {
   const [additionalProviders, setAdditionalProviders] = useState<AdditionalProvider[]>([]);
   const nextId = useRef(0);
+  const hostedClusterMode = isHostedMode && mode !== "local";
 
   // Fix for #122: restore additional provider cards from a loaded config.
   // When initialAdditionalProviders changes (e.g. after loading a saved
@@ -884,7 +887,7 @@ export function ProviderSection({
                   value={config.googleCloudProject}
                   onChange={(e) => update("googleCloudProject", e.target.value)}
                 />
-                {gcpDefaults?.sources.projectId && config.googleCloudProject === gcpDefaults.projectId ? (
+                {gcpDefaults?.sources?.projectId && config.googleCloudProject === gcpDefaults.projectId ? (
                   <div className="hint">from {gcpDefaults.sources.projectId}</div>
                 ) : !config.googleCloudProject && (
                   <div className="hint">Auto-extracted from credentials JSON if not set</div>
@@ -898,7 +901,7 @@ export function ProviderSection({
                   value={config.googleCloudLocation}
                   onChange={(e) => update("googleCloudLocation", e.target.value)}
                 />
-                {gcpDefaults?.sources.location && config.googleCloudLocation === gcpDefaults.location ? (
+                {gcpDefaults?.sources?.location && config.googleCloudLocation === gcpDefaults.location ? (
                   <div className="hint">from {gcpDefaults.sources.location}</div>
                 ) : !config.googleCloudLocation && (
                   <div className="hint">
@@ -910,88 +913,98 @@ export function ProviderSection({
 
             <div className="form-group">
               <label>Google Cloud Credentials (JSON)</label>
-              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                {config.gcpServiceAccountJson ? (
-                  <div
-                    style={{
-                      flex: 1,
-                      padding: "0.5rem 0.75rem",
-                      background: "var(--bg-primary)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "6px",
-                      fontFamily: "monospace",
-                      fontSize: "0.85rem",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    {(() => {
-                      try {
-                        const parsed = JSON.parse(config.gcpServiceAccountJson);
-                        return `${parsed.client_email || "service account"} (${parsed.project_id || "unknown project"})`;
-                      } catch {
-                        return "credentials loaded";
-                      }
-                    })()}
-                  </div>
-                ) : (
-                  <input
-                    type="text"
-                    placeholder={
-                      gcpDefaults?.hasServiceAccountJson
-                        ? `Using credentials from ${gcpDefaults.sources.credentials}`
-                        : "/path/to/service-account.json"
-                    }
-                    value={config.gcpServiceAccountPath}
-                    onChange={(e) => update("gcpServiceAccountPath", e.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                )}
-                <label
-                  className="btn btn-ghost"
-                  style={{ cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  {config.gcpServiceAccountJson ? "Change" : "Browse"}
-                  <input
-                    type="file"
-                    accept=".json"
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        const text = reader.result as string;
-                        update("gcpServiceAccountJson", text);
-                        update("gcpServiceAccountPath", "");
-                        if (!config.googleCloudProject) {
+              {hostedClusterMode ? (
+                <div className="hint">
+                  Add <code>GOOGLE_APPLICATION_CREDENTIALS_JSON</code> to the OpenShift provider Secret in the
+                  target namespace, then set the Secret name in External Secret Providers.
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    {config.gcpServiceAccountJson ? (
+                      <div
+                        style={{
+                          flex: 1,
+                          padding: "0.5rem 0.75rem",
+                          background: "var(--bg-primary)",
+                          border: "1px solid var(--border)",
+                          borderRadius: "6px",
+                          fontFamily: "monospace",
+                          fontSize: "0.85rem",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {(() => {
                           try {
-                            const parsed = JSON.parse(text);
-                            if (parsed.project_id) {
-                              update("googleCloudProject", parsed.project_id);
-                            }
+                            const parsed = JSON.parse(config.gcpServiceAccountJson);
+                            return `${parsed.client_email || "service account"} (${parsed.project_id || parsed.quota_project_id || "unknown project"})`;
                           } catch {
-                            // Ignore invalid JSON uploads here; validation happens later.
+                            return "credentials loaded";
                           }
+                        })()}
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder={
+                          gcpDefaults?.hasServiceAccountJson
+                            ? `Using credentials from ${gcpDefaults.sources?.credentials || "environment"}`
+                            : "/path/to/service-account.json"
                         }
-                      };
-                      reader.readAsText(file);
-                    }}
-                  />
-                </label>
-                {config.gcpServiceAccountJson && (
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => update("gcpServiceAccountJson", "")}
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              <div className="hint">
-                Type a path to a credentials JSON file, or use Browse to upload one.
-                {gcpDefaults?.hasServiceAccountJson && !config.gcpServiceAccountJson && !config.gcpServiceAccountPath
-                  && " Leave blank to use credentials detected from environment."}
-              </div>
+                        value={config.gcpServiceAccountPath}
+                        onChange={(e) => update("gcpServiceAccountPath", e.target.value)}
+                        style={{ flex: 1 }}
+                      />
+                    )}
+                    <label
+                      className="btn btn-ghost"
+                      style={{ cursor: "pointer", whiteSpace: "nowrap" }}
+                    >
+                      {config.gcpServiceAccountJson ? "Change" : "Browse"}
+                      <input
+                        type="file"
+                        accept=".json"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const text = reader.result as string;
+                            update("gcpServiceAccountJson", text);
+                            update("gcpServiceAccountPath", "");
+                            if (!config.googleCloudProject) {
+                              try {
+                                const parsed = JSON.parse(text);
+                                const projectId = parsed.project_id || parsed.quota_project_id;
+                                if (projectId) {
+                                  update("googleCloudProject", projectId);
+                                }
+                              } catch {
+                                // Ignore invalid JSON uploads here; validation happens later.
+                              }
+                            }
+                          };
+                          reader.readAsText(file);
+                        }}
+                      />
+                    </label>
+                    {config.gcpServiceAccountJson && (
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => update("gcpServiceAccountJson", "")}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="hint">
+                    Type a path to a credentials JSON file, or use Browse to upload one.
+                    {gcpDefaults?.hasServiceAccountJson && !config.gcpServiceAccountJson && !config.gcpServiceAccountPath
+                      && " Leave blank to use credentials detected from environment."}
+                  </div>
+                </>
+              )}
             </div>
 
             {(() => {
@@ -1151,6 +1164,7 @@ export function ProviderSection({
                 {!config.litellmProxy && (
                   <span style={{ color: "var(--warning)" }}>
                     {" "}Disabled: credentials will be passed directly to the agent container.
+                    For Claude on Vertex, the installer will also install the Anthropic Vertex provider plugin.
                   </span>
                 )}
               </div>

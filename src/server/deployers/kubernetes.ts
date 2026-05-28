@@ -17,6 +17,7 @@ import type {
   LogCallback,
 } from "./types.js";
 import { namespaceName, deriveModel, detectUnavailableProvider, generateToken, usesDefaultEnvSecretRef } from "./k8s-helpers.js";
+import { applyInstallerConfigMap } from "./k8s-instance-config.js";
 import { loadWorkspaceFiles } from "./k8s-agent.js";
 import { loadAgentSourceBundle, loadAgentSourceCronJobs, loadAgentSourceExecApprovals, loadAgentSourceWorkspaceTree } from "./agent-source.js";
 import {
@@ -515,6 +516,12 @@ export class KubernetesDeployer implements Deployer {
       log(`Deploy config saved to ${configDir}/deploy-config.json`);
     } catch {
       log("Could not save deploy config to host");
+    }
+
+    try {
+      await applyInstallerConfigMap(ns, config, log);
+    } catch {
+      log("Could not save deploy config to cluster metadata");
     }
 
     return {

@@ -44,6 +44,8 @@ export interface ServerDefaults {
   modelEndpoint: string;
   prefix: string;
   image: string;
+  runMode?: "desktop" | "hosted";
+  allowedDeployModes?: string[];
   containerRuntime?: string;
   k8sAvailable?: boolean;
   k8sContext?: string;
@@ -92,6 +94,7 @@ export interface DeployFormConfig {
   vaultKvVersion: string;
   vaultTokenSecretName: string;
   vaultTokenSecretKey: string;
+  providerSecretName: string;
   pluginInstallSpecsText: string;
   secretsProvidersJson: string;
   anthropicApiKeyRefSource: SecretRefSource;

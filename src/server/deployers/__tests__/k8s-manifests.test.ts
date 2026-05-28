@@ -30,6 +30,10 @@ function gatewayEnv(deployment: k8s.V1Deployment, name: string): k8s.V1EnvVar | 
   return (container?.env ?? []).find((e) => e.name === name);
 }
 
+function gatewayContainer(deployment: k8s.V1Deployment): k8s.V1Container | undefined {
+  return deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+}
+
 describe("k8s state sync manifests", () => {
   const config: DeployConfig = makeConfig();
 
@@ -190,6 +194,49 @@ describe("k8s state sync manifests", () => {
         { name: "tmp-volume", mountPath: "/tmp" },
       ]),
     );
+  });
+
+  it("installs the Anthropic Vertex provider plugin for direct Claude Vertex mode", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        inferenceProvider: "vertex-anthropic",
+        vertexEnabled: true,
+        vertexProvider: "anthropic",
+        litellmProxy: false,
+        googleCloudProject: "test-project",
+        googleCloudLocation: "us-east5",
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const containers = deployment.spec?.template.spec?.containers ?? [];
+
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/anthropic-vertex-provider' --force");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list | grep -q 'anthropic-vertex'");
+    expect(containers.some((container) => container.name === "litellm")).toBe(false);
+  });
+
+  it("does not install the Anthropic Vertex provider plugin when LiteLLM handles Claude Vertex", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        inferenceProvider: "vertex-anthropic",
+        vertexEnabled: true,
+        vertexProvider: "anthropic",
+        litellmProxy: true,
+        googleCloudProject: "test-project",
+        googleCloudLocation: "us-east5",
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const containers = deployment.spec?.template.spec?.containers ?? [];
+
+    expect(pluginInit).toBeUndefined();
+    expect(containers.some((container) => container.name === "litellm")).toBe(true);
   });
 
   it("migrates the legacy PVC-root state layout into the runtime home", () => {
@@ -457,6 +504,16 @@ describe("gateway env vars in proxy mode", () => {
 
     expect(envNames).toContain("ANTHROPIC_API_KEY");
     expect(envNames).toContain("OPENAI_API_KEY");
+  });
+
+  it("mounts an existing provider Secret as gateway environment", () => {
+    const deployment = deploymentManifest("ns", makeConfig({
+      providerSecretName: "openclaw-provider-secrets",
+    }));
+
+    expect(gatewayContainer(deployment)?.envFrom).toEqual([
+      { secretRef: { name: "openclaw-provider-secrets", optional: true } },
+    ]);
   });
 
   it("materializes default env SecretRefs into the backing Secret data", () => {

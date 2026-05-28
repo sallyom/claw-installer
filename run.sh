@@ -13,6 +13,9 @@
 #   ./run.sh --port 8080                          # Use a different port (default: 3000)
 #   OPENCLAW_INSTALLER_PORT=8080 ./run.sh          # Same, via env var
 #   ./run.sh --runtime docker                     # Force docker (default: auto-detect)
+#   ./run.sh --cluster-only                       # Hide local deploy mode; show Kubernetes/OpenShift only
+#   ./run.sh --hosted                             # Hosted mode defaults to Kubernetes/OpenShift only
+#   ./run.sh --deploy-modes openshift             # Explicit deploy modes
 #   ./run.sh --plugin @acme/openclaw-installer-aws
 #   ./run.sh --plugins @acme/openclaw-installer-aws,@acme/openclaw-installer-gke
 #   OPENCLAW_INSTALLER_PLUGINS=@acme/openclaw-installer-aws ./run.sh
@@ -28,6 +31,8 @@ PORT="${OPENCLAW_INSTALLER_PORT:-${PORT:-3000}}"
 BUILD=false
 RUNTIME=""
 PLUGIN_LIST="${OPENCLAW_INSTALLER_PLUGINS:-}"
+RUN_MODE="${OPENCLAW_INSTALLER_RUN_MODE:-desktop}"
+DEPLOY_MODES="${OPENCLAW_INSTALLER_DEPLOY_MODES:-}"
 
 append_plugins() {
   local raw="$1"
@@ -56,10 +61,19 @@ while [[ $# -gt 0 ]]; do
     --build) BUILD=true; shift ;;
     --port) PORT="$2"; shift 2 ;;
     --runtime) RUNTIME="$2"; shift 2 ;;
+    --hosted) RUN_MODE="hosted"; shift ;;
+    --cluster-only|--k8s-only)
+      DEPLOY_MODES="kubernetes,openshift"
+      shift
+      ;;
+    --deploy-modes)
+      DEPLOY_MODES="$2"
+      shift 2
+      ;;
     --plugin|--provider) append_plugins "$2"; shift 2 ;;
     --plugins|--providers) append_plugins "$2"; shift 2 ;;
     --help|-h)
-      echo "Usage: ./run.sh [--build] [--port PORT] [--runtime podman|docker] [--plugin PACKAGE] [--plugins PKG1,PKG2]"
+      echo "Usage: ./run.sh [--build] [--port PORT] [--runtime podman|docker] [--hosted] [--cluster-only] [--deploy-modes MODES] [--plugin PACKAGE] [--plugins PKG1,PKG2]"
       exit 0
       ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
@@ -131,6 +145,12 @@ info "Using container runtime: $RUNTIME"
 if [ -n "$PLUGIN_LIST" ]; then
   info "Requested plugin packages: $PLUGIN_LIST"
 fi
+if [ "$RUN_MODE" = "hosted" ] && [ -z "$DEPLOY_MODES" ]; then
+  DEPLOY_MODES="kubernetes,openshift"
+fi
+if [ -n "$DEPLOY_MODES" ]; then
+  info "Allowed deploy modes: $DEPLOY_MODES"
+fi
 
 # Check podman version (libkrun/applehv requires 5.0+)
 if [ "$RUNTIME" = "podman" ]; then
@@ -195,7 +215,10 @@ run_native_app() {
   info "Open http://localhost:${PORT} in your browser."
   echo ""
   cd "$APP_DIR"
-  OPENCLAW_INSTALLER_PORT="$PORT" NODE_ENV=production exec node dist/server/index.js
+  OPENCLAW_INSTALLER_PORT="$PORT" \
+    OPENCLAW_INSTALLER_RUN_MODE="$RUN_MODE" \
+    OPENCLAW_INSTALLER_DEPLOY_MODES="$DEPLOY_MODES" \
+    NODE_ENV=production exec node dist/server/index.js
 }
 
 # ---- macOS + podman: extract app from image, run natively ----
@@ -226,6 +249,10 @@ fi
 
 # Collect env var flags
 ENV_FLAGS=()
+ENV_FLAGS+=("-e" "OPENCLAW_INSTALLER_RUN_MODE=$RUN_MODE")
+if [ -n "$DEPLOY_MODES" ]; then
+  ENV_FLAGS+=("-e" "OPENCLAW_INSTALLER_DEPLOY_MODES=$DEPLOY_MODES")
+fi
 for var in ANTHROPIC_API_KEY OPENAI_API_KEY OPENCLAW_IMAGE OPENCLAW_PREFIX MODEL_ENDPOINT TELEGRAM_BOT_TOKEN TELEGRAM_ALLOW_FROM \
            GOOGLE_CLOUD_PROJECT GCLOUD_PROJECT CLOUD_SDK_PROJECT \
            GOOGLE_VERTEX_PROJECT ANTHROPIC_VERTEX_PROJECT_ID \

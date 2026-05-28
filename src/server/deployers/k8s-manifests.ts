@@ -12,6 +12,7 @@ import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
 import { shouldUseOtel, OTEL_COLLECTOR_IMAGE, OTEL_GRPC_PORT, OTEL_HTTP_PORT, otelAgentEnv } from "./otel.js";
 import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumAgentEnv } from "./chromium.js";
+import { ANTHROPIC_VERTEX_PROVIDER } from "./openclaw-compat.js";
 import type { TreeEntry } from "../state-tree.js";
 import { loadAgentSourceBundle, mainWorkspaceShellCondition } from "./agent-source.js";
 import {
@@ -29,12 +30,14 @@ export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
 export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
 const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
 const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
+const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
 
 function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const seen = new Set<string>();
   const specs: string[] = [];
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
+    ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();
@@ -63,6 +66,14 @@ function pluginInstallCommand(spec: string): string {
 
 function usesOpenShellSandbox(config: DeployConfig): boolean {
   return Boolean(config.sandboxEnabled && config.sandboxBackend === "openshell");
+}
+
+function usesDirectAnthropicVertex(config: DeployConfig): boolean {
+  if (shouldUseLitellmProxy(config)) {
+    return false;
+  }
+  return config.inferenceProvider === "vertex-anthropic"
+    || Boolean(config.vertexEnabled && config.vertexProvider === "anthropic");
 }
 
 function openShellGatewayRegistrationScript(): string {
@@ -136,6 +147,9 @@ function configuredPluginsInstallScript(specs: string[]): string {
     ...specs.map(pluginInstallCommand),
     ...(specs.includes(OPENSHELL_PLUGIN_SPEC)
       ? ["node openclaw.mjs plugins list | grep -q openshell"]
+      : []),
+    ...(specs.includes(ANTHROPIC_VERTEX_PLUGIN_SPEC)
+      ? [`node openclaw.mjs plugins list | grep -q ${shellQuote(ANTHROPIC_VERTEX_PROVIDER)}`]
       : []),
     "node openclaw.mjs plugins list || true",
   ].join("\n");
@@ -559,6 +573,7 @@ export function deploymentManifest(
     });
   }
   appendVaultPluginEnv(envVars, config);
+  const providerSecretName = config.providerSecretName?.trim();
 
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtel) {
@@ -685,6 +700,9 @@ export function deploymentManifest(
                 ...(withA2a ? [{ name: "bridge", containerPort: 18790, protocol: "TCP" as const }] : []),
               ],
               env: envVars,
+              ...(providerSecretName
+                ? { envFrom: [{ secretRef: { name: providerSecretName, optional: true } }] }
+                : {}),
               resources: {
                 requests: { memory: "1Gi", cpu: "250m" },
                 limits: { memory: "4Gi", cpu: "1000m" },

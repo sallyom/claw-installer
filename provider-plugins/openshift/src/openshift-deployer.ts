@@ -90,6 +90,56 @@ async function labelProjectIfAllowed(core: k8s.CoreV1Api, ns: string, log: LogCa
   }
 }
 
+interface AccessReviewResult {
+  allowed: boolean;
+  reason?: string;
+  evaluationError?: string;
+}
+
+interface AuthenticatedUserResult {
+  username?: string;
+  groups: string[];
+}
+
+async function currentAuthenticatedUser(): Promise<AuthenticatedUserResult> {
+  const auth = loadKubeConfig().makeApiClient(k8s.AuthenticationV1Api);
+  const review = await auth.createSelfSubjectReview({
+    body: {
+      apiVersion: "authentication.k8s.io/v1",
+      kind: "SelfSubjectReview",
+    },
+  });
+  const userInfo = review.status?.userInfo;
+  return {
+    username: userInfo?.username,
+    groups: userInfo?.groups || [],
+  };
+}
+
+async function canCreateServiceAccounts(ns: string): Promise<AccessReviewResult> {
+  const auth = loadKubeConfig().makeApiClient(k8s.AuthorizationV1Api);
+  const review = await auth.createSelfSubjectAccessReview({
+    body: {
+      apiVersion: "authorization.k8s.io/v1",
+      kind: "SelfSubjectAccessReview",
+      spec: {
+        resourceAttributes: {
+          namespace: ns,
+          verb: "create",
+          group: "",
+          resource: "serviceaccounts",
+        },
+      },
+    },
+  });
+  const status = review.status;
+  return {
+    allowed: Boolean(status?.allowed),
+    reason: status?.reason,
+    evaluationError: status?.evaluationError,
+  };
+}
+
 // ── OpenShift Deployer ─────────────────────────────────────────────
 
 /**
@@ -126,18 +176,30 @@ export class OpenShiftDeployer implements Deployer {
     } catch (e: unknown) {
       const status = k8sApiHttpCode(e);
       if (status === 403) {
-        log(`Cannot verify project "${ns}" at cluster scope (forbidden) — attempting OpenShift project self-provisioning.`);
-        try {
-          await createProjectRequest(ns, log);
-          await labelProjectIfAllowed(core, ns, log);
-        } catch (createErr: unknown) {
-          if (k8sApiHttpCode(createErr) === 403) {
-            throw new Error(
-              `Cannot create or verify OpenShift project "${ns}": forbidden. Ask a cluster admin to grant self-provisioner to your OpenShift group, or create the project first and grant you admin/edit there.`,
-              { cause: createErr },
-            );
+        log(`Cannot verify project "${ns}" at cluster scope (forbidden) — checking namespace-scoped deploy permissions.`);
+        const user = await currentAuthenticatedUser();
+        log(`Kubernetes API request is authenticated as ${user.username || "unknown"}.`);
+        const access = await canCreateServiceAccounts(ns);
+        if (access.allowed) {
+          log(`Namespace-scoped access to project ${ns} verified; continuing.`);
+        } else {
+          const detail = [access.reason, access.evaluationError].filter(Boolean).join("; ");
+          if (detail) {
+            log(`Namespace-scoped deploy permission denied for project ${ns}: ${detail}`);
           }
-          throw createErr;
+          log(`Namespace-scoped access to project ${ns} is not available — attempting OpenShift project self-provisioning.`);
+          try {
+            await createProjectRequest(ns, log);
+            await labelProjectIfAllowed(core, ns, log);
+          } catch (createErr: unknown) {
+            if (k8sApiHttpCode(createErr) === 403) {
+              throw new Error(
+                `Cannot create or verify OpenShift project "${ns}": forbidden. Ask a cluster admin to grant self-provisioner to your OpenShift group, or create the project first and grant you admin/edit there.`,
+                { cause: createErr },
+              );
+            }
+            throw createErr;
+          }
         }
       } else if (status === 404) {
         try {

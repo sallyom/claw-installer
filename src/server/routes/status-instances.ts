@@ -13,6 +13,8 @@ import { registry } from "../deployers/registry.js";
 import type { CodexOauthMode, DeployResult, DeploySecretRef, InferenceProvider } from "../deployers/types.js";
 import type { PodmanSecretMapping } from "../../shared/podman-secrets.js";
 import { debugPerf } from "../debug.js";
+import { sanitizeSavedConfigVars } from "../security.js";
+import { readInstallerSavedDeployConfig } from "../deployers/k8s-instance-config.js";
 
 const INSTANCE_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
@@ -305,6 +307,37 @@ async function buildK8sInstance(discovered: K8sInstance): Promise<DeployResult |
   }
 
   return instance;
+}
+
+export async function listClusterSavedConfigs(): Promise<Array<{ name: string; type: string; vars: Record<string, unknown> }>> {
+  const configs: Array<{ name: string; type: string; vars: Record<string, unknown> }> = [];
+  const instances = await discoverK8sInstances();
+
+  for (const discovered of instances) {
+    const savedVars = await readInstallerSavedDeployConfig(discovered.namespace);
+    const fallbackVars: Record<string, unknown> = {
+      mode: savedVars?.mode || "openshift",
+      prefix: discovered.prefix,
+      agentName: discovered.agentName,
+      agentDisplayName: discovered.agentName
+        ? discovered.agentName.charAt(0).toUpperCase() + discovered.agentName.slice(1)
+        : discovered.namespace,
+      namespace: discovered.namespace,
+      image: discovered.image,
+      providerSecretName: "openclaw-provider-secrets",
+    };
+    configs.push({
+      name: discovered.namespace,
+      type: "k8s",
+      vars: sanitizeSavedConfigVars({
+        ...fallbackVars,
+        ...(savedVars || {}),
+        namespace: discovered.namespace,
+      }),
+    });
+  }
+
+  return configs;
 }
 
 export async function listInstances(includeK8s: boolean): Promise<DeployResult[]> {

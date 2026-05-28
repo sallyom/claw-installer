@@ -54,6 +54,33 @@ describe("Multi-model per provider", () => {
       expect(body.anthropicModels).toBeUndefined();
     });
 
+    it("uses OpenShift provider Secret refs for selected cluster providers", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.providerSecretName = "openclaw-provider-secrets";
+
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "anthropic",
+        selectedProviders: ["anthropic", "openai"],
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(body.providerSecretName).toBe("openclaw-provider-secrets");
+      expect(body.anthropicApiKeyRef).toEqual({
+        source: "env",
+        provider: "default",
+        id: "ANTHROPIC_API_KEY",
+      });
+      expect(body.openaiApiKeyRef).toEqual({
+        source: "env",
+        provider: "default",
+        id: "OPENAI_API_KEY",
+      });
+    });
+
     it("includes openaiModels when non-empty", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";

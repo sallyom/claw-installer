@@ -1,10 +1,23 @@
 import React from "react";
 import type { DeployFormConfig, InferenceProvider } from "./types.js";
 
+export interface ProviderSecretStatus {
+  namespace: string;
+  name: string;
+  checking: boolean;
+  exists?: boolean;
+  keys?: string[];
+  error?: string;
+  forbidden?: boolean;
+}
+
 interface ExternalSecretProvidersSectionProps {
   config: DeployFormConfig;
   isClusterMode: boolean;
+  isHostedMode: boolean;
+  providerSecretStatus: ProviderSecretStatus | null;
   selectedProviders: InferenceProvider[];
+  suggestedNamespace: string;
   update: (field: string, value: string) => void;
   onVaultEnabledChange: (enabled: boolean) => void;
 }
@@ -20,7 +33,10 @@ const VAULT_PROVIDER_PATHS: Partial<Record<InferenceProvider, { label: string; p
 export function ExternalSecretProvidersSection({
   config,
   isClusterMode,
+  isHostedMode,
+  providerSecretStatus,
   selectedProviders,
+  suggestedNamespace,
   update,
   onVaultEnabledChange,
 }: ExternalSecretProvidersSectionProps) {
@@ -28,14 +44,107 @@ export function ExternalSecretProvidersSection({
     .map((provider) => VAULT_PROVIDER_PATHS[provider])
     .filter((entry): entry is { label: string; path: string } => Boolean(entry));
 
+  const namespace = config.namespace.trim() || suggestedNamespace || "<target-namespace>";
+  const providerSecretName = config.providerSecretName.trim() || "openclaw-provider-secrets";
+
   return (
-    <details style={{ marginTop: "1rem" }}>
+    <details open={isHostedMode} style={{ marginTop: "1rem" }}>
       <summary style={{ cursor: "pointer", fontWeight: 600 }}>External Secret Providers</summary>
       <div className="card" style={{ marginTop: "0.75rem" }}>
         <div className="hint" style={{ marginBottom: "0.75rem" }}>
           Configure OpenClaw to resolve credentials through SecretRef providers instead of writing provider API keys
           into the installer-managed Secret.
         </div>
+
+        {isClusterMode && (
+          <div className="form-group">
+            <label>OpenShift Provider Secret Name</label>
+            <input
+              type="text"
+              placeholder="openclaw-provider-secrets"
+              value={config.providerSecretName}
+              onChange={(e) => update("providerSecretName", e.target.value)}
+            />
+            <div className="hint">
+              {isHostedMode
+                ? "Create this Secret in the target namespace before deploying. The hosted installer reads JSON credentials from it and mounts it into the OpenClaw pod."
+                : "Optional. Mounts an existing Secret from the target namespace as provider environment variables and configures selected providers to use SecretRefs."}{" "}
+              Supported keys include <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>,
+              <code>GEMINI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>,
+              <code>OPENAI_CODEX_AUTH_JSON</code>, and <code>GOOGLE_APPLICATION_CREDENTIALS_JSON</code>.
+            </div>
+            {isHostedMode && (
+              <>
+                {providerSecretStatus?.checking && (
+                  <div className="hint" style={{ marginTop: "0.5rem" }}>
+                    Checking <code>{providerSecretName}</code> in <code>{namespace}</code>...
+                  </div>
+                )}
+                {providerSecretStatus && !providerSecretStatus.checking && providerSecretStatus.exists === true && (
+                  <div
+                    style={{
+                      marginTop: "0.5rem",
+                      padding: "0.5rem 0.75rem",
+                      background: "var(--accent-soft)",
+                      border: "1px solid var(--border-focus)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "0.85rem",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    Found <code>{providerSecretStatus.name}</code> in <code>{providerSecretStatus.namespace}</code>
+                    {providerSecretStatus.keys && providerSecretStatus.keys.length > 0
+                      ? <> with keys: <code>{providerSecretStatus.keys.join(", ")}</code></>
+                      : <>.</>}
+                  </div>
+                )}
+                {providerSecretStatus && !providerSecretStatus.checking && providerSecretStatus.exists === false && (
+                  <div
+                    style={{
+                      marginTop: "0.5rem",
+                      padding: "0.5rem 0.75rem",
+                      background: "var(--danger-soft)",
+                      border: "1px solid var(--danger)",
+                      borderRadius: "var(--radius-sm)",
+                      fontSize: "0.85rem",
+                      color: "var(--danger)",
+                    }}
+                  >
+                    {providerSecretStatus.error || `Secret ${providerSecretName} is not ready.`}
+                    {" "}Create the project and Secret before deploying, or pick a namespace where you have admin/edit access.
+                  </div>
+                )}
+                <div className="hint" style={{ marginTop: "0.75rem" }}>
+                  Create the target project first if it does not already exist:
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.78rem", marginTop: "0.35rem" }}>
+{`oc new-project ${namespace}`}
+                </pre>
+                <div className="hint" style={{ marginTop: "0.75rem" }}>
+                  For API-key providers, create the Secret with the keys you use and remove the rest:
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.78rem", marginTop: "0.35rem" }}>
+{`oc create secret generic ${providerSecretName} \\
+  -n ${namespace} \\
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-... \\
+  --from-literal=OPENAI_API_KEY=sk-... \\
+  --from-literal=GEMINI_API_KEY=AIza... \\
+  --from-literal=OPENROUTER_API_KEY=sk-or-...`}
+                </pre>
+                <div className="hint" style={{ marginTop: "0.75rem" }}>
+                  For OpenAI Codex OAuth or Google Vertex, add file-backed keys to the same Secret:
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.78rem", marginTop: "0.35rem" }}>
+{`oc create secret generic ${providerSecretName} \\
+  -n ${namespace} \\
+  --from-file=OPENAI_CODEX_AUTH_JSON=$HOME/.codex/auth.json \\
+  --from-file=GOOGLE_APPLICATION_CREDENTIALS_JSON=$HOME/.config/gcloud/application_default_credentials.json \\
+  --from-literal=GOOGLE_CLOUD_LOCATION=us-east5`}
+                </pre>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="form-group">
           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>

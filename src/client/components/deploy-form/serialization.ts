@@ -35,6 +35,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     vaultKvVersion: "2",
     vaultTokenSecretName: "openclaw-vault-token",
     vaultTokenSecretKey: "VAULT_TOKEN",
+    providerSecretName: "",
     pluginInstallSpecsText: "",
     secretsProvidersJson: "",
     anthropicApiKeyRefSource: "env",
@@ -376,6 +377,8 @@ export function applySavedVarsToConfig(
         getStringVar(vars, "VAULT_TOKEN_SECRET_NAME", "vaultTokenSecretName") || prev.vaultTokenSecretName,
       vaultTokenSecretKey:
         getStringVar(vars, "VAULT_TOKEN_SECRET_KEY", "vaultTokenSecretKey") || prev.vaultTokenSecretKey,
+      providerSecretName:
+        getStringVar(vars, "OPENCLAW_PROVIDER_SECRET_NAME", "providerSecretName") || prev.providerSecretName,
       pluginInstallSpecsText: savedPluginInstallSpecsText || prev.pluginInstallSpecsText,
       secretsProvidersJson: savedProvidersJson || prev.secretsProvidersJson,
       anthropicApiKeyRefSource: inferredAnthropicRef?.source || prev.anthropicApiKeyRefSource,
@@ -613,26 +616,29 @@ export function buildDeployRequestBody(params: {
   const pluginInstallSpecs = parsePluginInstallSpecsText(config.pluginInstallSpecsText);
   const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
   const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
+  const useProviderSecret = mode !== "local" && Boolean(config.providerSecretName.trim());
+  const providerSecretRef = (id: string): SecretRefValue | undefined =>
+    useProviderSecret ? { source: "env", provider: "default", id } : undefined;
   const effectiveAnthropicApiKeyRef =
     anthropicApiKeyRef || (config.vaultSecretsEnabled && sel("anthropic")
       ? vaultSecretRef("providers/anthropic/apiKey")
-      : undefined);
+      : providerSecretRef("ANTHROPIC_API_KEY"));
   const effectiveOpenaiApiKeyRef =
     openaiApiKeyRef || (config.vaultSecretsEnabled && sel("openai")
       ? vaultSecretRef("providers/openai/apiKey")
-      : undefined);
+      : providerSecretRef("OPENAI_API_KEY"));
   const effectiveGoogleApiKeyRef =
     googleApiKeyRef || (config.vaultSecretsEnabled && sel("google")
       ? vaultSecretRef("providers/google/apiKey")
-      : undefined);
+      : providerSecretRef("GEMINI_API_KEY"));
   const effectiveOpenrouterApiKeyRef =
     openrouterApiKeyRef || (config.vaultSecretsEnabled && sel("openrouter")
       ? vaultSecretRef("providers/openrouter/apiKey")
-      : undefined);
+      : providerSecretRef("OPENROUTER_API_KEY"));
   const effectiveModelEndpointApiKeyRef =
     modelEndpointApiKeyRef || (config.vaultSecretsEnabled && sel("custom-endpoint")
       ? vaultSecretRef("providers/endpoint/apiKey")
-      : undefined);
+      : providerSecretRef("MODEL_ENDPOINT_API_KEY"));
 
   return {
     mode,
@@ -651,6 +657,7 @@ export function buildDeployRequestBody(params: {
     vaultKvVersion: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvVersion) : undefined,
     vaultTokenSecretName: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretName) : undefined,
     vaultTokenSecretKey: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretKey) : undefined,
+    providerSecretName: mode !== "local" ? trimToUndefined(config.providerSecretName) : undefined,
     pluginInstallSpecs: pluginInstallSpecs.length > 0 ? pluginInstallSpecs : undefined,
     secretsProvidersJson: trimToUndefined(config.secretsProvidersJson),
     anthropicApiKeyRef: sel("anthropic") ? effectiveAnthropicApiKeyRef : undefined,
@@ -809,26 +816,29 @@ export function buildEnvFileContent(params: {
   const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
   const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
   const pluginInstallSpecs = parsePluginInstallSpecsText(config.pluginInstallSpecsText);
+  const useProviderSecret = Boolean(config.providerSecretName.trim());
+  const providerSecretRef = (id: string): SecretRefValue | undefined =>
+    useProviderSecret ? { source: "env", provider: "default", id } : undefined;
   const effectiveAnthropicApiKeyRef =
     anthropicApiKeyRef || (config.vaultSecretsEnabled && sel("anthropic")
       ? vaultSecretRef("providers/anthropic/apiKey")
-      : undefined);
+      : providerSecretRef("ANTHROPIC_API_KEY"));
   const effectiveOpenaiApiKeyRef =
     openaiApiKeyRef || (config.vaultSecretsEnabled && sel("openai")
       ? vaultSecretRef("providers/openai/apiKey")
-      : undefined);
+      : providerSecretRef("OPENAI_API_KEY"));
   const effectiveGoogleApiKeyRef =
     googleApiKeyRef || (config.vaultSecretsEnabled && sel("google")
       ? vaultSecretRef("providers/google/apiKey")
-      : undefined);
+      : providerSecretRef("GEMINI_API_KEY"));
   const effectiveOpenrouterApiKeyRef =
     openrouterApiKeyRef || (config.vaultSecretsEnabled && sel("openrouter")
       ? vaultSecretRef("providers/openrouter/apiKey")
-      : undefined);
+      : providerSecretRef("OPENROUTER_API_KEY"));
   const effectiveModelEndpointApiKeyRef =
     modelEndpointApiKeyRef || (config.vaultSecretsEnabled && sel("custom-endpoint")
       ? vaultSecretRef("providers/endpoint/apiKey")
-      : undefined);
+      : providerSecretRef("MODEL_ENDPOINT_API_KEY"));
 
   const lines = [
     "# OpenClaw installer config",
@@ -845,6 +855,7 @@ export function buildEnvFileContent(params: {
     `CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`,
     `VAULT_TOKEN_SECRET_NAME=${config.vaultTokenSecretName}`,
     `VAULT_TOKEN_SECRET_KEY=${config.vaultTokenSecretKey}`,
+    `OPENCLAW_PROVIDER_SECRET_NAME=${config.providerSecretName}`,
     `OPENCLAW_PLUGIN_INSTALL_SPECS_B64=${encodeBase64(JSON.stringify(pluginInstallSpecs))}`,
     `OPENCLAW_PORT=${config.port}`,
     `AGENT_SOURCE_DIR=${config.agentSourceDir}`,
