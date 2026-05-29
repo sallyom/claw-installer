@@ -239,26 +239,26 @@ done
 # Mount GCP credential files into the container
 GCP_MOUNT_FLAGS=()
 if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ] && [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
-  GCP_MOUNT_FLAGS+=("-v" "${GOOGLE_APPLICATION_CREDENTIALS}:/tmp/gcp-creds/sa.json:ro")
+  GCP_MOUNT_FLAGS+=("-v" "${GOOGLE_APPLICATION_CREDENTIALS}:/tmp/gcp-creds/sa.json:ro,Z")
   ENV_FLAGS+=("-e" "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds/sa.json")
 fi
 ADC_PATH="${HOME}/.config/gcloud/application_default_credentials.json"
 if [ -f "$ADC_PATH" ]; then
-  GCP_MOUNT_FLAGS+=("-v" "${ADC_PATH}:/tmp/gcp-adc/application_default_credentials.json:ro")
+  GCP_MOUNT_FLAGS+=("-v" "${ADC_PATH}:/tmp/gcp-adc/application_default_credentials.json:ro,Z")
 fi
 
 # Mount Codex CLI OAuth auth into containerized installer runs so the default
 # ~/.codex/auth.json path works the same way it does when run natively.
 CODEX_MOUNT_FLAGS=()
 if [ -d "$HOME/.codex" ]; then
-  CODEX_MOUNT_FLAGS+=("-v" "$HOME/.codex:/home/node/.codex:ro")
+  CODEX_MOUNT_FLAGS+=("-v" "$HOME/.codex:/home/node/.codex:ro,Z")
 fi
 
 # Mount kube config into containerized installer runs so Kubernetes/OpenShift
 # detection uses the same default ~/.kube/config path as native runs.
 KUBE_MOUNT_FLAGS=()
 if [ -f "$HOME/.kube/config" ]; then
-  KUBE_MOUNT_FLAGS+=("-v" "$HOME/.kube:/home/node/.kube:ro")
+  KUBE_MOUNT_FLAGS+=("-v" "$HOME/.kube:/home/node/.kube:ro,Z")
 fi
 
 # ---- Podman ----
@@ -285,6 +285,7 @@ case "$OS" in
     podman run -d \
       --name "$CONTAINER_NAME" \
       --security-opt label=disable \
+      --userns=keep-id:uid=1000,gid=0 \
       -p "${PORT}:3000" \
       -v "$PODMAN_SOCK:/run/podman/podman.sock" \
       -v "$HOME/.openclaw:/host-openclaw:ro,Z" \
