@@ -254,6 +254,13 @@ if [ -d "$HOME/.codex" ]; then
   CODEX_MOUNT_FLAGS+=("-v" "$HOME/.codex:/home/node/.codex:ro")
 fi
 
+# Mount kube config into containerized installer runs so Kubernetes/OpenShift
+# detection uses the same default ~/.kube/config path as native runs.
+KUBE_MOUNT_FLAGS=()
+if [ -f "$HOME/.kube/config" ]; then
+  KUBE_MOUNT_FLAGS+=("-v" "$HOME/.kube:/home/node/.kube:ro")
+fi
+
 # ---- Podman ----
 case "$OS" in
   Linux)
@@ -286,6 +293,7 @@ case "$OS" in
       "${ENV_FLAGS[@]}" \
       "${GCP_MOUNT_FLAGS[@]}" \
       "${CODEX_MOUNT_FLAGS[@]}" \
+      "${KUBE_MOUNT_FLAGS[@]}" \
       "$IMAGE_NAME"
 
     success "OpenClaw Installer running at http://localhost:${PORT}"
