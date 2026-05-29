@@ -45,11 +45,11 @@ test_mounts_default_kube_config() {
   rm -rf "$temp_home"
 
   local expected="-v
-$temp_home/.kube:/home/node/.kube:ro"
+$temp_home/.kube:/home/node/.kube:ro,Z"
   if [ "$output" = "$expected" ]; then
-    pass "Mounts ~/.kube read-only at the container default kube path"
+    pass "Mounts ~/.kube read-only with SELinux relabeling at the container default kube path"
   else
-    fail "Mounts ~/.kube read-only at the container default kube path" "got: $output"
+    fail "Mounts ~/.kube read-only with SELinux relabeling at the container default kube path" "got: $output"
   fi
 }
 
@@ -68,11 +68,36 @@ test_skips_missing_kube_config() {
   fi
 }
 
+test_read_only_mounts_include_selinux_relabel() {
+  local bad_lines
+  bad_lines="$(
+    awk '
+      /:ro/ && !/:ro,Z/ { print FNR ":" $0 }
+    ' "$REPO_DIR/run.sh"
+  )"
+
+  if [ -z "$bad_lines" ]; then
+    pass "All read-only run.sh bind mounts include SELinux relabeling"
+  else
+    fail "All read-only run.sh bind mounts include SELinux relabeling" "missing ,Z on: $bad_lines"
+  fi
+}
+
+test_linux_podman_run_preserves_host_user_mapping() {
+  if grep -q -- "--userns=keep-id:uid=1000,gid=0" "$REPO_DIR/run.sh"; then
+    pass "Linux podman run preserves host user mapping for node-owned bind mounts"
+  else
+    fail "Linux podman run preserves host user mapping for node-owned bind mounts" "missing --userns=keep-id:uid=1000,gid=0"
+  fi
+}
+
 echo "=== run.sh kube mount tests ==="
 echo ""
 
 test_mounts_default_kube_config
 test_skips_missing_kube_config
+test_read_only_mounts_include_selinux_relabel
+test_linux_podman_run_preserves_host_user_mapping
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
