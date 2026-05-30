@@ -161,6 +161,10 @@ behavior where GCP credentials are passed directly to the agent container.
 This is not recommended but may be needed if LiteLLM introduces
 compatibility issues with your model.
 
+For Claude on Vertex without the LiteLLM sidecar, the Kubernetes/OpenShift
+deployer automatically installs the `@openclaw/anthropic-vertex-provider`
+plugin into the OpenClaw home PVC before the gateway starts.
+
 ### Model naming with the proxy
 
 When the proxy is active, the model string changes from the Vertex format

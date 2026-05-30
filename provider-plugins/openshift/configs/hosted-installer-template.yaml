@@ -1,0 +1,215 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: openclaw-hosted-installer
+  annotations:
+    description: Hosted OpenClaw installer for OpenShift. Build and push the installer image from the repo Dockerfile, then process this template.
+parameters:
+  - name: NAMESPACE
+    value: openclaw-installer
+  - name: APP_NAME
+    value: openclaw-installer
+  - name: INSTALLER_IMAGE
+    value: quay.io/sallyom/openclaw-installer:latest
+    description: Pre-built installer image produced from this repository's Dockerfile.
+  - name: APPS_DOMAIN
+    required: true
+    description: OpenShift apps domain, for example apps.example.com.
+  - name: OAUTH_CLIENT_NAME
+    value: openclaw-installer
+  - name: OAUTH_CLIENT_SECRET
+    generate: expression
+    from: "[a-zA-Z0-9]{32}"
+  - name: OAUTH_COOKIE_SECRET
+    generate: expression
+    from: "[a-zA-Z0-9]{32}"
+objects:
+  - apiVersion: oauth.openshift.io/v1
+    kind: OAuthClient
+    metadata:
+      name: ${OAUTH_CLIENT_NAME}
+    secret: ${OAUTH_CLIENT_SECRET}
+    redirectURIs:
+      - https://${APP_NAME}-${NAMESPACE}.${APPS_DOMAIN}/oauth/callback
+    grantMethod: prompt
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: ${NAMESPACE}
+      labels:
+        app.kubernetes.io/name: ${APP_NAME}
+        app.kubernetes.io/part-of: openclaw
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: ${APP_NAME}
+      namespace: ${NAMESPACE}
+      labels:
+        app.kubernetes.io/name: ${APP_NAME}
+        app.kubernetes.io/part-of: openclaw
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: ${APP_NAME}-oauth
+      namespace: ${NAMESPACE}
+      labels:
+        app.kubernetes.io/name: ${APP_NAME}
+        app.kubernetes.io/part-of: openclaw
+    stringData:
+      cookie_secret: ${OAUTH_COOKIE_SECRET}
+      client_secret: ${OAUTH_CLIENT_SECRET}
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ${APP_NAME}
+      namespace: ${NAMESPACE}
+      labels:
+        app.kubernetes.io/name: ${APP_NAME}
+        app.kubernetes.io/part-of: openclaw
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: ${APP_NAME}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: ${APP_NAME}
+            app.kubernetes.io/part-of: openclaw
+        spec:
+          serviceAccountName: ${APP_NAME}
+          containers:
+            - name: oauth-proxy
+              image: quay.io/openshift/origin-oauth-proxy:4.14
+              imagePullPolicy: IfNotPresent
+              args:
+                - --http-address=:8443
+                - --https-address=
+                - --provider=openshift
+                - --upstream=http://127.0.0.1:3000
+                - --client-id=${OAUTH_CLIENT_NAME}
+                - --client-secret-file=/etc/oauth/config/client_secret
+                - --cookie-secret-file=/etc/oauth/config/cookie_secret
+                - --cookie-name=_openclaw_installer_oauth
+                - --cookie-expire=23h0m0s
+                - --pass-access-token
+                - --pass-user-headers
+                - --scope=user:full
+              ports:
+                - name: oauth-ui
+                  containerPort: 8443
+                  protocol: TCP
+              volumeMounts:
+                - name: oauth-config
+                  mountPath: /etc/oauth/config
+                  readOnly: true
+              readinessProbe:
+                httpGet:
+                  path: /oauth/healthz
+                  port: oauth-ui
+                  scheme: HTTP
+                initialDelaySeconds: 5
+                periodSeconds: 5
+              livenessProbe:
+                httpGet:
+                  path: /oauth/healthz
+                  port: oauth-ui
+                  scheme: HTTP
+                initialDelaySeconds: 30
+                periodSeconds: 10
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+            - name: installer
+              image: ${INSTALLER_IMAGE}
+              imagePullPolicy: Always
+              ports:
+                - name: http
+                  containerPort: 3000
+                  protocol: TCP
+              env:
+                - name: NODE_ENV
+                  value: production
+                - name: OPENCLAW_INSTALLER_BIND_HOST
+                  value: 0.0.0.0
+                - name: OPENCLAW_INSTALLER_PORT
+                  value: "3000"
+                - name: OPENCLAW_INSTALLER_RUN_MODE
+                  value: hosted
+                - name: OPENCLAW_INSTALLER_DEPLOY_MODES
+                  value: openshift
+              readinessProbe:
+                httpGet:
+                  path: /api/health
+                  port: http
+                initialDelaySeconds: 10
+                periodSeconds: 10
+              livenessProbe:
+                httpGet:
+                  path: /api/health
+                  port: http
+                initialDelaySeconds: 30
+                periodSeconds: 20
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+          volumes:
+            - name: oauth-config
+              secret:
+                secretName: ${APP_NAME}-oauth
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: ${APP_NAME}
+      namespace: ${NAMESPACE}
+      labels:
+        app.kubernetes.io/name: ${APP_NAME}
+        app.kubernetes.io/part-of: openclaw
+    spec:
+      selector:
+        app.kubernetes.io/name: ${APP_NAME}
+      ports:
+        - name: oauth-ui
+          port: 8443
+          targetPort: oauth-ui
+          protocol: TCP
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: ${APP_NAME}
+      namespace: ${NAMESPACE}
+      labels:
+        app.kubernetes.io/name: ${APP_NAME}
+        app.kubernetes.io/part-of: openclaw
+      annotations:
+        haproxy.router.openshift.io/timeout: 30m
+    spec:
+      host: ${APP_NAME}-${NAMESPACE}.${APPS_DOMAIN}
+      to:
+        kind: Service
+        name: ${APP_NAME}
+        weight: 100
+      port:
+        targetPort: oauth-ui
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect

@@ -27,6 +27,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     agentDisplayName: "",
     image: "",
     containerRunArgs: "",
+    localFileOwner: "",
     podmanSecretMappingsText: DEFAULT_PROVIDER_PODMAN_SECRET_MAPPINGS_TEXT,
     vaultSecretsEnabled: false,
     vaultAddr: "http://vault.vault.svc:8200",
@@ -35,6 +36,11 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     vaultKvVersion: "2",
     vaultTokenSecretName: "openclaw-vault-token",
     vaultTokenSecretKey: "VAULT_TOKEN",
+    onePasswordSecretsEnabled: false,
+    onePasswordVault: "OpenClaw",
+    onePasswordTokenSecretName: "openclaw-1password-token",
+    onePasswordTokenSecretKey: "OP_SERVICE_ACCOUNT_TOKEN",
+    providerSecretName: "",
     pluginInstallSpecsText: "",
     secretsProvidersJson: "",
     anthropicApiKeyRefSource: "env",
@@ -362,6 +368,7 @@ export function applySavedVarsToConfig(
       agentDisplayName: getStringVar(vars, "OPENCLAW_DISPLAY_NAME", "agentDisplayName") || prev.agentDisplayName,
       image: getStringVar(vars, "OPENCLAW_IMAGE", "image") || prev.image,
       containerRunArgs: getStringVar(vars, "OPENCLAW_CONTAINER_RUN_ARGS", "containerRunArgs") || prev.containerRunArgs,
+      localFileOwner: getStringVar(vars, "OPENCLAW_LOCAL_FILE_OWNER", "localFileOwner") || prev.localFileOwner,
       podmanSecretMappingsText: savedPodmanSecretMappingsText || prev.podmanSecretMappingsText,
       vaultSecretsEnabled:
         vars.VAULT_SECRETS_ENABLED === "true"
@@ -376,6 +383,21 @@ export function applySavedVarsToConfig(
         getStringVar(vars, "VAULT_TOKEN_SECRET_NAME", "vaultTokenSecretName") || prev.vaultTokenSecretName,
       vaultTokenSecretKey:
         getStringVar(vars, "VAULT_TOKEN_SECRET_KEY", "vaultTokenSecretKey") || prev.vaultTokenSecretKey,
+      onePasswordSecretsEnabled:
+        vars.ONEPASSWORD_SECRETS_ENABLED === "true"
+          || vars.onePasswordSecretsEnabled === true
+          || vars.onePasswordSecretsEnabled === "true"
+          || prev.onePasswordSecretsEnabled,
+      onePasswordVault:
+        getStringVar(vars, "CLAW_1PASSWORD_VAULT", "onePasswordVault") || prev.onePasswordVault,
+      onePasswordTokenSecretName:
+        getStringVar(vars, "ONEPASSWORD_TOKEN_SECRET_NAME", "onePasswordTokenSecretName")
+        || prev.onePasswordTokenSecretName,
+      onePasswordTokenSecretKey:
+        getStringVar(vars, "ONEPASSWORD_TOKEN_SECRET_KEY", "onePasswordTokenSecretKey")
+        || prev.onePasswordTokenSecretKey,
+      providerSecretName:
+        getStringVar(vars, "OPENCLAW_PROVIDER_SECRET_NAME", "providerSecretName") || prev.providerSecretName,
       pluginInstallSpecsText: savedPluginInstallSpecsText || prev.pluginInstallSpecsText,
       secretsProvidersJson: savedProvidersJson || prev.secretsProvidersJson,
       anthropicApiKeyRefSource: inferredAnthropicRef?.source || prev.anthropicApiKeyRefSource,
@@ -580,6 +602,15 @@ function vaultSecretRef(id: string): SecretRefValue {
   };
 }
 
+function onePasswordSecretRef(vault: string, item: string): SecretRefValue {
+  const vaultName = trimToUndefined(vault) || "OpenClaw";
+  return {
+    source: "exec",
+    provider: "onepassword",
+    id: `op://${vaultName}/${item}/credential`,
+  };
+}
+
 export function buildDeployRequestBody(params: {
   mode: string;
   inferenceProvider: InferenceProvider;
@@ -613,26 +644,39 @@ export function buildDeployRequestBody(params: {
   const pluginInstallSpecs = parsePluginInstallSpecsText(config.pluginInstallSpecsText);
   const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
   const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
+  const useProviderSecret = mode !== "local" && Boolean(config.providerSecretName.trim());
+  const providerSecretRef = (id: string): SecretRefValue | undefined =>
+    useProviderSecret ? { source: "env", provider: "default", id } : undefined;
   const effectiveAnthropicApiKeyRef =
     anthropicApiKeyRef || (config.vaultSecretsEnabled && sel("anthropic")
       ? vaultSecretRef("providers/anthropic/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("anthropic")
+        ? onePasswordSecretRef(config.onePasswordVault, "Anthropic")
+      : providerSecretRef("ANTHROPIC_API_KEY"));
   const effectiveOpenaiApiKeyRef =
     openaiApiKeyRef || (config.vaultSecretsEnabled && sel("openai")
       ? vaultSecretRef("providers/openai/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("openai")
+        ? onePasswordSecretRef(config.onePasswordVault, "OpenAI")
+      : providerSecretRef("OPENAI_API_KEY"));
   const effectiveGoogleApiKeyRef =
     googleApiKeyRef || (config.vaultSecretsEnabled && sel("google")
       ? vaultSecretRef("providers/google/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("google")
+        ? onePasswordSecretRef(config.onePasswordVault, "Google")
+      : providerSecretRef("GEMINI_API_KEY"));
   const effectiveOpenrouterApiKeyRef =
     openrouterApiKeyRef || (config.vaultSecretsEnabled && sel("openrouter")
       ? vaultSecretRef("providers/openrouter/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("openrouter")
+        ? onePasswordSecretRef(config.onePasswordVault, "OpenRouter")
+      : providerSecretRef("OPENROUTER_API_KEY"));
   const effectiveModelEndpointApiKeyRef =
     modelEndpointApiKeyRef || (config.vaultSecretsEnabled && sel("custom-endpoint")
       ? vaultSecretRef("providers/endpoint/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("custom-endpoint")
+        ? onePasswordSecretRef(config.onePasswordVault, "Endpoint")
+      : providerSecretRef("MODEL_ENDPOINT_API_KEY"));
 
   return {
     mode,
@@ -643,6 +687,7 @@ export function buildDeployRequestBody(params: {
     agentDisplayName: config.agentDisplayName || config.agentName,
     image: trimToUndefined(config.image),
     containerRunArgs: mode === "local" ? trimToUndefined(config.containerRunArgs) : undefined,
+    localFileOwner: mode === "local" ? trimToUndefined(config.localFileOwner) : undefined,
     podmanSecretMappings: mode === "local" && podmanSecretMappings.length > 0 ? podmanSecretMappings : undefined,
     vaultSecretsEnabled: config.vaultSecretsEnabled || undefined,
     vaultAddr: config.vaultSecretsEnabled ? trimToUndefined(config.vaultAddr) : undefined,
@@ -651,6 +696,13 @@ export function buildDeployRequestBody(params: {
     vaultKvVersion: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvVersion) : undefined,
     vaultTokenSecretName: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretName) : undefined,
     vaultTokenSecretKey: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretKey) : undefined,
+    onePasswordSecretsEnabled: config.onePasswordSecretsEnabled || undefined,
+    onePasswordVault: config.onePasswordSecretsEnabled ? trimToUndefined(config.onePasswordVault) : undefined,
+    onePasswordTokenSecretName:
+      config.onePasswordSecretsEnabled ? trimToUndefined(config.onePasswordTokenSecretName) : undefined,
+    onePasswordTokenSecretKey:
+      config.onePasswordSecretsEnabled ? trimToUndefined(config.onePasswordTokenSecretKey) : undefined,
+    providerSecretName: mode !== "local" ? trimToUndefined(config.providerSecretName) : undefined,
     pluginInstallSpecs: pluginInstallSpecs.length > 0 ? pluginInstallSpecs : undefined,
     secretsProvidersJson: trimToUndefined(config.secretsProvidersJson),
     anthropicApiKeyRef: sel("anthropic") ? effectiveAnthropicApiKeyRef : undefined,
@@ -809,26 +861,39 @@ export function buildEnvFileContent(params: {
   const sel = (p: InferenceProvider) => isProviderSelected(p, selectedProviders);
   const anyVertexSelected = sel("vertex-anthropic") || sel("vertex-google");
   const pluginInstallSpecs = parsePluginInstallSpecsText(config.pluginInstallSpecsText);
+  const useProviderSecret = Boolean(config.providerSecretName.trim());
+  const providerSecretRef = (id: string): SecretRefValue | undefined =>
+    useProviderSecret ? { source: "env", provider: "default", id } : undefined;
   const effectiveAnthropicApiKeyRef =
     anthropicApiKeyRef || (config.vaultSecretsEnabled && sel("anthropic")
       ? vaultSecretRef("providers/anthropic/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("anthropic")
+        ? onePasswordSecretRef(config.onePasswordVault, "Anthropic")
+      : providerSecretRef("ANTHROPIC_API_KEY"));
   const effectiveOpenaiApiKeyRef =
     openaiApiKeyRef || (config.vaultSecretsEnabled && sel("openai")
       ? vaultSecretRef("providers/openai/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("openai")
+        ? onePasswordSecretRef(config.onePasswordVault, "OpenAI")
+      : providerSecretRef("OPENAI_API_KEY"));
   const effectiveGoogleApiKeyRef =
     googleApiKeyRef || (config.vaultSecretsEnabled && sel("google")
       ? vaultSecretRef("providers/google/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("google")
+        ? onePasswordSecretRef(config.onePasswordVault, "Google")
+      : providerSecretRef("GEMINI_API_KEY"));
   const effectiveOpenrouterApiKeyRef =
     openrouterApiKeyRef || (config.vaultSecretsEnabled && sel("openrouter")
       ? vaultSecretRef("providers/openrouter/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("openrouter")
+        ? onePasswordSecretRef(config.onePasswordVault, "OpenRouter")
+      : providerSecretRef("OPENROUTER_API_KEY"));
   const effectiveModelEndpointApiKeyRef =
     modelEndpointApiKeyRef || (config.vaultSecretsEnabled && sel("custom-endpoint")
       ? vaultSecretRef("providers/endpoint/apiKey")
-      : undefined);
+      : config.onePasswordSecretsEnabled && sel("custom-endpoint")
+        ? onePasswordSecretRef(config.onePasswordVault, "Endpoint")
+      : providerSecretRef("MODEL_ENDPOINT_API_KEY"));
 
   const lines = [
     "# OpenClaw installer config",
@@ -837,6 +902,7 @@ export function buildEnvFileContent(params: {
     `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName}`,
     `OPENCLAW_IMAGE=${config.image}`,
     `OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`,
+    `OPENCLAW_LOCAL_FILE_OWNER=${config.localFileOwner}`,
     `PODMAN_SECRET_MAPPINGS_B64=${encodeBase64(JSON.stringify(parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings))}`,
     `VAULT_SECRETS_ENABLED=${config.vaultSecretsEnabled}`,
     `VAULT_ADDR=${config.vaultAddr}`,
@@ -845,6 +911,11 @@ export function buildEnvFileContent(params: {
     `CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`,
     `VAULT_TOKEN_SECRET_NAME=${config.vaultTokenSecretName}`,
     `VAULT_TOKEN_SECRET_KEY=${config.vaultTokenSecretKey}`,
+    `ONEPASSWORD_SECRETS_ENABLED=${config.onePasswordSecretsEnabled}`,
+    `CLAW_1PASSWORD_VAULT=${config.onePasswordVault}`,
+    `ONEPASSWORD_TOKEN_SECRET_NAME=${config.onePasswordTokenSecretName}`,
+    `ONEPASSWORD_TOKEN_SECRET_KEY=${config.onePasswordTokenSecretKey}`,
+    `OPENCLAW_PROVIDER_SECRET_NAME=${config.providerSecretName}`,
     `OPENCLAW_PLUGIN_INSTALL_SPECS_B64=${encodeBase64(JSON.stringify(pluginInstallSpecs))}`,
     `OPENCLAW_PORT=${config.port}`,
     `AGENT_SOURCE_DIR=${config.agentSourceDir}`,

@@ -40,6 +40,7 @@ import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumCo
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import {
   attachDirectVertexProviderModels,
+  buildOnePasswordSecretProviderConfig,
   buildVaultSecretProviderConfig,
   buildConfiguredAgentModelCatalog,
   CUSTOM_ENDPOINT_PROVIDER,
@@ -48,6 +49,8 @@ import {
   OPENAI_BASE_URL,
   OPENROUTER_BASE_URL,
   OPENROUTER_PROVIDER,
+  ONEPASSWORD_SECRET_PROVIDER_ALIAS,
+  ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID,
   VAULT_SECRET_PROVIDER_ALIAS,
   VAULT_SECRET_PROVIDER_PLUGIN_ID,
   detectUnavailableProvider,
@@ -81,6 +84,8 @@ import { buildAgentJson, buildDefaultAgentsMd } from "./local-agent-files.js";
 import { installLocalPlugins } from "./local-plugins.js";
 import {
   bindMountSpec,
+  localGatewayUserArgs,
+  localStateMaintenanceUserArgs,
   parseContainerRunArgs,
   runCommand,
   runtimeOwnershipFixupCommand,
@@ -159,6 +164,9 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     ...(config.containerRunArgs
       ? [`OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`]
       : []),
+    ...(config.localFileOwner
+      ? [`OPENCLAW_LOCAL_FILE_OWNER=${config.localFileOwner}`]
+      : []),
     ...(config.podmanSecretMappings && config.podmanSecretMappings.length > 0
       ? [`PODMAN_SECRET_MAPPINGS_B64=${encodeEnvValue(JSON.stringify(config.podmanSecretMappings))}`]
       : []),
@@ -182,6 +190,10 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     if (config.vaultNamespace) lines.push(`VAULT_NAMESPACE=${config.vaultNamespace}`);
     if (config.vaultKvMount) lines.push(`CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`);
     if (config.vaultKvVersion) lines.push(`CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`);
+  }
+  if (config.onePasswordSecretsEnabled) {
+    lines.push(`ONEPASSWORD_SECRETS_ENABLED=true`);
+    if (config.onePasswordVault) lines.push(`CLAW_1PASSWORD_VAULT=${config.onePasswordVault}`);
   }
   if (config.anthropicApiKeyRef) {
     lines.push(`ANTHROPIC_API_KEY_REF_B64=${encodeEnvValue(JSON.stringify(config.anthropicApiKeyRef))}`);
@@ -370,7 +382,8 @@ function resolveImage(config: DeployConfig): string {
 function tryParseProjectId(saJson: string): string {
   try {
     const parsed = JSON.parse(saJson);
-    return typeof parsed.project_id === "string" ? parsed.project_id : "";
+    if (typeof parsed.project_id === "string") return parsed.project_id;
+    return typeof parsed.quota_project_id === "string" ? parsed.quota_project_id : "";
   } catch {
     return "";
   }
@@ -470,12 +483,13 @@ async function importLocalCodexAuthProfiles(params: {
       params.log("Importing Codex OAuth profile into local OpenClaw state via Podman secret");
       const result = await runCommand(params.runtime, [
         "run", "--rm",
+        ...localStateMaintenanceUserArgs(params.config.localFileOwner),
         ...localStateMountArgs(params.config),
         "--secret", `${secretName},type=mount`,
         params.image,
         "sh", "-c", [
           authProfileImportLines(secretPath),
-          runtimeOwnershipFixupCommand(),
+          runtimeOwnershipFixupCommand(params.config.localFileOwner),
         ].join("\n"),
       ], params.log);
       if (result.code !== 0) {
@@ -502,7 +516,7 @@ async function importLocalCodexAuthProfiles(params: {
       params.image,
       "sh", "-c", [
         authProfileImportLines(AUTH_PROFILE_IMPORT_CONTAINER_PATH),
-        runtimeOwnershipFixupCommand(),
+        runtimeOwnershipFixupCommand(params.config.localFileOwner),
       ].join("\n"),
     ], params.log);
     if (result.code !== 0) {
@@ -579,11 +593,18 @@ function deriveModel(config: DeployConfig): string {
   return "anthropic/claude-sonnet-4-6";
 }
 
+function normalizeSecretRefId(ref: DeploySecretRef): string {
+  if (ref.provider === "onepassword" && ref.id.endsWith("/apiKey")) {
+    return `${ref.id.slice(0, -"/apiKey".length)}/credential`;
+  }
+  return ref.id;
+}
+
 function cloneSecretRef(ref: DeploySecretRef): Record<string, string> {
   return {
     source: ref.source,
     provider: ref.provider,
-    id: ref.id,
+    id: normalizeSecretRefId(ref),
   };
 }
 
@@ -692,6 +713,10 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
   const vaultProvider = buildVaultSecretProviderConfig(config);
   if (vaultProvider) {
     providers[VAULT_SECRET_PROVIDER_ALIAS] = vaultProvider;
+  }
+  const onePasswordProvider = buildOnePasswordSecretProviderConfig(config);
+  if (onePasswordProvider) {
+    providers[ONEPASSWORD_SECRET_PROVIDER_ALIAS] = onePasswordProvider;
   }
   let shouldDefineDefaultEnvProvider = false;
 
@@ -903,6 +928,9 @@ function requiredBundledPluginAllowlist(config: DeployConfig): string[] {
   if (config.vaultSecretsEnabled) {
     allow.add(VAULT_SECRET_PROVIDER_PLUGIN_ID);
   }
+  if (config.onePasswordSecretsEnabled) {
+    allow.add(ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID);
+  }
   if (config.telegramBotToken || config.telegramBotTokenRef) {
     allow.add("telegram");
   }
@@ -925,6 +953,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
         ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
+        ...(config.onePasswordSecretsEnabled ? { [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
       },
     },
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces
@@ -1191,6 +1220,19 @@ export function buildRunArgs(
       env.VAULT_TOKEN = process.env.VAULT_TOKEN;
     }
   }
+  if (effectiveConfig.onePasswordSecretsEnabled) {
+    if (process.env.OP_SERVICE_ACCOUNT_TOKEN) {
+      env.OP_SERVICE_ACCOUNT_TOKEN = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+    }
+    if (process.env.OP_ACCOUNT) {
+      env.OP_ACCOUNT = process.env.OP_ACCOUNT;
+    }
+    if (effectiveConfig.onePasswordVault) {
+      env.CLAW_1PASSWORD_VAULT = effectiveConfig.onePasswordVault;
+    } else if (process.env.CLAW_1PASSWORD_VAULT) {
+      env.CLAW_1PASSWORD_VAULT = process.env.CLAW_1PASSWORD_VAULT;
+    }
+  }
 
   if (effectiveConfig.vertexEnabled && useProxy) {
     // Proxy mode: gateway talks to LiteLLM via the litellm provider config in openclaw.json
@@ -1247,6 +1289,7 @@ export function buildRunArgs(
     runArgs.push(...buildPodmanSecretRunArgs(effectiveConfig.podmanSecretMappings));
   }
   runArgs.push(...parseContainerRunArgs(effectiveConfig.containerRunArgs));
+  runArgs.push(...localGatewayUserArgs(effectiveConfig.localFileOwner));
   runArgs.push(image);
 
   // Bind to lan (0.0.0.0) so port mapping works from host into pod/container
@@ -1464,13 +1507,14 @@ Use this table to track verified peer OpenClaw instances.
       `if [ -d /tmp/agent-source/skills ]; then cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
       `if [ -f /tmp/agent-source/cron/jobs.json ]; then mkdir -p /home/node/.openclaw/cron && cp /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true; fi`,
       `if [ -f /tmp/agent-source/exec-approvals.json ]; then cp /tmp/agent-source/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true; fi`,
-      runtimeOwnershipFixupCommand(),
+      runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner),
     ].join("\n");
 
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
 
     const initArgs = [
       "run", "--rm",
+      ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
       ...localStateMountArgs(config),
     ];
 
@@ -1512,9 +1556,10 @@ Use this table to track verified peer OpenClaw instances.
     // Write GCP SA JSON into volume as a separate step (avoids heredoc/shell escaping issues)
     if (config.gcpServiceAccountJson) {
       const b64 = Buffer.from(config.gcpServiceAccountJson).toString("base64");
-      const saScript = `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand()}`;
+      const saScript = `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner)}`;
       const saResult = await runCommand(runtime, [
         "run", "--rm",
+        ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
         ...localStateMountArgs(config),
         image, "sh", "-c", saScript,
       ], log);
@@ -1542,11 +1587,12 @@ Use this table to track verified peer OpenClaw instances.
         `echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH}`,
         `echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH}`,
         `chmod 600 ${LITELLM_KEY_PATH}`,
-        runtimeOwnershipFixupCommand(),
+        runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner),
       ].join(" && ");
 
       const litellmInitResult = await runCommand(runtime, [
         "run", "--rm",
+        ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
         ...localStateMountArgs(config),
         image, "sh", "-c", litellmScript,
       ], log);
@@ -1596,6 +1642,7 @@ Use this table to track verified peer OpenClaw instances.
           "--pod", pod,
           ...localStateMountArgs(config),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          ...localGatewayUserArgs(config.localFileOwner),
           litellmImage,
           "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
         ], log);
@@ -1612,6 +1659,7 @@ Use this table to track verified peer OpenClaw instances.
           "-p", `${port + 1}:${LITELLM_PORT}`,
           ...localStateMountArgs(config),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          ...localGatewayUserArgs(config.localFileOwner),
           litellmImage,
           "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
         ], log);
@@ -1871,6 +1919,7 @@ Use this table to track verified peer OpenClaw instances.
     const ocConfigB64 = Buffer.from(ocConfig).toString("base64");
     const bootstrapResult = await runCommand(runtime, [
       "run", "--rm",
+      ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
       ...localStateMountArgs(effectiveConfig),
       image,
       "sh",
@@ -1881,7 +1930,7 @@ Use this table to track verified peer OpenClaw instances.
         `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${effectiveConfig.openaiCompatibleEndpointsEnabled !== false}};c.gateway.http.endpoints.responses={enabled:${effectiveConfig.openaiCompatibleEndpointsEnabled !== false}};c.gateway.controlUi ||= {};c.gateway.controlUi.allowedOrigins=['http://localhost:${port}','http://127.0.0.1:${port}'];fs.writeFileSync(p,JSON.stringify(c,null,2))"`,
         ...workspaceSetupCommands,
         "mkdir -p /home/node/.openclaw/skills",
-        runtimeOwnershipFixupCommand(),
+        runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
       ].join(" && "),
     ], log);
     if (bootstrapResult.code !== 0) {
@@ -1903,11 +1952,12 @@ Use this table to track verified peer OpenClaw instances.
       const b64 = Buffer.from(effectiveConfig.gcpServiceAccountJson).toString("base64");
       const gcpResult = await runCommand(runtime, [
         "run", "--rm",
+        ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
         ...localStateMountArgs(effectiveConfig),
         image,
         "sh",
         "-c",
-        `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand()}`,
+        `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner)}`,
       ], log);
       if (gcpResult.code !== 0) {
         log("WARNING: Failed to restore GCP service account key to runtime state");
@@ -1934,11 +1984,12 @@ Use this table to track verified peer OpenClaw instances.
         `if [ -d /tmp/agent-source/skills ]; then mkdir -p /home/node/.openclaw/skills && cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
         `if [ -f /tmp/agent-source/cron/jobs.json ]; then mkdir -p /home/node/.openclaw/cron && cp /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true; fi`,
         `if [ -f /tmp/agent-source/exec-approvals.json ]; then cp /tmp/agent-source/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true; fi`,
-        runtimeOwnershipFixupCommand(),
+        runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
       ].join("\n");
 
       const copyResult = await runCommand(runtime, [
         "run", "--rm",
+        ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
         ...localStateMountArgs(effectiveConfig),
         "-v", bindMountSpec(agentSourceDir, "/tmp/agent-source", "ro"),
         image, "sh", "-c", copyScript,
@@ -1968,11 +2019,12 @@ Use this table to track verified peer OpenClaw instances.
             `chmod 600 '${SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH}'`,
           ]
         : []),
-      runtimeOwnershipFixupCommand(),
+      runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
     ].join("\n");
 
     const sshMaterialResult = await runCommand(runtime, [
       "run", "--rm",
+      ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
       ...localStateMountArgs(effectiveConfig),
       image, "sh", "-c", sshMaterialScript,
     ], log);
@@ -1997,6 +2049,7 @@ Use this table to track verified peer OpenClaw instances.
       try {
         const { stdout } = await execFileAsync(runtime, [
           "run", "--rm",
+          ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
           ...localStateMountArgs(effectiveConfig),
           image, "cat", LITELLM_KEY_PATH,
         ]);
@@ -2010,9 +2063,10 @@ Use this table to track verified peer OpenClaw instances.
         const keyB64 = Buffer.from(litellmMasterKey).toString("base64");
         const litellmRewriteResult = await runCommand(runtime, [
           "run", "--rm",
+          ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
           ...localStateMountArgs(effectiveConfig),
           image, "sh", "-c",
-          `mkdir -p /home/node/.openclaw/litellm && echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH} && echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH} && chmod 600 ${LITELLM_KEY_PATH} && ${runtimeOwnershipFixupCommand()}`,
+          `mkdir -p /home/node/.openclaw/litellm && echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH} && echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH} && chmod 600 ${LITELLM_KEY_PATH} && ${runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner)}`,
         ], log);
         if (litellmRewriteResult.code !== 0) {
           throw new Error("Failed to restore LiteLLM runtime state");
@@ -2043,6 +2097,7 @@ Use this table to track verified peer OpenClaw instances.
           "--pod", pod,
           ...localStateMountArgs(effectiveConfig),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          ...localGatewayUserArgs(effectiveConfig.localFileOwner),
           litellmImage,
           "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
         ], log);
@@ -2055,6 +2110,7 @@ Use this table to track verified peer OpenClaw instances.
           "-p", `${port + 1}:${LITELLM_PORT}`,
           ...localStateMountArgs(effectiveConfig),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
+          ...localGatewayUserArgs(effectiveConfig.localFileOwner),
           litellmImage,
           "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
         ], log);
@@ -2298,11 +2354,12 @@ Use this table to track verified peer OpenClaw instances.
       `if [ -f /tmp/agent-source/exec-approvals.json ]; then`,
       `  cp -v /tmp/agent-source/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true`,
       `fi`,
-      runtimeOwnershipFixupCommand(),
+      runtimeOwnershipFixupCommand(result.config.localFileOwner),
     ].join("\n");
 
     const copyResult = await runCommand(runtime, [
       "run", "--rm",
+      ...localStateMaintenanceUserArgs(result.config.localFileOwner),
       ...localStateMountArgs(result.config),
       "-v", bindMountSpec(agentSourceDir, "/tmp/agent-source", "ro"),
       image, "sh", "-c", copyScript,
@@ -2327,6 +2384,7 @@ Use this table to track verified peer OpenClaw instances.
       try {
         const { stdout } = await execFileAsync(runtime, [
           "run", "--rm",
+          ...localStateMaintenanceUserArgs(result.config.localFileOwner),
           ...localStateMountArgs(result.config),
           image, "cat", LITELLM_KEY_PATH,
         ]);

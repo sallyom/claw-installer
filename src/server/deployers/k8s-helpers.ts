@@ -43,6 +43,9 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const VAULT_SECRET_PROVIDER_ALIAS = "vault";
 export const VAULT_SECRET_PROVIDER_PLUGIN_ID = "vault";
 export const VAULT_SECRET_PROVIDER_INTEGRATION_ID = "vault";
+export const ONEPASSWORD_SECRET_PROVIDER_ALIAS = "onepassword";
+export const ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID = "1password";
+export const ONEPASSWORD_SECRET_PROVIDER_INTEGRATION_ID = "onepassword";
 const ANTHROPIC_VERTEX_MAX_TOKENS = 128000;
 
 type ModelCatalogEntry = {
@@ -59,7 +62,8 @@ export function defaultImage(config: DeployConfig): string {
 export function tryParseProjectId(saJson: string): string {
   try {
     const parsed = JSON.parse(saJson);
-    return typeof parsed.project_id === "string" ? parsed.project_id : "";
+    if (typeof parsed.project_id === "string") return parsed.project_id;
+    return typeof parsed.quota_project_id === "string" ? parsed.quota_project_id : "";
   } catch {
     return "";
   }
@@ -530,11 +534,18 @@ function subagentConfig(policy?: string): { allowAgents: string[] } {
   }
 }
 
+function normalizeSecretRefId(ref: DeploySecretRef): string {
+  if (ref.provider === "onepassword" && ref.id.endsWith("/apiKey")) {
+    return `${ref.id.slice(0, -"/apiKey".length)}/credential`;
+  }
+  return ref.id;
+}
+
 function cloneSecretRef(ref: DeploySecretRef): Record<string, string> {
   return {
     source: ref.source,
     provider: ref.provider,
-    id: ref.id,
+    id: normalizeSecretRefId(ref),
   };
 }
 
@@ -555,6 +566,19 @@ export function buildVaultSecretProviderConfig(config: DeployConfig): Record<str
     pluginIntegration: {
       pluginId: VAULT_SECRET_PROVIDER_PLUGIN_ID,
       integrationId: VAULT_SECRET_PROVIDER_INTEGRATION_ID,
+    },
+  };
+}
+
+export function buildOnePasswordSecretProviderConfig(config: DeployConfig): Record<string, unknown> | undefined {
+  if (!config.onePasswordSecretsEnabled) {
+    return undefined;
+  }
+  return {
+    source: "exec",
+    pluginIntegration: {
+      pluginId: ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID,
+      integrationId: ONEPASSWORD_SECRET_PROVIDER_INTEGRATION_ID,
     },
   };
 }
@@ -660,6 +684,10 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
   const vaultProvider = buildVaultSecretProviderConfig(config);
   if (vaultProvider) {
     providers[VAULT_SECRET_PROVIDER_ALIAS] = vaultProvider;
+  }
+  const onePasswordProvider = buildOnePasswordSecretProviderConfig(config);
+  if (onePasswordProvider) {
+    providers[ONEPASSWORD_SECRET_PROVIDER_ALIAS] = onePasswordProvider;
   }
   let shouldDefineDefaultEnvProvider = false;
 
@@ -831,6 +859,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
     ...(shouldUseCodexOauth(config) ? [OPENAI_PROVIDER, CODEX_PLUGIN_ID] : []),
     ...(shouldUseOtel(config) ? ["diagnostics-otel"] : []),
     ...(config.vaultSecretsEnabled ? [VAULT_SECRET_PROVIDER_PLUGIN_ID] : []),
+    ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID] : []),
     ...((config.telegramBotToken || config.telegramBotTokenRef) ? ["telegram"] : []),
   ]));
   const controlUi: Record<string, unknown> = {
@@ -857,6 +886,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, [CODEX_PLUGIN_ID]: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
         ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
+        ...(config.onePasswordSecretsEnabled ? { [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
         ...(openShellPluginConfig ? { openshell: { enabled: true, config: openShellPluginConfig } } : {}),
       },
     },

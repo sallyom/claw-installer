@@ -30,6 +30,10 @@ function gatewayEnv(deployment: k8s.V1Deployment, name: string): k8s.V1EnvVar | 
   return (container?.env ?? []).find((e) => e.name === name);
 }
 
+function gatewayContainer(deployment: k8s.V1Deployment): k8s.V1Container | undefined {
+  return deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
+}
+
 describe("k8s state sync manifests", () => {
   const config: DeployConfig = makeConfig();
 
@@ -190,6 +194,49 @@ describe("k8s state sync manifests", () => {
         { name: "tmp-volume", mountPath: "/tmp" },
       ]),
     );
+  });
+
+  it("installs the Anthropic Vertex provider plugin for direct Claude Vertex mode", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        inferenceProvider: "vertex-anthropic",
+        vertexEnabled: true,
+        vertexProvider: "anthropic",
+        litellmProxy: false,
+        googleCloudProject: "test-project",
+        googleCloudLocation: "us-east5",
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const containers = deployment.spec?.template.spec?.containers ?? [];
+
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/anthropic-vertex-provider' --force");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list | grep -q 'anthropic-vertex'");
+    expect(containers.some((container) => container.name === "litellm")).toBe(false);
+  });
+
+  it("does not install the Anthropic Vertex provider plugin when LiteLLM handles Claude Vertex", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        inferenceProvider: "vertex-anthropic",
+        vertexEnabled: true,
+        vertexProvider: "anthropic",
+        litellmProxy: true,
+        googleCloudProject: "test-project",
+        googleCloudLocation: "us-east5",
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const containers = deployment.spec?.template.spec?.containers ?? [];
+
+    expect(pluginInit).toBeUndefined();
+    expect(containers.some((container) => container.name === "litellm")).toBe(true);
   });
 
   it("migrates the legacy PVC-root state layout into the runtime home", () => {
@@ -459,6 +506,16 @@ describe("gateway env vars in proxy mode", () => {
     expect(envNames).toContain("OPENAI_API_KEY");
   });
 
+  it("mounts an existing provider Secret as gateway environment", () => {
+    const deployment = deploymentManifest("ns", makeConfig({
+      providerSecretName: "openclaw-provider-secrets",
+    }));
+
+    expect(gatewayContainer(deployment)?.envFrom).toEqual([
+      { secretRef: { name: "openclaw-provider-secrets", optional: true } },
+    ]);
+  });
+
   it("materializes default env SecretRefs into the backing Secret data", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
@@ -558,6 +615,40 @@ describe("gateway env vars in proxy mode", () => {
     expect(env.CLAW_VAULT_KV_VERSION).toBe("2");
     expect(gatewayEnv(deployment, "VAULT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
       name: "openclaw-vault-token",
+      key: "token",
+    });
+  });
+
+  it("installs the 1Password plugin and injects its token Secret", () => {
+    const config = makeConfig({
+      onePasswordSecretsEnabled: true,
+      onePasswordVault: "Engineering",
+      onePasswordTokenSecretName: "openclaw-1password-token",
+      onePasswordTokenSecretKey: "token",
+    });
+
+    const deployment = deploymentManifest("ns", config);
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const cliInit = initContainers.find((container) => container.name === "install-1password-cli");
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const env = gatewayEnvMap(deployment);
+
+    expect(cliInit?.image).toBe("docker.io/1password/op:2");
+    expect(cliInit?.command?.[2]).toContain("cp \"$op_path\" /home/node/.openclaw/bin/op");
+    expect(cliInit?.command?.[2]).toContain("chmod 0700 /home/node/.config/op");
+    expect(cliInit?.command?.[2]).toContain("find /home/node/.config/op -type f -exec chmod 0600 {} +");
+    expect(cliInit?.command?.[2]).toContain("exec /home/node/.openclaw/bin/op --config /home/node/.config/op \"$@\"");
+    expect(cliInit?.volumeMounts).toEqual(
+      expect.arrayContaining([
+        { name: "openclaw-home", mountPath: "/home/node" },
+        { name: "tmp-volume", mountPath: "/tmp" },
+      ]),
+    );
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-1password' --force");
+    expect(env.CLAW_1PASSWORD_VAULT).toBe("Engineering");
+    expect(env.CLAW_1PASSWORD_OP).toBe("/home/node/.openclaw/bin/openclaw-op");
+    expect(gatewayEnv(deployment, "OP_SERVICE_ACCOUNT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
+      name: "openclaw-1password-token",
       key: "token",
     });
   });

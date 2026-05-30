@@ -41,6 +41,11 @@ export interface DeployConfig {
   vaultKvVersion?: string;
   vaultTokenSecretName?: string;
   vaultTokenSecretKey?: string;
+  onePasswordSecretsEnabled?: boolean;
+  onePasswordVault?: string;
+  onePasswordTokenSecretName?: string;
+  onePasswordTokenSecretKey?: string;
+  providerSecretName?: string;
   pluginInstallSpecs?: string[];
   secretsProvidersJson?: string;
   anthropicApiKeyRef?: DeploySecretRef;
@@ -138,6 +143,7 @@ export interface DeployConfig {
   // Local mode
   containerRuntime?: "podman" | "docker";
   containerRunArgs?: string;
+  localFileOwner?: string;
   podmanSecretMappings?: PodmanSecretMapping[];
   image?: string;
   port?: number;

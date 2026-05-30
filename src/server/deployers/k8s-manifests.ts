@@ -12,6 +12,7 @@ import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
 import { shouldUseOtel, OTEL_COLLECTOR_IMAGE, OTEL_GRPC_PORT, OTEL_HTTP_PORT, otelAgentEnv } from "./otel.js";
 import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumAgentEnv } from "./chromium.js";
+import { ANTHROPIC_VERTEX_PROVIDER } from "./openclaw-compat.js";
 import type { TreeEntry } from "../state-tree.js";
 import { loadAgentSourceBundle, mainWorkspaceShellCondition } from "./agent-source.js";
 import {
@@ -29,12 +30,20 @@ export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
 export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
 const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
 const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
+const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
+const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
+const ONEPASSWORD_CLI_IMAGE = "docker.io/1password/op:2";
+const ONEPASSWORD_CLI_BINARY_PATH = `${OPENCLAW_RUNTIME_DIR}/bin/op`;
+const ONEPASSWORD_CLI_PATH = `${OPENCLAW_RUNTIME_DIR}/bin/openclaw-op`;
+const ONEPASSWORD_CONFIG_DIR = `${OPENCLAW_RUNTIME_HOME}/.config/op`;
 
 function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const seen = new Set<string>();
   const specs: string[] = [];
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
+    ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
+    ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();
@@ -63,6 +72,14 @@ function pluginInstallCommand(spec: string): string {
 
 function usesOpenShellSandbox(config: DeployConfig): boolean {
   return Boolean(config.sandboxEnabled && config.sandboxBackend === "openshell");
+}
+
+function usesDirectAnthropicVertex(config: DeployConfig): boolean {
+  if (shouldUseLitellmProxy(config)) {
+    return false;
+  }
+  return config.inferenceProvider === "vertex-anthropic"
+    || Boolean(config.vertexEnabled && config.vertexProvider === "anthropic");
 }
 
 function openShellGatewayRegistrationScript(): string {
@@ -137,6 +154,9 @@ function configuredPluginsInstallScript(specs: string[]): string {
     ...(specs.includes(OPENSHELL_PLUGIN_SPEC)
       ? ["node openclaw.mjs plugins list | grep -q openshell"]
       : []),
+    ...(specs.includes(ANTHROPIC_VERTEX_PLUGIN_SPEC)
+      ? [`node openclaw.mjs plugins list | grep -q ${shellQuote(ANTHROPIC_VERTEX_PROVIDER)}`]
+      : []),
     "node openclaw.mjs plugins list || true",
   ].join("\n");
 }
@@ -147,6 +167,46 @@ function configuredPluginsInitContainer(image: string, specs: string[]): k8s.V1C
     image,
     configuredPluginsInstallScript(specs),
   );
+}
+
+function onePasswordCliInitContainer(): k8s.V1Container {
+  return {
+    name: "install-1password-cli",
+    image: ONEPASSWORD_CLI_IMAGE,
+    imagePullPolicy: "IfNotPresent",
+    command: [
+      "sh",
+      "-c",
+      [
+        "set -eu",
+        `mkdir -p ${OPENCLAW_RUNTIME_DIR}/bin ${ONEPASSWORD_CONFIG_DIR}`,
+        `chmod 0700 ${ONEPASSWORD_CONFIG_DIR}`,
+        "op_path=$(command -v op)",
+        `cp "$op_path" ${ONEPASSWORD_CLI_BINARY_PATH}`,
+        `chmod 0755 ${ONEPASSWORD_CLI_BINARY_PATH}`,
+        `cat > ${ONEPASSWORD_CLI_PATH} <<'EOF_OPENCLAW_OP'`,
+        "#!/bin/sh",
+        "set -eu",
+        `mkdir -p ${ONEPASSWORD_CONFIG_DIR}`,
+        `find ${ONEPASSWORD_CONFIG_DIR} -type d -exec chmod 0700 {} + 2>/dev/null || true`,
+        `find ${ONEPASSWORD_CONFIG_DIR} -type f -exec chmod 0600 {} + 2>/dev/null || true`,
+        "umask 077",
+        `exec ${ONEPASSWORD_CLI_BINARY_PATH} --config ${ONEPASSWORD_CONFIG_DIR} "$@"`,
+        "EOF_OPENCLAW_OP",
+        `chmod 0755 ${ONEPASSWORD_CLI_PATH}`,
+        `${ONEPASSWORD_CLI_PATH} --version`,
+      ].join("\n"),
+    ],
+    resources: {
+      requests: { memory: "32Mi", cpu: "25m" },
+      limits: { memory: "128Mi", cpu: "100m" },
+    },
+    volumeMounts: pluginInstallVolumeMounts(),
+    securityContext: {
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+    },
+  };
 }
 
 export function namespaceManifest(ns: string): k8s.V1Namespace {
@@ -354,6 +414,25 @@ function appendVaultPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): vo
   }
 }
 
+function appendOnePasswordPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): void {
+  if (!config.onePasswordSecretsEnabled) {
+    return;
+  }
+  if (config.onePasswordVault) {
+    envVars.push({ name: "CLAW_1PASSWORD_VAULT", value: config.onePasswordVault });
+  }
+  envVars.push({ name: "CLAW_1PASSWORD_OP", value: ONEPASSWORD_CLI_PATH });
+  envVars.push({
+    name: "OP_SERVICE_ACCOUNT_TOKEN",
+    valueFrom: {
+      secretKeyRef: {
+        name: config.onePasswordTokenSecretName || "openclaw-1password-token",
+        key: config.onePasswordTokenSecretKey || "OP_SERVICE_ACCOUNT_TOKEN",
+      },
+    },
+  });
+}
+
 export function serviceManifest(ns: string, config: DeployConfig): k8s.V1Service {
   const withA2a = Boolean(config.withA2a);
   return {
@@ -461,8 +540,8 @@ if [ -f ${OPENCLAW_HOME_VOLUME_MOUNT}/openclaw.json ] || [ -d ${OPENCLAW_HOME_VO
     mv "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || cp -R "$path" "${OPENCLAW_RUNTIME_DIR}/$base" 2>/dev/null || true
   done
 fi
-mkdir -p ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config
-chmod 700 ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config 2>/dev/null || true
+mkdir -p ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config ${ONEPASSWORD_CONFIG_DIR}
+chmod 700 ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config ${ONEPASSWORD_CONFIG_DIR} 2>/dev/null || true
 cp /config/openclaw.json ${OPENCLAW_RUNTIME_DIR}/openclaw.json
 chmod 600 ${OPENCLAW_RUNTIME_DIR}/openclaw.json
 mkdir -p ${OPENCLAW_RUNTIME_DIR}/bin
@@ -559,6 +638,8 @@ export function deploymentManifest(
     });
   }
   appendVaultPluginEnv(envVars, config);
+  appendOnePasswordPluginEnv(envVars, config);
+  const providerSecretName = config.providerSecretName?.trim();
 
   // OTEL collector env vars (tell the agent where to send traces)
   if (useOtel) {
@@ -670,6 +751,7 @@ export function deploymentManifest(
                 { name: "exec-approvals-config", mountPath: "/exec-approvals-src", readOnly: true },
               ],
             },
+            ...(config.onePasswordSecretsEnabled ? [onePasswordCliInitContainer()] : []),
             ...(pluginInstallSpecs.length > 0
               ? [configuredPluginsInitContainer(image, pluginInstallSpecs)]
               : []),
@@ -685,6 +767,9 @@ export function deploymentManifest(
                 ...(withA2a ? [{ name: "bridge", containerPort: 18790, protocol: "TCP" as const }] : []),
               ],
               env: envVars,
+              ...(providerSecretName
+                ? { envFrom: [{ secretRef: { name: providerSecretName, optional: true } }] }
+                : {}),
               resources: {
                 requests: { memory: "1Gi", cpu: "250m" },
                 limits: { memory: "4Gi", cpu: "1000m" },

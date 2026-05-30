@@ -10,7 +10,7 @@ import { detectGcpDefaults, defaultVertexLocation } from "../services/gcp.js";
 import { normalizeModelEndpointBaseUrl } from "../services/model-endpoint.js";
 import { namespaceName } from "../deployers/k8s-helpers.js";
 import { registry } from "../deployers/registry.js";
-import { k8sApiHttpCode } from "../services/k8s.js";
+import { coreApi, k8sApiHttpCode } from "../services/k8s.js";
 import { createLogCallback, sendStatus } from "../ws.js";
 import { validateUserSuppliedPath } from "../security.js";
 import {
@@ -19,8 +19,30 @@ import {
   shouldUseCodexOauth,
 } from "../deployers/codex-oauth.js";
 import { deploymentRateLimit } from "../rate-limit.js";
+import { isDeployModeAllowed } from "../installer-mode.js";
+import { hostedUserPrefix } from "../hosted-auth.js";
 
 const router = Router();
+
+const CODEX_PROVIDER_SECRET_AUTH_JSON_KEYS = [
+  "OPENAI_CODEX_AUTH_JSON",
+  "CODEX_OAUTH_AUTH_JSON",
+];
+const VERTEX_PROVIDER_SECRET_CREDENTIALS_JSON_KEYS = [
+  "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+  "GCP_SERVICE_ACCOUNT_JSON",
+];
+const VERTEX_PROVIDER_SECRET_PROJECT_KEYS = [
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "ANTHROPIC_VERTEX_PROJECT_ID",
+  "CLOUD_SDK_PROJECT",
+  "GOOGLE_VERTEX_PROJECT",
+];
+const VERTEX_PROVIDER_SECRET_LOCATION_KEYS = [
+  "GOOGLE_CLOUD_LOCATION",
+  "GOOGLE_VERTEX_LOCATION",
+];
 
 function normalizeSshMaterial(value: string): string {
   const withoutBom = value.replace(/^\uFEFF/, "");
@@ -32,6 +54,80 @@ function trimOptional(value: string | undefined): string | undefined {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function firstSecretValue(data: Record<string, string | undefined>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = trimOptional(data[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function tryParseGcpCredentialsProjectId(json: string | undefined): string | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = JSON.parse(json);
+    if (typeof parsed.project_id === "string" && parsed.project_id.trim()) {
+      return parsed.project_id.trim();
+    }
+    if (typeof parsed.quota_project_id === "string" && parsed.quota_project_id.trim()) {
+      return parsed.quota_project_id.trim();
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+export function applyProviderSecretDataDefaults(
+  config: DeployConfig,
+  data: Record<string, string | undefined>,
+): void {
+  if (
+    shouldUseCodexOauth(config)
+    && config.codexOauthMode !== "profile"
+    && !config.codexOauthAuthJson
+    && !config.codexOauthAuthJsonPath
+  ) {
+    config.codexOauthAuthJson = firstSecretValue(data, CODEX_PROVIDER_SECRET_AUTH_JSON_KEYS);
+  }
+
+  if (config.vertexEnabled) {
+    if (!config.gcpServiceAccountJson && !config.gcpServiceAccountPath) {
+      config.gcpServiceAccountJson = firstSecretValue(data, VERTEX_PROVIDER_SECRET_CREDENTIALS_JSON_KEYS);
+    }
+    if (!config.googleCloudProject) {
+      config.googleCloudProject = firstSecretValue(data, VERTEX_PROVIDER_SECRET_PROJECT_KEYS)
+        || tryParseGcpCredentialsProjectId(config.gcpServiceAccountJson);
+    }
+    if (!config.googleCloudLocation) {
+      config.googleCloudLocation = firstSecretValue(data, VERTEX_PROVIDER_SECRET_LOCATION_KEYS);
+    }
+  }
+}
+
+function needsProviderSecretJsonDefaults(config: DeployConfig): boolean {
+  return (
+    shouldUseCodexOauth(config)
+    && config.codexOauthMode !== "profile"
+    && !config.codexOauthAuthJson
+    && !config.codexOauthAuthJsonPath
+  ) || (
+    Boolean(config.vertexEnabled)
+    && (!config.gcpServiceAccountJson || !config.googleCloudProject || !config.googleCloudLocation)
+  );
+}
+
+async function readProviderSecretData(namespace: string, name: string): Promise<Record<string, string | undefined>> {
+  const secret = await coreApi().readNamespacedSecret({ namespace, name });
+  const data: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(secret.data || {})) {
+    if (typeof value === "string") {
+      data[key] = Buffer.from(value, "base64").toString("utf8");
+    }
+  }
+  return data;
 }
 
 export function normalizeVaultAddr(value: string | undefined): string | undefined {
@@ -60,6 +156,15 @@ function vaultSecretRef(id: string): DeploySecretRef {
   };
 }
 
+function onePasswordSecretRef(vault: string | undefined, item: string): DeploySecretRef {
+  const vaultName = trimOptional(vault) || "OpenClaw";
+  return {
+    source: "exec",
+    provider: "onepassword",
+    id: `op://${vaultName}/${item}/credential`,
+  };
+}
+
 export function applyVaultSecretRefDefaults(
   config: DeployConfig,
   selectedProviders?: string[],
@@ -82,6 +187,31 @@ export function applyVaultSecretRefDefaults(
   }
   if (selected("custom-endpoint") && !config.modelEndpointApiKeyRef) {
     config.modelEndpointApiKeyRef = vaultSecretRef("providers/endpoint/apiKey");
+  }
+}
+
+export function applyOnePasswordSecretRefDefaults(
+  config: DeployConfig,
+  selectedProviders?: string[],
+): void {
+  if (!config.onePasswordSecretsEnabled) {
+    return;
+  }
+  const selected = (provider: string) => !selectedProviders || selectedProviders.includes(provider);
+  if (selected("anthropic") && !config.anthropicApiKeyRef) {
+    config.anthropicApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "Anthropic");
+  }
+  if (selected("openai") && !config.openaiApiKeyRef) {
+    config.openaiApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "OpenAI");
+  }
+  if (selected("google") && !config.googleApiKeyRef) {
+    config.googleApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "Google");
+  }
+  if (selected("openrouter") && !config.openrouterApiKeyRef) {
+    config.openrouterApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "OpenRouter");
+  }
+  if (selected("custom-endpoint") && !config.modelEndpointApiKeyRef) {
+    config.modelEndpointApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "Endpoint");
   }
 }
 
@@ -224,6 +354,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.sshUser = trimOptional(config.sshUser);
   config.agentSourceDir = trimOptional(config.agentSourceDir);
   config.containerRunArgs = trimOptional(config.containerRunArgs);
+  config.localFileOwner = trimOptional(config.localFileOwner);
   config.sandboxOpenShellGatewayEndpoint = trimOptional(config.sandboxOpenShellGatewayEndpoint);
   config.podmanSecretMappings = normalizePodmanSecretMappings(config.podmanSecretMappings);
   config.modelFallbacks = normalizeModelFallbacks(config.modelFallbacks);
@@ -235,6 +366,10 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.vaultKvVersion = trimOptional(config.vaultKvVersion);
   config.vaultTokenSecretName = trimOptional(config.vaultTokenSecretName);
   config.vaultTokenSecretKey = trimOptional(config.vaultTokenSecretKey);
+  config.onePasswordVault = trimOptional(config.onePasswordVault);
+  config.onePasswordTokenSecretName = trimOptional(config.onePasswordTokenSecretName);
+  config.onePasswordTokenSecretKey = trimOptional(config.onePasswordTokenSecretKey);
+  config.providerSecretName = trimOptional(config.providerSecretName);
   config.pluginInstallSpecs = normalizeStringArray(config.pluginInstallSpecs);
   config.secretsProvidersJson = trimOptional(config.secretsProvidersJson);
 
@@ -259,6 +394,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     return;
   }
   applyVaultSecretRefDefaults(config, selectedProviders);
+  applyOnePasswordSecretRefDefaults(config, selectedProviders);
 
   let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson) {
@@ -299,11 +435,34 @@ router.post("/", deploymentRateLimit, async (req, res) => {
       return;
     }
   }
+  if (config.vaultSecretsEnabled && config.onePasswordSecretsEnabled) {
+    res.status(400).json({ error: "Choose either Vault or 1Password SecretRef wiring, not both" });
+    return;
+  }
+  if (config.onePasswordSecretsEnabled) {
+    const isClusterMode = config.mode === "kubernetes" || config.mode === "openshift";
+    if (isClusterMode && (!config.onePasswordTokenSecretName || !config.onePasswordTokenSecretKey)) {
+      res.status(400).json({
+        error: "onePasswordTokenSecretName and onePasswordTokenSecretKey are required when onePasswordSecretsEnabled is true",
+      });
+      return;
+    }
+    if (customSecretProviders && "onepassword" in customSecretProviders) {
+      res.status(400).json({
+        error: "Remove secretsProvidersJson.onepassword when onePasswordSecretsEnabled is true",
+      });
+      return;
+    }
+  }
 
   if (!config.mode || !config.agentName) {
     res.status(400).json({
       error: "Missing required fields: mode, agentName",
     });
+    return;
+  }
+  if (!isDeployModeAllowed(config.mode)) {
+    res.status(400).json({ error: `Deploy mode is disabled: ${config.mode}` });
     return;
   }
   if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshTarget?.trim()) {
@@ -363,7 +522,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
 
   // Default prefix to OS username
   if (!config.prefix) {
-    config.prefix = process.env.OPENCLAW_PREFIX || userInfo().username;
+    config.prefix = process.env.OPENCLAW_PREFIX || hostedUserPrefix() || userInfo().username;
   }
 
   // Fall back to server environment for image and credentials.
@@ -385,6 +544,36 @@ router.post("/", deploymentRateLimit, async (req, res) => {
       config.inferenceProvider = "openai";
     } else if (config.googleApiKey || config.googleApiKeyRef) {
       config.inferenceProvider = "google";
+    }
+  }
+
+  if (
+    config.providerSecretName
+    && (config.mode === "kubernetes" || config.mode === "openshift")
+    && needsProviderSecretJsonDefaults(config)
+  ) {
+    const ns = namespaceName(config);
+    try {
+      const providerSecretData = await readProviderSecretData(ns, config.providerSecretName);
+      applyProviderSecretDataDefaults(config, providerSecretData);
+    } catch (err) {
+      res.status(400).json({
+        error: `Cannot read provider Secret "${config.providerSecretName}" in namespace "${ns}": ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      });
+      return;
+    }
+    if (
+      shouldUseCodexOauth(config)
+      && config.codexOauthMode !== "profile"
+      && !config.codexOauthAuthJson
+      && !config.codexOauthAuthJsonPath
+    ) {
+      res.status(400).json({
+        error: `Provider Secret "${config.providerSecretName}" is missing ${CODEX_PROVIDER_SECRET_AUTH_JSON_KEYS.join(" or ")}`,
+      });
+      return;
     }
   }
 

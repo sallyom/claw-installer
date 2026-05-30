@@ -17,6 +17,7 @@ import type {
   LogCallback,
 } from "./types.js";
 import { namespaceName, deriveModel, detectUnavailableProvider, generateToken, usesDefaultEnvSecretRef } from "./k8s-helpers.js";
+import { applyInstallerConfigMap } from "./k8s-instance-config.js";
 import { loadWorkspaceFiles } from "./k8s-agent.js";
 import { loadAgentSourceBundle, loadAgentSourceCronJobs, loadAgentSourceExecApprovals, loadAgentSourceWorkspaceTree } from "./agent-source.js";
 import {
@@ -517,6 +518,12 @@ export class KubernetesDeployer implements Deployer {
       log("Could not save deploy config to host");
     }
 
+    try {
+      await applyInstallerConfigMap(ns, config, log);
+    } catch {
+      log("Could not save deploy config to cluster metadata");
+    }
+
     return {
       id,
       mode: "kubernetes",
@@ -747,7 +754,7 @@ export class KubernetesDeployer implements Deployer {
     const apps = appsApi();
     log(`Deleting resources in namespace ${ns}...`);
 
-    // Delete resources explicitly before namespace to avoid stuck Terminating state.
+    // Delete installer-managed resources while preserving the namespace/project.
     const deletes: Array<{ name: string; fn: () => Promise<unknown> }> = [
       { name: "Deployment", fn: () => apps.deleteNamespacedDeployment({ name: "openclaw", namespace: ns }) },
       { name: "Service", fn: () => core.deleteNamespacedService({ name: "openclaw", namespace: ns }) },
@@ -795,13 +802,6 @@ export class KubernetesDeployer implements Deployer {
       }
     }
 
-    log(`Deleting namespace ${ns}...`);
-    try {
-      await core.deleteNamespace({ name: ns });
-      log(`Namespace ${ns} deleted`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log(`Warning: ${message}`);
-    }
+    log(`OpenClaw resources deleted; namespace ${ns} preserved`);
   }
 }

@@ -9,6 +9,7 @@ import {
   runtimeOwnershipFixupCommand,
   shouldAlwaysPull,
 } from "../local.js";
+import { localStateMaintenanceUserArgs } from "../local-runtime.js";
 import { __testing as localPluginsTesting } from "../local-plugins.js";
 
 describe("shouldAlwaysPull", () => {
@@ -193,6 +194,19 @@ describe("local Vault SecretRef wiring", () => {
     }
   });
 
+  it("runs local gateway as configured file owner after extra run args", () => {
+    const args = buildRunArgs({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      localFileOwner: "501:20",
+      containerRunArgs: "--security-opt label=disable --user 1000:1000",
+    }, "podman", "openclaw-demo", 18789);
+
+    const imageIndex = args.indexOf("ghcr.io/openclaw/openclaw:latest");
+    expect(args.slice(imageIndex - 2, imageIndex)).toEqual(["--user", "501:20"]);
+  });
+
   it("keeps plugin installs plugin-root owned for plugin-managed Vault providers", () => {
     const plan = localPluginsTesting.localPluginInstallPlan({
       mode: "local",
@@ -203,6 +217,73 @@ describe("local Vault SecretRef wiring", () => {
     });
 
     expect(plan.specs).toEqual(["git:github.com/sallyom/claw-vault"]);
+  });
+});
+
+describe("local 1Password SecretRef wiring", () => {
+  it("generates 1Password and OpenRouter provider config for local deploys", () => {
+    const rendered = JSON.parse(buildOpenClawConfig({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      inferenceProvider: "openrouter",
+      onePasswordSecretsEnabled: true,
+      onePasswordVault: "Engineering",
+      openrouterApiKeyRef: {
+        source: "exec",
+        provider: "onepassword",
+        id: "op://Engineering/OpenRouter/apiKey",
+      },
+    }, "gateway-token"));
+
+    expect(rendered.secrets.providers.onepassword).toMatchObject({
+      source: "exec",
+      pluginIntegration: {
+        pluginId: "1password",
+        integrationId: "onepassword",
+      },
+    });
+    expect(rendered.plugins.allow).toEqual(expect.arrayContaining(["1password"]));
+    expect(rendered.plugins.entries["1password"]).toEqual({ enabled: true });
+    expect(rendered.models.providers.openrouter.apiKey).toEqual({
+      source: "exec",
+      provider: "onepassword",
+      id: "op://Engineering/OpenRouter/credential",
+    });
+  });
+
+  it("passes local 1Password environment to the gateway container", () => {
+    const previousToken = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+    process.env.OP_SERVICE_ACCOUNT_TOKEN = "test-op-token";
+    try {
+      const args = buildRunArgs({
+        mode: "local",
+        agentName: "demo",
+        agentDisplayName: "Demo",
+        onePasswordSecretsEnabled: true,
+        onePasswordVault: "Engineering",
+      }, "podman", "openclaw-demo", 18789);
+
+      expect(args).toContain("OP_SERVICE_ACCOUNT_TOKEN=test-op-token");
+      expect(args).toContain("CLAW_1PASSWORD_VAULT=Engineering");
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
+      } else {
+        process.env.OP_SERVICE_ACCOUNT_TOKEN = previousToken;
+      }
+    }
+  });
+
+  it("auto-installs the 1Password plugin for local containers", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      onePasswordSecretsEnabled: true,
+    });
+
+    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-1password"]);
   });
 });
 
@@ -271,5 +352,21 @@ describe("runtimeOwnershipFixupCommand", () => {
     expect(stripWorldIdx).toBeGreaterThan(chownIdx);
     expect(stateDirIdx).toBeGreaterThan(stripWorldIdx);
     expect(configIdx).toBeGreaterThan(stateDirIdx);
+  });
+
+  it("can target a configured local file owner", () => {
+    const cmd = runtimeOwnershipFixupCommand("501:20");
+
+    expect(cmd).toContain("chown -R 501:20 /home/node/.openclaw");
+    expect(cmd).toContain("chmod -R o-rwx /home/node/.openclaw");
+  });
+
+  it("rejects invalid local file owners", () => {
+    expect(() => runtimeOwnershipFixupCommand("node:node")).toThrow("expected UID or UID:GID");
+  });
+
+  it("runs maintenance containers as root so ownership can be repaired", () => {
+    expect(localStateMaintenanceUserArgs()).toEqual(["--user", "0"]);
+    expect(localStateMaintenanceUserArgs("501:20")).toEqual(["--user", "0"]);
   });
 });

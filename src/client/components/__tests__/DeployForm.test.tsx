@@ -37,6 +37,43 @@ function mockHealthResponse(deployers: DeployerStub[], overrides: Record<string,
   });
 }
 
+function mockHostedFetch(
+  deployers: DeployerStub[],
+  overrides: Record<string, unknown>,
+  providerSecretStatus: Record<string, unknown> = { exists: true, keys: ["OPENAI_API_KEY"] },
+) {
+  return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/health")) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => healthJson(deployers, overrides),
+      } as Response);
+    }
+    if (url.endsWith("/api/configs")) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => [],
+      } as Response);
+    }
+    if (url.endsWith("/api/configs/provider-secret-status")) {
+      const body = init?.body ? JSON.parse(String(init.body)) as { namespace?: string; name?: string } : {};
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          namespace: body.namespace || "testuser-openclaw",
+          name: body.name || "openclaw-provider-secrets",
+          ...providerSecretStatus,
+        }),
+      } as Response);
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({}),
+    } as Response);
+  }) as unknown as typeof global.fetch;
+}
+
 describe("DeployForm deployer visibility (issue #10)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -79,6 +116,78 @@ describe("DeployForm deployer visibility (issue #10)", () => {
 
     // Available plugin deployer should be visible
     expect(screen.getByText("OpenShift")).toBeTruthy();
+  });
+
+  it("only shows cluster deployers returned by hosted mode health", async () => {
+    global.fetch = mockHostedFetch(
+      [
+        { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false },
+      ],
+      { runMode: "hosted", allowedDeployModes: ["openshift"] },
+    );
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    expect(await screen.findByText("OpenShift")).toBeTruthy();
+    expect(screen.queryByText("This Machine")).toBeNull();
+  });
+
+  it("uses provider Secret guidance and disables Vertex credential browsing in hosted mode", async () => {
+    global.fetch = mockHostedFetch(
+      [
+        { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false },
+      ],
+      {
+        runMode: "hosted",
+        allowedDeployModes: ["openshift"],
+        k8sAvailable: true,
+        isOpenShift: true,
+      },
+    );
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    expect(await screen.findByDisplayValue("openclaw-provider-secrets")).toBeTruthy();
+    expect(screen.getByText(/Create this Secret in the target namespace before deploying/i)).toBeTruthy();
+
+    const providerSelect = screen.getAllByRole("combobox").find((element) =>
+      Array.from((element as HTMLSelectElement).options).some((option) => option.value === "vertex-anthropic"),
+    ) as HTMLSelectElement | undefined;
+    expect(providerSelect).toBeTruthy();
+    fireEvent.change(providerSelect!, { target: { value: "vertex-anthropic" } });
+
+    expect(await screen.findByText("Google Cloud Credentials (JSON)")).toBeTruthy();
+    expect(screen.getAllByText(/GOOGLE_APPLICATION_CREDENTIALS_JSON/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Browse")).toBeNull();
+  });
+
+  it("warns hosted users when the selected provider Secret is missing", async () => {
+    global.fetch = mockHostedFetch(
+      [
+        { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false },
+      ],
+      {
+        runMode: "hosted",
+        allowedDeployModes: ["openshift"],
+        k8sAvailable: true,
+        isOpenShift: true,
+      },
+      {
+        exists: false,
+        reason: "notFound",
+        error: 'Secret "openclaw-provider-secrets" was not found in namespace "testuser-openclaw".',
+      },
+    );
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    expect(await screen.findByText(/For API-key providers/i)).toBeTruthy();
+    expect(screen.getByText(/--from-literal=OPENAI_API_KEY=sk-/i)).toBeTruthy();
+    expect(screen.getByText(/--from-file=GOOGLE_APPLICATION_CREDENTIALS_JSON/i)).toBeTruthy();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Secret "openclaw-provider-secrets" was not found/i)).toBeTruthy();
+    });
   });
 
   it("hides disabled plugin deployers from mode selector", async () => {
@@ -675,6 +784,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
               prefix: "testuser",
               image: "",
               containerRuntime: "podman",
+              localFileOwner: "501:20",
             },
           }),
         };
@@ -698,6 +808,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
       screen.getByPlaceholderText("e.g., --userns=keep-id --security-opt label=disable"),
       { target: { value: "--userns=keep-id -v '/tmp/my data:/data:Z'" } },
     );
+    fireEvent.click(screen.getByRole("button", { name: "Use my UID:GID" }));
     fireEvent.click(screen.getAllByRole("button", { name: /deploy openclaw/i }).at(-1)!);
 
     await waitFor(() => {
@@ -710,6 +821,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
     const deployCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/deploy");
     const body = JSON.parse(String((deployCall?.[1] as RequestInit | undefined)?.body || "{}"));
     expect(body.containerRunArgs).toBe("--userns=keep-id -v '/tmp/my data:/data:Z'");
+    expect(body.localFileOwner).toBe("501:20");
   });
 
   it("fetches models from the OpenAI-compatible endpoint and selects the returned label", async () => {

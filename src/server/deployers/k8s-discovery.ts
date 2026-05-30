@@ -1,7 +1,7 @@
 import * as k8s from "@kubernetes/client-node";
 import { readdir, writeFile, unlink, access } from "node:fs/promises";
 import { join } from "node:path";
-import { coreApi, appsApi } from "../services/k8s.js";
+import { coreApi, appsApi, loadKubeConfig } from "../services/k8s.js";
 import { installerDataDir } from "../paths.js";
 import { debugPerf } from "../debug.js";
 
@@ -75,6 +75,20 @@ async function loadSavedNamespaces(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function listOpenShiftProjects(): Promise<string[]> {
+  const customApi = loadKubeConfig().makeApiClient(k8s.CustomObjectsApi);
+  const result = await customApi.listClusterCustomObject({
+    group: "project.openshift.io",
+    version: "v1",
+    plural: "projects",
+  }) as { items?: Array<{ metadata?: { name?: string }; status?: { phase?: string } }> };
+
+  return (result.items || [])
+    .filter((project) => project.status?.phase !== "Terminating")
+    .map((project) => project.metadata?.name || "")
+    .filter(Boolean);
 }
 
 export function derivePodInfo(pod: k8s.V1Pod): K8sPodInfo {
@@ -162,6 +176,14 @@ export function deriveInstanceStatus(
   return { status: "deploying", statusDetail: detail };
 }
 
+function discoverOpenClawImage(dep: k8s.V1Deployment): string {
+  const containers = dep.spec?.template?.spec?.containers || [];
+  return containers.find((container) => container.name === "gateway")?.image
+    || containers.find((container) => container.name !== "oauth-proxy")?.image
+    || containers[0]?.image
+    || "";
+}
+
 async function probeNamespace(
   nsName: string,
   apps: ReturnType<typeof appsApi>,
@@ -174,7 +196,7 @@ async function probeNamespace(
     const labels = dep.metadata?.labels || {};
     const replicas = dep.spec?.replicas ?? 1;
     const readyReplicas = dep.status?.readyReplicas ?? 0;
-    const image = dep.spec?.template?.spec?.containers?.[0]?.image || "";
+    const image = discoverOpenClawImage(dep);
 
     const tPods = performance.now();
     const podList = await core.listNamespacedPod({
@@ -234,6 +256,16 @@ export async function discoverK8sInstances(options: DiscoverK8sInstancesOptions 
       debugPerf(`[perf]         discover: listNamespace: ${(performance.now() - tListNs).toFixed(0)}ms, ${namespaces.size} total namespaces`);
     } catch {
       debugPerf(`[perf]         discover: listNamespace: ${(performance.now() - tListNs).toFixed(0)}ms (failed/forbidden)`);
+    }
+
+    const tProjects = performance.now();
+    try {
+      for (const nsName of await listOpenShiftProjects()) {
+        namespaces.add(nsName);
+      }
+      debugPerf(`[perf]         discover: listOpenShiftProjects: ${(performance.now() - tProjects).toFixed(0)}ms, ${namespaces.size} total namespaces`);
+    } catch {
+      debugPerf(`[perf]         discover: listOpenShiftProjects: ${(performance.now() - tProjects).toFixed(0)}ms (failed/not openshift)`);
     }
 
     const probes = [...namespaces].map((nsName) => probeNamespace(nsName, apps, core));

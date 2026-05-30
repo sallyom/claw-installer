@@ -9,6 +9,7 @@ import {
   JAEGER_UI_PORT,
 } from "./otel.js";
 import type { DeployConfig, LogCallback } from "./types.js";
+import { localGatewayUserArgs, localStateMaintenanceUserArgs, normalizeLocalFileOwner } from "./local-runtime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,14 +43,17 @@ export async function startOtelSidecar(
 
   const otelYaml = generateOtelConfig(config);
   const otelB64 = Buffer.from(otelYaml).toString("base64");
+  const localFileOwner = normalizeLocalFileOwner(config.localFileOwner);
 
   const initScript = [
     `mkdir -p ${OTEL_STATE_DIR}/otel`,
     `echo '${otelB64}' | base64 -d > ${OTEL_CONFIG_PATH}`,
+    ...(localFileOwner ? [`chown -R ${localFileOwner} ${OTEL_STATE_DIR} 2>/dev/null || true`] : []),
   ].join(" && ");
 
   const initResult = await runCommand(runtime, [
     "run", "--rm",
+    ...localStateMaintenanceUserArgs(config.localFileOwner),
     "-v", `${volumeName}:${OTEL_STATE_DIR}`,
     image, "sh", "-c", initScript,
   ], log);
@@ -84,6 +88,7 @@ export async function startOtelSidecar(
       "--name", otelName,
       "--pod", podNameOrNull,
       "-v", `${volumeName}:${OTEL_STATE_DIR}:ro`,
+      ...localGatewayUserArgs(config.localFileOwner),
       otelImage,
       "--config", OTEL_CONFIG_PATH,
     ], log);
@@ -94,6 +99,7 @@ export async function startOtelSidecar(
       "--name", otelName,
       "--network", `container:${litellmContainerOrNull}`,
       "-v", `${volumeName}:${OTEL_STATE_DIR}:ro`,
+      ...localGatewayUserArgs(config.localFileOwner),
       otelImage,
       "--config", OTEL_CONFIG_PATH,
     ], log);
@@ -107,6 +113,7 @@ export async function startOtelSidecar(
         "--name", otelName,
         "--pod", podNameOrNull || otelName + "-pod",
         "-v", `${volumeName}:${OTEL_STATE_DIR}:ro`,
+        ...localGatewayUserArgs(config.localFileOwner),
         otelImage,
         "--config", OTEL_CONFIG_PATH,
       ], log);
@@ -117,6 +124,7 @@ export async function startOtelSidecar(
         "--name", otelName,
         "-p", `${port}:18789`,
         "-v", `${volumeName}:${OTEL_STATE_DIR}:ro`,
+        ...localGatewayUserArgs(config.localFileOwner),
         otelImage,
         "--config", OTEL_CONFIG_PATH,
       ], log);

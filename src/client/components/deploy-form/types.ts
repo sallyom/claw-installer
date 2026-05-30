@@ -44,6 +44,9 @@ export interface ServerDefaults {
   modelEndpoint: string;
   prefix: string;
   image: string;
+  runMode?: "desktop" | "hosted";
+  allowedDeployModes?: string[];
+  localFileOwner?: string;
   containerRuntime?: string;
   k8sAvailable?: boolean;
   k8sContext?: string;
@@ -84,6 +87,7 @@ export interface DeployFormConfig {
   agentDisplayName: string;
   image: string;
   containerRunArgs: string;
+  localFileOwner: string;
   podmanSecretMappingsText: string;
   vaultSecretsEnabled: boolean;
   vaultAddr: string;
@@ -92,6 +96,11 @@ export interface DeployFormConfig {
   vaultKvVersion: string;
   vaultTokenSecretName: string;
   vaultTokenSecretKey: string;
+  onePasswordSecretsEnabled: boolean;
+  onePasswordVault: string;
+  onePasswordTokenSecretName: string;
+  onePasswordTokenSecretKey: string;
+  providerSecretName: string;
   pluginInstallSpecsText: string;
   secretsProvidersJson: string;
   anthropicApiKeyRefSource: SecretRefSource;

@@ -7,7 +7,7 @@ import deployRoutes from "./routes/deploy.js";
 import statusRoutes from "./routes/status.js";
 import pluginsRoutes from "./routes/plugins.js";
 import { detectRuntime } from "./services/container.js";
-import { isClusterReachable, currentContext, currentNamespace, resetKubeConfig } from "./services/k8s.js";
+import { isClusterReachable, currentContext, currentNamespace, resetKubeConfig, coreApi, k8sApiHttpCode } from "./services/k8s.js";
 import { stopAllK8sPortForwards } from "./services/k8s-port-forward.js";
 import { detectGcpDefaults } from "./services/gcp.js";
 import { fetchModelEndpointCatalog } from "./services/model-endpoint.js";
@@ -27,6 +27,10 @@ import {
   validateUserSuppliedPath,
 } from "./security.js";
 import { configReadRateLimit, frontendRateLimit, modelDiscoveryRateLimit } from "./rate-limit.js";
+import { allowedDeployModes, installerRunMode, isDeployModeAllowed } from "./installer-mode.js";
+import { hostedRequestContextMiddleware, hostedUserPrefix } from "./hosted-auth.js";
+import { currentHostedUser } from "./request-context.js";
+import { listClusterSavedConfigs } from "./routes/status-instances.js";
 
 // Register built-in deployers
 registry.register({
@@ -60,7 +64,12 @@ const server = createServer(app);
 const PORT = installerPort();
 const BIND_HOST = installerBindHost();
 
+if (installerRunMode() === "hosted") {
+  app.set("trust proxy", 1);
+}
+
 app.use(express.json());
+app.use("/api", hostedRequestContextMiddleware);
 
 // API routes
 app.use("/api/deploy", deployRoutes);
@@ -74,16 +83,19 @@ app.get("/api/health", async (_req, res) => {
   const k8sReachable = await isClusterReachable();
   const detected = await registry.detect();
   const disabledModes = new Set(await getDisabledModes());
+  const allowedModes = allowedDeployModes();
 
   res.json({
     status: "ok",
+    runMode: installerRunMode(),
+    allowedDeployModes: Array.from(allowedModes),
     containerRuntime: runtime,
     k8sAvailable: k8sReachable,
     k8sContext: k8sReachable ? currentContext() : "",
     k8sNamespace: k8sReachable ? currentNamespace() : "",
     isOpenShift: detected.some((d) => d.mode === "openshift"),
     version: "0.1.0",
-    deployers: registry.list().map((reg) => {
+    deployers: registry.list().filter((reg) => isDeployModeAllowed(reg.mode)).map((reg) => {
       const available = detected.some((d) => d.mode === reg.mode);
       return {
         mode: reg.mode,
@@ -104,8 +116,12 @@ app.get("/api/health", async (_req, res) => {
       hasTelegramToken: !!process.env.TELEGRAM_BOT_TOKEN,
       telegramAllowFrom: process.env.TELEGRAM_ALLOW_FROM || "",
       modelEndpoint: process.env.MODEL_ENDPOINT || "",
-      prefix: process.env.OPENCLAW_PREFIX || userInfo().username,
+      prefix: process.env.OPENCLAW_PREFIX || hostedUserPrefix() || userInfo().username,
       image: process.env.OPENCLAW_IMAGE || "",
+      hostedUser: currentHostedUser()?.username || "",
+      localFileOwner: typeof process.getuid === "function"
+        ? `${process.getuid()}:${typeof process.getgid === "function" ? process.getgid() : process.getuid()}`
+        : "",
     },
   });
 });
@@ -122,9 +138,62 @@ app.get("/api/configs/gcp-defaults", async (_req, res) => {
   });
 });
 
+app.post("/api/configs/provider-secret-status", configReadRateLimit, async (req, res) => {
+  const namespace = String(req.body?.namespace || "").trim();
+  const name = String(req.body?.name || "").trim();
+  if (!namespace || !name) {
+    res.status(400).json({ error: "namespace and name are required" });
+    return;
+  }
+
+  try {
+    const secret = await coreApi().readNamespacedSecret({ namespace, name });
+    res.json({
+      namespace,
+      name,
+      exists: true,
+      keys: Object.keys(secret.data || {}).sort(),
+    });
+  } catch (err) {
+    const code = k8sApiHttpCode(err);
+    if (code === 404) {
+      res.json({
+        namespace,
+        name,
+        exists: false,
+        reason: "notFound",
+        error: `Secret "${name}" was not found in namespace "${namespace}".`,
+      });
+      return;
+    }
+    if (code === 403) {
+      res.json({
+        namespace,
+        name,
+        exists: false,
+        reason: "forbidden",
+        forbidden: true,
+        error: `You do not have permission to read Secret "${name}" in namespace "${namespace}".`,
+      });
+      return;
+    }
+    res.status(500).json({
+      namespace,
+      name,
+      exists: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 // List saved instance configs from ~/.openclaw/installer/local/*/.env
 // and ~/.openclaw/installer/k8s/*/deploy-config.json
 app.get("/api/configs", configReadRateLimit, async (_req, res) => {
+  if (installerRunMode() === "hosted") {
+    res.json(await listClusterSavedConfigs());
+    return;
+  }
+
   const baseDir = installerDataDir();
   const configs: Array<{ name: string; type: string; vars: Record<string, unknown> }> = [];
 

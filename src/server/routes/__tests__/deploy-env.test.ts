@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DeployConfig } from "../../deployers/types.js";
-import { applyServerEnvFallbacks, applyVaultSecretRefDefaults, normalizeVaultAddr } from "../deploy.js";
+import {
+  applyProviderSecretDataDefaults,
+  applyOnePasswordSecretRefDefaults,
+  applyServerEnvFallbacks,
+  applyVaultSecretRefDefaults,
+  normalizeVaultAddr,
+} from "../deploy.js";
 
 function makeConfig(overrides: Partial<DeployConfig> = {}): DeployConfig {
   return {
@@ -165,6 +171,134 @@ describe("applyVaultSecretRefDefaults", () => {
       provider: "custom",
       id: "openai",
     });
+  });
+});
+
+describe("applyOnePasswordSecretRefDefaults", () => {
+  it("defaults selected provider refs to 1Password when 1Password wiring is enabled", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      onePasswordSecretsEnabled: true,
+      onePasswordVault: "Engineering",
+    });
+
+    applyOnePasswordSecretRefDefaults(config, ["openrouter"]);
+
+    expect(config.openrouterApiKeyRef).toEqual({
+      source: "exec",
+      provider: "onepassword",
+      id: "op://Engineering/OpenRouter/credential",
+    });
+    expect(config.openaiApiKeyRef).toBeUndefined();
+  });
+
+  it("does not overwrite explicit SecretRefs", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      onePasswordSecretsEnabled: true,
+      openrouterApiKeyRef: {
+        source: "exec",
+        provider: "custom",
+        id: "openrouter",
+      },
+    });
+
+    applyOnePasswordSecretRefDefaults(config, ["openrouter"]);
+
+    expect(config.openrouterApiKeyRef).toEqual({
+      source: "exec",
+      provider: "custom",
+      id: "openrouter",
+    });
+  });
+});
+
+describe("applyProviderSecretDataDefaults", () => {
+  it("hydrates Codex OAuth auth.json from a provider Secret", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      inferenceProvider: "openai-codex",
+      codexOauthMode: "codex-cli",
+      codexOauthProfileId: "openai-codex:default",
+    });
+    const authJson = JSON.stringify({
+      auth_mode: "chatgpt",
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+      },
+    });
+
+    applyProviderSecretDataDefaults(config, {
+      OPENAI_CODEX_AUTH_JSON: authJson,
+    });
+
+    expect(config.codexOauthAuthJson).toBe(authJson);
+  });
+
+  it("hydrates Vertex credentials and location defaults from a provider Secret", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      inferenceProvider: "vertex-anthropic",
+      vertexEnabled: true,
+      vertexProvider: "anthropic",
+    });
+    const credentialsJson = JSON.stringify({
+      type: "service_account",
+      project_id: "vertex-project",
+    });
+
+    applyProviderSecretDataDefaults(config, {
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: credentialsJson,
+      GOOGLE_CLOUD_PROJECT: "vertex-project",
+      GOOGLE_CLOUD_LOCATION: "us-east5",
+    });
+
+    expect(config.gcpServiceAccountJson).toBe(credentialsJson);
+    expect(config.googleCloudProject).toBe("vertex-project");
+    expect(config.googleCloudLocation).toBe("us-east5");
+  });
+
+  it("hydrates Vertex project from ADC quota_project_id in a provider Secret", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      inferenceProvider: "vertex-anthropic",
+      vertexEnabled: true,
+      vertexProvider: "anthropic",
+    });
+    const credentialsJson = JSON.stringify({
+      type: "authorized_user",
+      quota_project_id: "quota-project",
+    });
+
+    applyProviderSecretDataDefaults(config, {
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: credentialsJson,
+    });
+
+    expect(config.gcpServiceAccountJson).toBe(credentialsJson);
+    expect(config.googleCloudProject).toBe("quota-project");
+  });
+
+  it("does not overwrite explicit Vertex form values", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      inferenceProvider: "vertex-anthropic",
+      vertexEnabled: true,
+      vertexProvider: "anthropic",
+      googleCloudProject: "form-project",
+      googleCloudLocation: "us-west1",
+      gcpServiceAccountJson: "{\"project_id\":\"form-project\"}",
+    });
+
+    applyProviderSecretDataDefaults(config, {
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: "{\"project_id\":\"secret-project\"}",
+      GOOGLE_CLOUD_PROJECT: "secret-project",
+      GOOGLE_CLOUD_LOCATION: "us-east5",
+    });
+
+    expect(config.gcpServiceAccountJson).toBe("{\"project_id\":\"form-project\"}");
+    expect(config.googleCloudProject).toBe("form-project");
+    expect(config.googleCloudLocation).toBe("us-west1");
   });
 });
 

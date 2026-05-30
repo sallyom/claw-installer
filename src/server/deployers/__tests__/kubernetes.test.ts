@@ -19,7 +19,7 @@ vi.mock("node:http", () => ({
 }));
 
 import http from "node:http";
-import { appsApi, coreApi } from "../../services/k8s.js";
+import { appsApi, coreApi, loadKubeConfig } from "../../services/k8s.js";
 import { ensureK8sPortForward } from "../../services/k8s-port-forward.js";
 import { KubernetesDeployer } from "../kubernetes.js";
 
@@ -280,5 +280,41 @@ describe("KubernetesDeployer.status", () => {
     const result = await deployer.status(baseResult);
     expect(http.get).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("running");
+  });
+});
+
+describe("KubernetesDeployer.teardown", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("deletes OpenClaw resources without deleting the namespace", async () => {
+    const deleteNamespace = vi.fn().mockResolvedValue({});
+    const deleteResource = vi.fn().mockResolvedValue({});
+    const deleteCustomObject = vi.fn().mockResolvedValue({});
+    vi.mocked(appsApi).mockReturnValue({
+      deleteNamespacedDeployment: deleteResource,
+    } as any);
+    vi.mocked(coreApi).mockReturnValue({
+      deleteNamespacedService: deleteResource,
+      deleteNamespacedServiceAccount: deleteResource,
+      deleteNamespacedSecret: deleteResource,
+      deleteNamespacedConfigMap: deleteResource,
+      deleteNamespacedPersistentVolumeClaim: deleteResource,
+      deleteNamespace,
+    } as any);
+    vi.mocked(loadKubeConfig).mockReturnValue({
+      makeApiClient: vi.fn(() => ({
+        deleteNamespacedCustomObject: deleteCustomObject,
+      })),
+    } as any);
+    const logs: string[] = [];
+
+    await new KubernetesDeployer().teardown(baseResult, (line) => logs.push(line));
+
+    expect(deleteResource).toHaveBeenCalled();
+    expect(deleteCustomObject).toHaveBeenCalled();
+    expect(deleteNamespace).not.toHaveBeenCalled();
+    expect(logs).toContain("OpenClaw resources deleted; namespace user-lynx-openclaw preserved");
   });
 });

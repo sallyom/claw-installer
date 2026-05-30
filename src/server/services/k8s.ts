@@ -1,17 +1,56 @@
 import * as k8s from "@kubernetes/client-node";
 import { Writable } from "node:stream";
+import { currentRequestContext, type RequestContext } from "../request-context.js";
 
 let _kc: k8s.KubeConfig | null = null;
+const requestKubeConfigs = new WeakMap<RequestContext, k8s.KubeConfig>();
 
 /**
  * Load kubeconfig from default locations (~/.kube/config or in-cluster SA).
  * Cached after first call.
  */
 export function loadKubeConfig(): k8s.KubeConfig {
+  const context = currentRequestContext();
+  if (context?.hostedUser?.token) {
+    return loadRequestKubeConfig(context);
+  }
   if (_kc) return _kc;
   const kc = new k8s.KubeConfig();
   kc.loadFromDefault({ onInvalidEntry: "filter" });
   _kc = kc;
+  return kc;
+}
+
+function loadDefaultKubeConfig(): k8s.KubeConfig {
+  if (_kc) return _kc;
+  const kc = new k8s.KubeConfig();
+  kc.loadFromDefault({ onInvalidEntry: "filter" });
+  _kc = kc;
+  return kc;
+}
+
+function loadRequestKubeConfig(context: RequestContext): k8s.KubeConfig {
+  const cached = requestKubeConfigs.get(context);
+  if (cached) return cached;
+
+  const base = loadDefaultKubeConfig();
+  const baseCluster = base.getCurrentCluster();
+  const hostedUser = context.hostedUser;
+  if (!baseCluster || !hostedUser) {
+    return base;
+  }
+
+  const clusterName = baseCluster.name || "cluster";
+  const userName = `hosted:${hostedUser.username}`;
+  const contextName = "hosted-user";
+  const kc = new k8s.KubeConfig();
+  kc.loadFromOptions({
+    clusters: [baseCluster],
+    users: [{ name: userName, token: hostedUser.token }],
+    contexts: [{ name: contextName, cluster: clusterName, user: userName }],
+    currentContext: contextName,
+  });
+  requestKubeConfigs.set(context, kc);
   return kc;
 }
 

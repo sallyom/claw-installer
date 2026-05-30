@@ -22,7 +22,7 @@ import {
 import { ProviderSection } from "./deploy-form/ProviderSection.js";
 import { SandboxSection } from "./deploy-form/SandboxSection.js";
 import { PluginInstallSection } from "./deploy-form/PluginInstallSection.js";
-import { ExternalSecretProvidersSection } from "./deploy-form/ExternalSecretProvidersSection.js";
+import { ExternalSecretProvidersSection, type ProviderSecretStatus } from "./deploy-form/ExternalSecretProvidersSection.js";
 import type {
   DeployFormConfig,
   DeployerInfo,
@@ -46,6 +46,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   const [autoLoadedEnvDir, setAutoLoadedEnvDir] = useState<string | null>(null);
   const [inferenceProvider, setInferenceProvider] = useState<InferenceProvider>("anthropic");
   const [selectedProviders, setSelectedProviders] = useState<InferenceProvider[]>(["anthropic"]);
+  const [deployError, setDeployError] = useState<string | null>(null);
   // Additional providers inferred from a loaded config, passed to ProviderSection
   // so it can restore the "Add Provider" cards. Fix for #122.
   const [additionalProvidersFromConfig, setAdditionalProvidersFromConfig] = useState<InferenceProvider[]>([]);
@@ -78,9 +79,11 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   const [loadingVertexGoogleModels, setLoadingVertexGoogleModels] = useState(false);
   const [vertexGoogleModelsError, setVertexGoogleModelsError] = useState<string | null>(null);
   const [vertexGoogleModelsWarning, setVertexGoogleModelsWarning] = useState<string | null>(null);
+  const [providerSecretStatus, setProviderSecretStatus] = useState<ProviderSecretStatus | null>(null);
   const previousModelEndpointRef = useRef("");
 
   const isClusterMode = mode === "kubernetes" || mode === "openshift";
+  const isHostedMode = defaults?.runMode === "hosted";
   const isVertex = inferenceProvider === "vertex-anthropic" || inferenceProvider === "vertex-google";
   const displayedDeployers = useMemo(
     () => {
@@ -131,6 +134,8 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           k8sContext: data.k8sContext,
           k8sNamespace: data.k8sNamespace,
           isOpenShift: data.isOpenShift,
+          runMode: data.runMode,
+          allowedDeployModes: Array.isArray(data.allowedDeployModes) ? data.allowedDeployModes : [],
         };
         setDefaults(d);
 
@@ -317,6 +322,13 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           image: defaults?.image || "",
         };
     const applied = applySavedVarsToConfig(vars, baseConfig);
+    if (
+      isHostedMode
+      && (mode === "kubernetes" || mode === "openshift")
+      && !applied.config.providerSecretName.trim()
+    ) {
+      applied.config.providerSecretName = "openclaw-provider-secrets";
+    }
     setNamespaceManuallyEdited(applied.namespaceManuallyEdited);
     setConfig(applied.config);
 
@@ -352,6 +364,64 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
       return { ...prev, namespace: suggestedNamespace };
     });
   }, [namespaceManuallyEdited, suggestedNamespace]);
+
+  useEffect(() => {
+    if (!isHostedMode || !isClusterMode) {
+      setProviderSecretStatus(null);
+      return;
+    }
+
+    const namespace = (config.namespace || suggestedNamespace).trim();
+    const name = config.providerSecretName.trim();
+    if (!namespace || !name) {
+      setProviderSecretStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = globalThis.setTimeout(() => {
+      setProviderSecretStatus({ namespace, name, checking: true });
+      fetch("/api/configs/provider-secret-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ namespace, name }),
+      })
+        .then(async (res) => {
+          const data = await res.json() as Omit<ProviderSecretStatus, "checking">;
+          if (!res.ok) {
+            throw new Error(data.error || `Secret check failed (${res.status})`);
+          }
+          if (!cancelled) {
+            setProviderSecretStatus({ ...data, checking: false });
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setProviderSecretStatus({
+              namespace,
+              name,
+              checking: false,
+              exists: false,
+              error: err instanceof Error ? err.message : "Secret check failed",
+            });
+          }
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      globalThis.clearTimeout(timer);
+    };
+  }, [isHostedMode, isClusterMode, config.namespace, config.providerSecretName, suggestedNamespace]);
+
+  useEffect(() => {
+    if (!isHostedMode || !isClusterMode) return;
+    setConfig((prev) => (
+      prev.providerSecretName.trim()
+        ? prev
+        : { ...prev, providerSecretName: "openclaw-provider-secrets" }
+    ));
+  }, [isClusterMode, isHostedMode]);
 
   const update = (field: string, value: string) => {
     if (field === "agentName") {
@@ -645,10 +715,17 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     });
   }, [selectedProviders]);
 
+  const handleOnePasswordEnabledChange = useCallback((enabled: boolean) => {
+    setConfig((prev) => {
+      return { ...prev, onePasswordSecretsEnabled: enabled };
+    });
+  }, []);
+
   const handleDeploy = async () => {
     if (!isValid) {
       return;
     }
+    setDeployError(null);
     setDeploying(true);
     try {
       const body = buildDeployRequestBody({
@@ -672,12 +749,19 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeployError(data.error || `Deploy request failed with HTTP ${res.status}`);
+        return;
+      }
       if (data.deployId) {
         onDeployStarted(data.deployId);
+      } else {
+        setDeployError(data.error || "Deploy request did not return a deploy id.");
       }
     } catch (err) {
       console.error("Deploy failed:", err);
+      setDeployError(err instanceof Error ? err.message : String(err));
     } finally {
       setDeploying(false);
     }
@@ -772,6 +856,9 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
   }
   if (isClusterMode && !defaults?.k8sAvailable) {
     validationErrors.push("No Kubernetes cluster detected.");
+  }
+  if (isHostedMode && isClusterMode && selectedProviders.length > 0 && !config.providerSecretName.trim()) {
+    validationErrors.push("Hosted OpenShift installs require an OpenShift Provider Secret Name.");
   }
   let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson.trim()) {
@@ -1230,6 +1317,33 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               </div>
             </div>
 
+            <div className="form-group">
+              <label>Local file owner <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>(optional)</span></label>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder={defaults?.localFileOwner || "e.g., 501:20"}
+                  spellCheck={false}
+                  value={config.localFileOwner}
+                  onChange={(e) => update("localFileOwner", e.target.value)}
+                />
+                {defaults?.localFileOwner && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => update("localFileOwner", defaults.localFileOwner || "")}
+                  >
+                    Use my UID:GID
+                  </button>
+                )}
+              </div>
+              <div className="hint">
+                Makes OpenClaw run as the same host user so both you and OpenClaw can edit bind-mounted files.
+                Use this for mounted repos or workspaces; leave blank to use the image default.
+              </div>
+            </div>
+
             {(defaults?.containerRuntime || "podman") === "podman" && (
               <div className="form-group">
                 <label>Podman secret mappings <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>(optional)</span></label>
@@ -1302,6 +1416,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           initialAdditionalProviders={additionalProvidersFromConfig}
           loadingModelEndpointOptions={loadingModelEndpointOptions}
           mode={mode}
+          isHostedMode={isHostedMode}
           modelEndpointOptions={modelEndpointOptions}
           modelEndpointOptionsError={modelEndpointOptionsError}
           setConfig={setConfig}
@@ -1442,15 +1557,24 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
         <ExternalSecretProvidersSection
           config={config}
           isClusterMode={isClusterMode}
+          isHostedMode={isHostedMode}
+          providerSecretStatus={providerSecretStatus}
           selectedProviders={selectedProviders}
+          suggestedNamespace={suggestedNamespace}
           update={update}
           onVaultEnabledChange={handleVaultEnabledChange}
+          onOnePasswordEnabledChange={handleOnePasswordEnabledChange}
         />
 
         <div style={{ marginTop: "1.5rem" }}>
           {!isValid && (
             <div style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
               {validationErrors.join(" ")}
+            </div>
+          )}
+          {deployError && (
+            <div style={{ color: "var(--danger)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+              {deployError}
             </div>
           )}
           <button

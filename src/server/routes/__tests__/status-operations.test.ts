@@ -27,7 +27,7 @@ vi.mock("../status-instances.js", () => ({
   readSavedGatewayToken: vi.fn(),
 }));
 
-const { approveLatestDevicePairing, selectLatestPendingDeviceRequestId } =
+const { approveLatestDevicePairing, buildInstanceCommand, selectLatestPendingDeviceRequestId } =
   await import("../status-operations.js");
 
 const clusterInstance: DeployResult = {
@@ -122,5 +122,26 @@ describe("approveLatestDevicePairing", () => {
     });
 
     expect(mockExecInPod).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("buildInstanceCommand", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListNamespacedPod.mockResolvedValue({
+      items: [{
+        metadata: { name: "openclaw-pod" },
+        spec: { containers: [{ name: "gateway" }] },
+      }],
+    });
+  });
+
+  it("uses namespace-preserving cleanup for cluster instances", async () => {
+    const command = await buildInstanceCommand(clusterInstance, clusterInstance.id);
+
+    expect(command).toContain("# Delete OpenClaw resources while preserving the namespace");
+    expect(command).toContain("kubectl delete deployment/openclaw");
+    expect(command).toContain("-n ns-1 --ignore-not-found");
+    expect(command).not.toContain("kubectl delete namespace");
   });
 });
