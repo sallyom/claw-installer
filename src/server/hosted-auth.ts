@@ -22,8 +22,18 @@ function bearerToken(req: Request): string {
   }
 
   const authorization = req.get("authorization") || "";
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || "";
+  const trimmed = authorization.trim();
+  if (trimmed.length <= "Bearer".length || trimmed.slice(0, "Bearer".length).toLowerCase() !== "bearer") {
+    return "";
+  }
+  if (!isAsciiWhitespace(trimmed.charAt("Bearer".length))) {
+    return "";
+  }
+  return trimmed.slice("Bearer".length + 1).trim();
+}
+
+function isAsciiWhitespace(value: string): boolean {
+  return value === " " || value === "\t" || value === "\n" || value === "\r" || value === "\f";
 }
 
 function parseGroups(value: string): string[] {

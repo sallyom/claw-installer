@@ -35,6 +35,23 @@ describe("hostedUserFromRequest", () => {
     expect(user?.token).toBe("token-456");
   });
 
+  it("parses bearer auth without regex backtracking risk", () => {
+    const user = hostedUserFromRequest(mockReq({
+      "X-Forwarded-User": "sallyom",
+      Authorization: `  bEaReR\t${"x".repeat(10_000)}  `,
+    }));
+
+    expect(user?.token).toBe("x".repeat(10_000));
+    expect(hostedUserFromRequest(mockReq({
+      "X-Forwarded-User": "sallyom",
+      Authorization: "Bearer",
+    }))).toBeNull();
+    expect(hostedUserFromRequest(mockReq({
+      "X-Forwarded-User": "sallyom",
+      Authorization: "BearerToken",
+    }))).toBeNull();
+  });
+
   it("requires both user and token", () => {
     expect(hostedUserFromRequest(mockReq({ "X-Forwarded-User": "sallyom" }))).toBeNull();
     expect(hostedUserFromRequest(mockReq({ "X-Forwarded-Access-Token": "token-123" }))).toBeNull();
