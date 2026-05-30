@@ -3,14 +3,15 @@ kind: Template
 metadata:
   name: openclaw-hosted-installer
   annotations:
-    description: Hosted OpenClaw installer for OpenShift. Process this template, then start the binary build from this repo.
+    description: Hosted OpenClaw installer for OpenShift. Build and push the installer image from the repo Dockerfile, then process this template.
 parameters:
   - name: NAMESPACE
     value: openclaw-installer
   - name: APP_NAME
     value: openclaw-installer
-  - name: INSTALLER_IMAGE_TAG
-    value: latest
+  - name: INSTALLER_IMAGE
+    value: quay.io/sallyom/openclaw-installer:latest
+    description: Pre-built installer image produced from this repository's Dockerfile.
   - name: APPS_DOMAIN
     required: true
     description: OpenShift apps domain, for example apps.example.com.
@@ -38,33 +39,6 @@ objects:
       labels:
         app.kubernetes.io/name: ${APP_NAME}
         app.kubernetes.io/part-of: openclaw
-  - apiVersion: image.openshift.io/v1
-    kind: ImageStream
-    metadata:
-      name: ${APP_NAME}
-      namespace: ${NAMESPACE}
-      labels:
-        app.kubernetes.io/name: ${APP_NAME}
-        app.kubernetes.io/part-of: openclaw
-  - apiVersion: build.openshift.io/v1
-    kind: BuildConfig
-    metadata:
-      name: ${APP_NAME}
-      namespace: ${NAMESPACE}
-      labels:
-        app.kubernetes.io/name: ${APP_NAME}
-        app.kubernetes.io/part-of: openclaw
-    spec:
-      source:
-        type: Binary
-      strategy:
-        type: Docker
-        dockerStrategy:
-          dockerfilePath: Dockerfile
-      output:
-        to:
-          kind: ImageStreamTag
-          name: ${APP_NAME}:${INSTALLER_IMAGE_TAG}
   - apiVersion: v1
     kind: ServiceAccount
     metadata:
@@ -157,7 +131,7 @@ objects:
                   drop:
                     - ALL
             - name: installer
-              image: image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/${APP_NAME}:${INSTALLER_IMAGE_TAG}
+              image: ${INSTALLER_IMAGE}
               imagePullPolicy: Always
               ports:
                 - name: http

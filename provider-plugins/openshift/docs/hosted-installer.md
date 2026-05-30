@@ -6,16 +6,22 @@ current browser user for cluster operations.
 ## Deploy the Installer
 
 ```bash
+podman build -t quay.io/sallyom/openclaw-installer:latest -f Dockerfile .
+podman push quay.io/sallyom/openclaw-installer:latest
+
 APPS_DOMAIN="$(oc get ingress.config.openshift.io cluster -o jsonpath='{.spec.domain}')"
 oc process -f provider-plugins/openshift/configs/hosted-installer-template.yaml \
   -p APPS_DOMAIN="${APPS_DOMAIN}" \
+  -p INSTALLER_IMAGE=quay.io/sallyom/openclaw-installer:latest \
   | oc apply -f -
-oc start-build openclaw-installer -n openclaw-installer --from-dir=. --follow
+oc rollout restart deployment/openclaw-installer -n openclaw-installer
+oc rollout status deployment/openclaw-installer -n openclaw-installer
 ```
 
-The template creates the `openclaw-installer` namespace, an ImageStream,
-BuildConfig, OAuthClient, ServiceAccount, OAuth-protected Deployment, Service,
-and Route.
+The template creates the `openclaw-installer` namespace, OAuthClient,
+ServiceAccount, OAuth-protected Deployment, Service, and Route. It does not
+create an ImageStream or BuildConfig; rebuild and push the image when you update
+the installer, then restart the Deployment.
 
 ## Provider Secrets
 
