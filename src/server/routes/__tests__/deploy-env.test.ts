@@ -187,7 +187,7 @@ describe("applyOnePasswordSecretRefDefaults", () => {
     expect(config.openrouterApiKeyRef).toEqual({
       source: "exec",
       provider: "onepassword",
-      id: "op://Engineering/OpenRouter/apiKey",
+      id: "op://Engineering/OpenRouter/credential",
     });
     expect(config.openaiApiKeyRef).toBeUndefined();
   });

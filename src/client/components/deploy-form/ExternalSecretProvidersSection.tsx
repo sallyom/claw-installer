@@ -57,7 +57,7 @@ export function ExternalSecretProvidersSection({
   const onePasswordRefs = selectedProviders
     .map((provider) => ONEPASSWORD_PROVIDER_ITEMS[provider])
     .filter((entry): entry is { label: string; item: string } => Boolean(entry))
-    .map((entry) => ({ ...entry, id: `op://${onePasswordVault}/${entry.item}/apiKey` }));
+    .map((entry) => ({ ...entry, id: `op://${onePasswordVault}/${entry.item}/credential` }));
 
   const namespace = config.namespace.trim() || suggestedNamespace || "<target-namespace>";
   const providerSecretName = config.providerSecretName.trim() || "openclaw-provider-secrets";
@@ -278,7 +278,7 @@ export function ExternalSecretProvidersSection({
           </label>
           <div className="hint">
             Creates the <code>onepassword</code> SecretRef provider backed by the <code>1password</code> plugin and
-            points selected credential SecretRefs at ids such as <code>op://OpenClaw/OpenRouter/apiKey</code>. {isClusterMode
+            points selected credential SecretRefs at ids such as <code>op://OpenClaw/OpenRouter/credential</code>. {isClusterMode
               ? "The 1Password service account token must already exist as a Secret in the target namespace."
               : "For local deploys, the installer passes OP_SERVICE_ACCOUNT_TOKEN from its environment when present."}{" "}
             The OpenShift deployer installs <code>git:github.com/sallyom/claw-1password</code> automatically when this is enabled.
@@ -299,7 +299,7 @@ export function ExternalSecretProvidersSection({
                 <div className="hint">
                   Used for generated <code>op://</code> SecretRef ids. Your 1Password items should be named
                   <code> Anthropic</code>, <code> OpenAI</code>, <code> Google</code>, <code> OpenRouter</code>, or
-                  <code> Endpoint</code> with an <code>apiKey</code> field.
+                  <code> Endpoint</code> with a <code>credential</code> field.
                 </div>
               </div>
             </div>

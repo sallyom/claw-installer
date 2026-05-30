@@ -161,7 +161,7 @@ function onePasswordSecretRef(vault: string | undefined, item: string): DeploySe
   return {
     source: "exec",
     provider: "onepassword",
-    id: `op://${vaultName}/${item}/apiKey`,
+    id: `op://${vaultName}/${item}/credential`,
   };
 }
 

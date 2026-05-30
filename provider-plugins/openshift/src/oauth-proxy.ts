@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import jsYaml from "js-yaml";
-import { coreApi, k8sApiHttpCode } from "../../../src/server/services/k8s.js";
 
 // Resolve templates relative to this file's compiled location.
 // At runtime this file is at provider-plugins/openshift/src/oauth-proxy.ts,
@@ -32,35 +31,7 @@ export function oauthServiceAccount(ns: string): k8s.V1ServiceAccount {
   return jsYaml.load(yaml) as k8s.V1ServiceAccount;
 }
 
-export async function oauthConfigSecret(ns: string): Promise<k8s.V1Secret> {
-  // For SA-based OAuth, the client-secret must be a valid SA token.
-  // Create a token for the openclaw-oauth-proxy SA.
-  let clientSecret: string;
-  try {
-    const core = coreApi();
-    const tokenRequest: k8s.AuthenticationV1TokenRequest = {
-      apiVersion: "authentication.k8s.io/v1",
-      kind: "TokenRequest",
-      spec: { audiences: [], expirationSeconds: 365 * 24 * 3600 }, // 1 year
-    };
-    const result = await core.createNamespacedServiceAccountToken({
-      name: "openclaw-oauth-proxy",
-      namespace: ns,
-      body: tokenRequest,
-    });
-    clientSecret = result.status?.token || "";
-  } catch (err: unknown) {
-    if (k8sApiHttpCode(err) === 403) {
-      throw new Error(
-        `Cannot create OAuth token for ServiceAccount "openclaw-oauth-proxy" in namespace "${ns}": `
-        + "forbidden. Grant create on serviceaccounts/token in the target namespace before deploying.",
-        { cause: err },
-      );
-    }
-    // Fallback: use a generated token (requires OAuthClient cluster resource)
-    clientSecret = randomBytes(32).toString("base64");
-  }
-
+export function oauthConfigSecret(ns: string): k8s.V1Secret {
   return {
     apiVersion: "v1",
     kind: "Secret",
@@ -70,7 +41,6 @@ export async function oauthConfigSecret(ns: string): Promise<k8s.V1Secret> {
       labels: { app: "openclaw" },
     },
     stringData: {
-      "client-secret": clientSecret,
       cookie_secret: randomBytes(16).toString("hex"),
     },
   };

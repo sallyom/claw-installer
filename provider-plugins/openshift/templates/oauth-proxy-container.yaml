@@ -6,7 +6,7 @@ args:
   - --provider=openshift
   - --upstream=http://localhost:18789
   - --client-id=__CLIENT_ID__
-  - --client-secret-file=/etc/oauth/config/client-secret
+  - --client-secret-file=/var/run/secrets/kubernetes.io/serviceaccount/token
   - --cookie-secret-file=/etc/oauth/config/cookie_secret
   - --cookie-expire=23h0m0s
   - --pass-access-token

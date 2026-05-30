@@ -53,8 +53,7 @@ Required for a normal OpenShift deploy:
 | API group | Resources | Why |
 |-----------|-----------|-----|
 | core | `serviceaccounts` | Create `openclaw-oauth-proxy` and, for non-A2A Kubernetes paths, `openclaw` |
-| core | `serviceaccounts/token` | Create the OAuth proxy client secret from the ServiceAccount TokenRequest API |
-| core | `secrets` | Store gateway token, provider credentials, OAuth proxy config, optional GCP credentials |
+| core | `secrets` | Store gateway token, provider credentials, OAuth proxy cookie secret, optional GCP credentials |
 | core | `configmaps` | Store OpenClaw config and agent workspace files |
 | core | `persistentvolumeclaims` | Create `openclaw-home-pvc` |
 | core | `services` | Create and update the `openclaw` ClusterIP Service |

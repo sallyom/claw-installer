@@ -229,8 +229,9 @@ export class OpenShiftDeployer implements Deployer {
       log,
     );
 
-    // OAuth config secret (client-secret + cookie_secret)
-    const oauthSecret = await oauthConfigSecret(ns);
+    // OAuth config secret (cookie_secret). The OAuth client-secret is the pod's
+    // mounted service account token.
+    const oauthSecret = oauthConfigSecret(ns);
     await applyResource(
       () => core.readNamespacedSecret({ name: "openclaw-oauth-config", namespace: ns }),
       () => core.createNamespacedSecret({ namespace: ns, body: oauthSecret }),

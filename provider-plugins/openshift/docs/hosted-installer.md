@@ -77,4 +77,4 @@ oc create secret generic openclaw-1password-token \
 ```
 
 The generated SecretRef ids use the selected 1Password vault and item names
-such as `op://OpenClaw/OpenRouter/apiKey`.
+such as `op://OpenClaw/OpenRouter/credential`.

@@ -248,7 +248,7 @@ describe("local 1Password SecretRef wiring", () => {
     expect(rendered.models.providers.openrouter.apiKey).toEqual({
       source: "exec",
       provider: "onepassword",
-      id: "op://Engineering/OpenRouter/apiKey",
+      id: "op://Engineering/OpenRouter/credential",
     });
   });
 

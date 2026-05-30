@@ -593,11 +593,18 @@ function deriveModel(config: DeployConfig): string {
   return "anthropic/claude-sonnet-4-6";
 }
 
+function normalizeSecretRefId(ref: DeploySecretRef): string {
+  if (ref.provider === "onepassword" && ref.id.endsWith("/apiKey")) {
+    return `${ref.id.slice(0, -"/apiKey".length)}/credential`;
+  }
+  return ref.id;
+}
+
 function cloneSecretRef(ref: DeploySecretRef): Record<string, string> {
   return {
     source: ref.source,
     provider: ref.provider,
-    id: ref.id,
+    id: normalizeSecretRefId(ref),
   };
 }
 

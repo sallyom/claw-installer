@@ -629,11 +629,24 @@ describe("gateway env vars in proxy mode", () => {
 
     const deployment = deploymentManifest("ns", config);
     const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const cliInit = initContainers.find((container) => container.name === "install-1password-cli");
     const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
     const env = gatewayEnvMap(deployment);
 
+    expect(cliInit?.image).toBe("docker.io/1password/op:2");
+    expect(cliInit?.command?.[2]).toContain("cp \"$op_path\" /home/node/.openclaw/bin/op");
+    expect(cliInit?.command?.[2]).toContain("chmod 0700 /home/node/.config/op");
+    expect(cliInit?.command?.[2]).toContain("find /home/node/.config/op -type f -exec chmod 0600 {} +");
+    expect(cliInit?.command?.[2]).toContain("exec /home/node/.openclaw/bin/op --config /home/node/.config/op \"$@\"");
+    expect(cliInit?.volumeMounts).toEqual(
+      expect.arrayContaining([
+        { name: "openclaw-home", mountPath: "/home/node" },
+        { name: "tmp-volume", mountPath: "/tmp" },
+      ]),
+    );
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-1password' --force");
     expect(env.CLAW_1PASSWORD_VAULT).toBe("Engineering");
+    expect(env.CLAW_1PASSWORD_OP).toBe("/home/node/.openclaw/bin/openclaw-op");
     expect(gatewayEnv(deployment, "OP_SERVICE_ACCOUNT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
       name: "openclaw-1password-token",
       key: "token",

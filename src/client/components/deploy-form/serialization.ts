@@ -607,7 +607,7 @@ function onePasswordSecretRef(vault: string, item: string): SecretRefValue {
   return {
     source: "exec",
     provider: "onepassword",
-    id: `op://${vaultName}/${item}/apiKey`,
+    id: `op://${vaultName}/${item}/credential`,
   };
 }
 

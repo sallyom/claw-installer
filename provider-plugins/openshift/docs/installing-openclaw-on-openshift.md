@@ -120,7 +120,7 @@ The installer creates these Kubernetes resources in a dedicated namespace. Examp
 |----------|------|---------|
 | [**Namespace**](examples/namespace.yaml) | `alice-myagent-openclaw` | Isolated namespace, labeled for installer discovery |
 | [**ServiceAccount**](examples/serviceaccount.yaml) | `openclaw-oauth-proxy` | SA for the oauth-proxy with OAuth redirect annotation |
-| [**Secret**](examples/oauth-config-secret.yaml) | `openclaw-oauth-config` | OAuth client-secret (SA token) and cookie secret |
+| [**Secret**](examples/oauth-config-secret.yaml) | `openclaw-oauth-config` | OAuth proxy cookie secret |
 | [**Service**](examples/service.yaml) | `openclaw` | ClusterIP with gateway (18789) and oauth-ui (8443) ports |
 | [**Route**](examples/route.yaml) | `openclaw` | TLS-terminated route targeting the oauth-proxy |
 | [**PVC**](examples/pvc.yaml) | `openclaw-home-pvc` | 10Gi volume for all persistent state |

@@ -245,7 +245,7 @@ describe("Multi-model per provider", () => {
       expect(body.openrouterApiKeyRef).toEqual({
         source: "exec",
         provider: "onepassword",
-        id: "op://Engineering/OpenRouter/apiKey",
+        id: "op://Engineering/OpenRouter/credential",
       });
       expect(body.openrouterApiKey).toBeUndefined();
     });
@@ -404,7 +404,7 @@ describe("Multi-model per provider", () => {
       expect(JSON.parse(window.atob(match![1]))).toEqual({
         source: "exec",
         provider: "onepassword",
-        id: "op://Engineering/OpenRouter/apiKey",
+        id: "op://Engineering/OpenRouter/credential",
       });
     });
 
