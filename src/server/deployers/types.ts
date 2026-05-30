@@ -41,6 +41,10 @@ export interface DeployConfig {
   vaultKvVersion?: string;
   vaultTokenSecretName?: string;
   vaultTokenSecretKey?: string;
+  onePasswordSecretsEnabled?: boolean;
+  onePasswordVault?: string;
+  onePasswordTokenSecretName?: string;
+  onePasswordTokenSecretKey?: string;
   providerSecretName?: string;
   pluginInstallSpecs?: string[];
   secretsProvidersJson?: string;

@@ -206,6 +206,73 @@ describe("local Vault SecretRef wiring", () => {
   });
 });
 
+describe("local 1Password SecretRef wiring", () => {
+  it("generates 1Password and OpenRouter provider config for local deploys", () => {
+    const rendered = JSON.parse(buildOpenClawConfig({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      inferenceProvider: "openrouter",
+      onePasswordSecretsEnabled: true,
+      onePasswordVault: "Engineering",
+      openrouterApiKeyRef: {
+        source: "exec",
+        provider: "onepassword",
+        id: "op://Engineering/OpenRouter/apiKey",
+      },
+    }, "gateway-token"));
+
+    expect(rendered.secrets.providers.onepassword).toMatchObject({
+      source: "exec",
+      pluginIntegration: {
+        pluginId: "1password",
+        integrationId: "onepassword",
+      },
+    });
+    expect(rendered.plugins.allow).toEqual(expect.arrayContaining(["1password"]));
+    expect(rendered.plugins.entries["1password"]).toEqual({ enabled: true });
+    expect(rendered.models.providers.openrouter.apiKey).toEqual({
+      source: "exec",
+      provider: "onepassword",
+      id: "op://Engineering/OpenRouter/apiKey",
+    });
+  });
+
+  it("passes local 1Password environment to the gateway container", () => {
+    const previousToken = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+    process.env.OP_SERVICE_ACCOUNT_TOKEN = "test-op-token";
+    try {
+      const args = buildRunArgs({
+        mode: "local",
+        agentName: "demo",
+        agentDisplayName: "Demo",
+        onePasswordSecretsEnabled: true,
+        onePasswordVault: "Engineering",
+      }, "podman", "openclaw-demo", 18789);
+
+      expect(args).toContain("OP_SERVICE_ACCOUNT_TOKEN=test-op-token");
+      expect(args).toContain("CLAW_1PASSWORD_VAULT=Engineering");
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
+      } else {
+        process.env.OP_SERVICE_ACCOUNT_TOKEN = previousToken;
+      }
+    }
+  });
+
+  it("auto-installs the 1Password plugin for local containers", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      onePasswordSecretsEnabled: true,
+    });
+
+    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-1password"]);
+  });
+});
+
 describe("parseContainerRunArgs", () => {
   it("parses quoted runtime args into argv tokens", () => {
     expect(

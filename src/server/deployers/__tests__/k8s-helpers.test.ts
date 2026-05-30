@@ -787,6 +787,54 @@ describe("model config generation", () => {
     expect(rendered.secrets?.providers?.vault?.noOutputTimeoutMs).toBe(15000);
   });
 
+  it("generates the installed 1Password plugin SecretRef provider", () => {
+    const config = makeConfig({
+      inferenceProvider: "openrouter",
+      onePasswordSecretsEnabled: true,
+      openrouterApiKeyRef: {
+        source: "exec",
+        provider: "onepassword",
+        id: "op://Engineering/OpenRouter/apiKey",
+      },
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      plugins?: {
+        allow?: string[];
+        entries?: Record<string, { enabled?: boolean }>;
+      };
+      secrets?: {
+        providers?: Record<string, {
+          source?: string;
+          pluginIntegration?: {
+            pluginId?: string;
+            integrationId?: string;
+          };
+        }>;
+      };
+      models?: {
+        providers?: Record<string, {
+          apiKey?: unknown;
+        }>;
+      };
+    };
+
+    expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["1password"]));
+    expect(rendered.plugins?.entries?.["1password"]).toEqual({ enabled: true });
+    expect(rendered.secrets?.providers?.onepassword).toMatchObject({
+      source: "exec",
+      pluginIntegration: {
+        pluginId: "1password",
+        integrationId: "onepassword",
+      },
+    });
+    expect(rendered.models?.providers?.openrouter?.apiKey).toEqual({
+      source: "exec",
+      provider: "onepassword",
+      id: "op://Engineering/OpenRouter/apiKey",
+    });
+  });
+
   it("builds SecretRef-backed auth profiles for managed Anthropic, OpenAI, and Google credentials", () => {
     const config = makeConfig({
       inferenceProvider: "anthropic",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DeployConfig } from "../../deployers/types.js";
 import {
   applyProviderSecretDataDefaults,
+  applyOnePasswordSecretRefDefaults,
   applyServerEnvFallbacks,
   applyVaultSecretRefDefaults,
   normalizeVaultAddr,
@@ -169,6 +170,45 @@ describe("applyVaultSecretRefDefaults", () => {
       source: "exec",
       provider: "custom",
       id: "openai",
+    });
+  });
+});
+
+describe("applyOnePasswordSecretRefDefaults", () => {
+  it("defaults selected provider refs to 1Password when 1Password wiring is enabled", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      onePasswordSecretsEnabled: true,
+      onePasswordVault: "Engineering",
+    });
+
+    applyOnePasswordSecretRefDefaults(config, ["openrouter"]);
+
+    expect(config.openrouterApiKeyRef).toEqual({
+      source: "exec",
+      provider: "onepassword",
+      id: "op://Engineering/OpenRouter/apiKey",
+    });
+    expect(config.openaiApiKeyRef).toBeUndefined();
+  });
+
+  it("does not overwrite explicit SecretRefs", () => {
+    const config = makeConfig({
+      mode: "openshift",
+      onePasswordSecretsEnabled: true,
+      openrouterApiKeyRef: {
+        source: "exec",
+        provider: "custom",
+        id: "openrouter",
+      },
+    });
+
+    applyOnePasswordSecretRefDefaults(config, ["openrouter"]);
+
+    expect(config.openrouterApiKeyRef).toEqual({
+      source: "exec",
+      provider: "custom",
+      id: "openrouter",
     });
   });
 });

@@ -172,7 +172,9 @@ describe("InstanceList", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /delete data/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: /delete data/i })).not.toBeDisabled();
+    const deleteButton = screen.getByRole("button", { name: /delete data/i });
+    expect(deleteButton).not.toBeDisabled();
+    expect(deleteButton).toHaveAttribute("title", "Delete OpenClaw resources and data; preserve namespace");
     expect(screen.getByRole("button", { name: /approve pairing/i })).toBeInTheDocument();
   });
 
@@ -707,6 +709,26 @@ describe("InstanceList", () => {
 
     await user.click(screen.getByRole("button", { name: /delete data/i }));
     expect(fetchMock).toHaveBeenCalledWith("/api/instances/inst-2", { method: "DELETE" });
+  });
+
+  it("confirms K8s delete as namespace-preserving cleanup", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const confirmMock = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirmMock);
+    const runningK8s = { ...runningInstance, mode: "kubernetes", id: "k8s-1" };
+    const fetchMock = mockFetchWith([runningK8s]);
+    globalThis.fetch = fetchMock;
+
+    render(<InstanceList active />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /delete data/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /delete data/i }));
+    expect(confirmMock).toHaveBeenCalledWith(
+      "Delete OpenClaw data in this namespace? This removes the PVC, secrets, deployment, and installer-managed resources. The namespace/project will be preserved. Cannot be undone.",
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/instances/k8s-1", { method: "DELETE" });
   });
 
   it("does not call DELETE when confirm is cancelled", async () => {

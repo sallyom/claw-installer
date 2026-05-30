@@ -94,6 +94,10 @@ export interface DeployFormConfig {
   vaultKvVersion: string;
   vaultTokenSecretName: string;
   vaultTokenSecretKey: string;
+  onePasswordSecretsEnabled: boolean;
+  onePasswordVault: string;
+  onePasswordTokenSecretName: string;
+  onePasswordTokenSecretKey: string;
   providerSecretName: string;
   pluginInstallSpecsText: string;
   secretsProvidersJson: string;

@@ -156,6 +156,15 @@ function vaultSecretRef(id: string): DeploySecretRef {
   };
 }
 
+function onePasswordSecretRef(vault: string | undefined, item: string): DeploySecretRef {
+  const vaultName = trimOptional(vault) || "OpenClaw";
+  return {
+    source: "exec",
+    provider: "onepassword",
+    id: `op://${vaultName}/${item}/apiKey`,
+  };
+}
+
 export function applyVaultSecretRefDefaults(
   config: DeployConfig,
   selectedProviders?: string[],
@@ -178,6 +187,31 @@ export function applyVaultSecretRefDefaults(
   }
   if (selected("custom-endpoint") && !config.modelEndpointApiKeyRef) {
     config.modelEndpointApiKeyRef = vaultSecretRef("providers/endpoint/apiKey");
+  }
+}
+
+export function applyOnePasswordSecretRefDefaults(
+  config: DeployConfig,
+  selectedProviders?: string[],
+): void {
+  if (!config.onePasswordSecretsEnabled) {
+    return;
+  }
+  const selected = (provider: string) => !selectedProviders || selectedProviders.includes(provider);
+  if (selected("anthropic") && !config.anthropicApiKeyRef) {
+    config.anthropicApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "Anthropic");
+  }
+  if (selected("openai") && !config.openaiApiKeyRef) {
+    config.openaiApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "OpenAI");
+  }
+  if (selected("google") && !config.googleApiKeyRef) {
+    config.googleApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "Google");
+  }
+  if (selected("openrouter") && !config.openrouterApiKeyRef) {
+    config.openrouterApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "OpenRouter");
+  }
+  if (selected("custom-endpoint") && !config.modelEndpointApiKeyRef) {
+    config.modelEndpointApiKeyRef = onePasswordSecretRef(config.onePasswordVault, "Endpoint");
   }
 }
 
@@ -331,6 +365,9 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.vaultKvVersion = trimOptional(config.vaultKvVersion);
   config.vaultTokenSecretName = trimOptional(config.vaultTokenSecretName);
   config.vaultTokenSecretKey = trimOptional(config.vaultTokenSecretKey);
+  config.onePasswordVault = trimOptional(config.onePasswordVault);
+  config.onePasswordTokenSecretName = trimOptional(config.onePasswordTokenSecretName);
+  config.onePasswordTokenSecretKey = trimOptional(config.onePasswordTokenSecretKey);
   config.providerSecretName = trimOptional(config.providerSecretName);
   config.pluginInstallSpecs = normalizeStringArray(config.pluginInstallSpecs);
   config.secretsProvidersJson = trimOptional(config.secretsProvidersJson);
@@ -356,6 +393,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     return;
   }
   applyVaultSecretRefDefaults(config, selectedProviders);
+  applyOnePasswordSecretRefDefaults(config, selectedProviders);
 
   let customSecretProviders: Record<string, unknown> | undefined;
   if (config.secretsProvidersJson) {
@@ -393,6 +431,25 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     }
     if (customSecretProviders && "vault" in customSecretProviders) {
       res.status(400).json({ error: "Remove secretsProvidersJson.vault when vaultSecretsEnabled is true" });
+      return;
+    }
+  }
+  if (config.vaultSecretsEnabled && config.onePasswordSecretsEnabled) {
+    res.status(400).json({ error: "Choose either Vault or 1Password SecretRef wiring, not both" });
+    return;
+  }
+  if (config.onePasswordSecretsEnabled) {
+    const isClusterMode = config.mode === "kubernetes" || config.mode === "openshift";
+    if (isClusterMode && (!config.onePasswordTokenSecretName || !config.onePasswordTokenSecretKey)) {
+      res.status(400).json({
+        error: "onePasswordTokenSecretName and onePasswordTokenSecretKey are required when onePasswordSecretsEnabled is true",
+      });
+      return;
+    }
+    if (customSecretProviders && "onepassword" in customSecretProviders) {
+      res.status(400).json({
+        error: "Remove secretsProvidersJson.onepassword when onePasswordSecretsEnabled is true",
+      });
       return;
     }
   }

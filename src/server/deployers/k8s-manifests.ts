@@ -31,12 +31,14 @@ export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
 const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
 const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
 const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
+const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 
 function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const seen = new Set<string>();
   const specs: string[] = [];
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
+    ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
     ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
   ]) {
@@ -368,6 +370,24 @@ function appendVaultPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): vo
   }
 }
 
+function appendOnePasswordPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): void {
+  if (!config.onePasswordSecretsEnabled) {
+    return;
+  }
+  if (config.onePasswordVault) {
+    envVars.push({ name: "CLAW_1PASSWORD_VAULT", value: config.onePasswordVault });
+  }
+  envVars.push({
+    name: "OP_SERVICE_ACCOUNT_TOKEN",
+    valueFrom: {
+      secretKeyRef: {
+        name: config.onePasswordTokenSecretName || "openclaw-1password-token",
+        key: config.onePasswordTokenSecretKey || "OP_SERVICE_ACCOUNT_TOKEN",
+      },
+    },
+  });
+}
+
 export function serviceManifest(ns: string, config: DeployConfig): k8s.V1Service {
   const withA2a = Boolean(config.withA2a);
   return {
@@ -573,6 +593,7 @@ export function deploymentManifest(
     });
   }
   appendVaultPluginEnv(envVars, config);
+  appendOnePasswordPluginEnv(envVars, config);
   const providerSecretName = config.providerSecretName?.trim();
 
   // OTEL collector env vars (tell the agent where to send traces)

@@ -208,18 +208,17 @@ The installer's **Instances** tab shows all OpenClaw namespaces on your cluster 
 - **Re-deploy** - updates agent files from host to ConfigMap and restarts the pod
 - **Stop** - scales the deployment to 0 (PVC preserved)
 - **Start** - scales back to 1
-- **Delete** - tears down all resources and deletes the namespace
+- **Delete** - tears down OpenClaw resources and data while preserving the namespace/project
 
 ## Teardown
 
-From the Instances tab, click Delete on the instance. The installer explicitly deletes each resource before removing the namespace to avoid stuck Terminating states. Resources cleaned up:
+From the Instances tab, click Delete on the instance. The installer explicitly deletes each OpenClaw-managed resource and leaves the namespace/project in place. Resources cleaned up:
 
 - Deployment, Service, Route
-- All Secrets (openclaw-secrets, gcp-sa, openclaw-oauth-config, openclaw-proxy-tls)
-- ServiceAccount (openclaw-oauth-proxy)
-- ConfigMaps (openclaw-config, openclaw-agent)
+- OpenClaw-managed Secrets (openclaw-secrets, gcp-sa, openclaw-oauth-config, openclaw-proxy-tls)
+- ServiceAccounts (openclaw, openclaw-oauth-proxy)
+- ConfigMaps (openclaw-config, openclaw-agent, and generated runtime config)
 - PVC (openclaw-home-pvc)
-- Namespace
 
 ## Next steps
 

@@ -65,3 +65,16 @@ oc create secret generic openclaw-provider-secrets \
 ```
 
 Use `us-east5` for Claude on Vertex unless your GCP setup uses another region.
+
+For 1Password SecretRefs, create a service account token Secret in the target
+namespace and enable **External Secret Providers -> Configure 1Password
+SecretRefs**:
+
+```bash
+oc create secret generic openclaw-1password-token \
+  -n sallyom-demo-openclaw \
+  --from-literal=OP_SERVICE_ACCOUNT_TOKEN=ops_...
+```
+
+The generated SecretRef ids use the selected 1Password vault and item names
+such as `op://OpenClaw/OpenRouter/apiKey`.

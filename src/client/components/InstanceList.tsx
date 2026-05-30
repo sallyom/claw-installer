@@ -361,7 +361,7 @@ export default function InstanceList({ active }: { active: boolean }) {
     if (
       !confirm(
         mode !== "local"
-          ? "Delete namespace and all data? This removes the PVC, secrets, deployment, and namespace. Cannot be undone."
+          ? "Delete OpenClaw data in this namespace? This removes the PVC, secrets, deployment, and installer-managed resources. The namespace/project will be preserved. Cannot be undone."
           : "Delete all data? This removes the data volume (config, sessions, workspaces). Cannot be undone.",
       )
     )
@@ -533,7 +533,7 @@ export default function InstanceList({ active }: { active: boolean }) {
         const isRemoteClusterInstance = isK8s && inst.hasLocalState === false;
         const canUseLocalManagedActions = !isRemoteClusterInstance;
         const canStop = isRunning || isDeploying || isError;
-        // K8s: allow delete anytime (it deletes the whole namespace)
+        // K8s: allow delete anytime; it removes OpenClaw resources and preserves the namespace.
         // Local: must stop first
         const canDelete = isK8s || (!isRunning && !isDeploying);
 
@@ -655,7 +655,7 @@ export default function InstanceList({ active }: { active: boolean }) {
                     !canDelete
                       ? "Stop the instance first"
                       : isK8s
-                        ? "Delete namespace and all data"
+                        ? "Delete OpenClaw resources and data; preserve namespace"
                         : "Delete data volume (config, sessions, workspaces)"
                   }
                 >

@@ -40,6 +40,7 @@ import { shouldUseChromiumSidecar, CHROMIUM_IMAGE, CHROMIUM_CDP_PORT, chromiumCo
 import { agentWorkspaceDir, installerLocalInstanceDir, openclawHomeDir } from "../paths.js";
 import {
   attachDirectVertexProviderModels,
+  buildOnePasswordSecretProviderConfig,
   buildVaultSecretProviderConfig,
   buildConfiguredAgentModelCatalog,
   CUSTOM_ENDPOINT_PROVIDER,
@@ -48,6 +49,8 @@ import {
   OPENAI_BASE_URL,
   OPENROUTER_BASE_URL,
   OPENROUTER_PROVIDER,
+  ONEPASSWORD_SECRET_PROVIDER_ALIAS,
+  ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID,
   VAULT_SECRET_PROVIDER_ALIAS,
   VAULT_SECRET_PROVIDER_PLUGIN_ID,
   detectUnavailableProvider,
@@ -182,6 +185,10 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     if (config.vaultNamespace) lines.push(`VAULT_NAMESPACE=${config.vaultNamespace}`);
     if (config.vaultKvMount) lines.push(`CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`);
     if (config.vaultKvVersion) lines.push(`CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`);
+  }
+  if (config.onePasswordSecretsEnabled) {
+    lines.push(`ONEPASSWORD_SECRETS_ENABLED=true`);
+    if (config.onePasswordVault) lines.push(`CLAW_1PASSWORD_VAULT=${config.onePasswordVault}`);
   }
   if (config.anthropicApiKeyRef) {
     lines.push(`ANTHROPIC_API_KEY_REF_B64=${encodeEnvValue(JSON.stringify(config.anthropicApiKeyRef))}`);
@@ -694,6 +701,10 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
   if (vaultProvider) {
     providers[VAULT_SECRET_PROVIDER_ALIAS] = vaultProvider;
   }
+  const onePasswordProvider = buildOnePasswordSecretProviderConfig(config);
+  if (onePasswordProvider) {
+    providers[ONEPASSWORD_SECRET_PROVIDER_ALIAS] = onePasswordProvider;
+  }
   let shouldDefineDefaultEnvProvider = false;
 
   const models = (ocConfig.models as Record<string, unknown> | undefined) || {};
@@ -904,6 +915,9 @@ function requiredBundledPluginAllowlist(config: DeployConfig): string[] {
   if (config.vaultSecretsEnabled) {
     allow.add(VAULT_SECRET_PROVIDER_PLUGIN_ID);
   }
+  if (config.onePasswordSecretsEnabled) {
+    allow.add(ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID);
+  }
   if (config.telegramBotToken || config.telegramBotTokenRef) {
     allow.add("telegram");
   }
@@ -926,6 +940,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
         ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
+        ...(config.onePasswordSecretsEnabled ? { [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
       },
     },
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces
@@ -1190,6 +1205,19 @@ export function buildRunArgs(
     env.CLAW_VAULT_KV_VERSION = effectiveConfig.vaultKvVersion || "2";
     if (process.env.VAULT_TOKEN) {
       env.VAULT_TOKEN = process.env.VAULT_TOKEN;
+    }
+  }
+  if (effectiveConfig.onePasswordSecretsEnabled) {
+    if (process.env.OP_SERVICE_ACCOUNT_TOKEN) {
+      env.OP_SERVICE_ACCOUNT_TOKEN = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+    }
+    if (process.env.OP_ACCOUNT) {
+      env.OP_ACCOUNT = process.env.OP_ACCOUNT;
+    }
+    if (effectiveConfig.onePasswordVault) {
+      env.CLAW_1PASSWORD_VAULT = effectiveConfig.onePasswordVault;
+    } else if (process.env.CLAW_1PASSWORD_VAULT) {
+      env.CLAW_1PASSWORD_VAULT = process.env.CLAW_1PASSWORD_VAULT;
     }
   }
 

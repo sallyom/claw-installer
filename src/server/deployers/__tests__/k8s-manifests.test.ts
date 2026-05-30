@@ -618,6 +618,27 @@ describe("gateway env vars in proxy mode", () => {
       key: "token",
     });
   });
+
+  it("installs the 1Password plugin and injects its token Secret", () => {
+    const config = makeConfig({
+      onePasswordSecretsEnabled: true,
+      onePasswordVault: "Engineering",
+      onePasswordTokenSecretName: "openclaw-1password-token",
+      onePasswordTokenSecretKey: "token",
+    });
+
+    const deployment = deploymentManifest("ns", config);
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+    const env = gatewayEnvMap(deployment);
+
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-1password' --force");
+    expect(env.CLAW_1PASSWORD_VAULT).toBe("Engineering");
+    expect(gatewayEnv(deployment, "OP_SERVICE_ACCOUNT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
+      name: "openclaw-1password-token",
+      key: "token",
+    });
+  });
 });
 
 /** Extract env var names from the LiteLLM sidecar container in a deployment manifest. */

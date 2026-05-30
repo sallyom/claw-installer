@@ -715,6 +715,12 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
     });
   }, [selectedProviders]);
 
+  const handleOnePasswordEnabledChange = useCallback((enabled: boolean) => {
+    setConfig((prev) => {
+      return { ...prev, onePasswordSecretsEnabled: enabled };
+    });
+  }, []);
+
   const handleDeploy = async () => {
     if (!isValid) {
       return;
@@ -1530,6 +1536,7 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
           suggestedNamespace={suggestedNamespace}
           update={update}
           onVaultEnabledChange={handleVaultEnabledChange}
+          onOnePasswordEnabledChange={handleOnePasswordEnabledChange}
         />
 
         <div style={{ marginTop: "1.5rem" }}>

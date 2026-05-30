@@ -223,6 +223,33 @@ describe("Multi-model per provider", () => {
       expect(body.anthropicApiKeyRef).toBeUndefined();
     });
 
+    it("defaults selected provider SecretRefs to 1Password when 1Password is enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.onePasswordSecretsEnabled = true;
+      config.onePasswordVault = "Engineering";
+      config.openrouterApiKey = "sk-should-not-be-sent";
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "openrouter",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["openrouter"],
+      });
+
+      expect(body.onePasswordSecretsEnabled).toBe(true);
+      expect(body.onePasswordVault).toBe("Engineering");
+      expect(body.onePasswordTokenSecretName).toBe("openclaw-1password-token");
+      expect(body.onePasswordTokenSecretKey).toBe("OP_SERVICE_ACCOUNT_TOKEN");
+      expect(body.openrouterApiKeyRef).toEqual({
+        source: "exec",
+        provider: "onepassword",
+        id: "op://Engineering/OpenRouter/apiKey",
+      });
+      expect(body.openrouterApiKey).toBeUndefined();
+    });
+
     it("includes custom OpenShell sandbox source when the OpenShell backend is enabled", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
@@ -354,6 +381,31 @@ describe("Multi-model per provider", () => {
         id: "providers/openai/apiKey",
       });
       expect(env).not.toContain("ANTHROPIC_API_KEY_REF_B64=");
+    });
+
+    it("exports selected provider 1Password SecretRefs into the env file", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.onePasswordSecretsEnabled = true;
+      config.onePasswordVault = "Engineering";
+      config.openrouterApiKey = "sk-should-not-be-sent";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "openrouter",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+        selectedProviders: ["openrouter"],
+      });
+
+      expect(env).toContain("ONEPASSWORD_SECRETS_ENABLED=true");
+      expect(env).toContain("CLAW_1PASSWORD_VAULT=Engineering");
+      const match = env.match(/OPENROUTER_API_KEY_REF_B64=(.+)/);
+      expect(match).toBeTruthy();
+      expect(JSON.parse(window.atob(match![1]))).toEqual({
+        source: "exec",
+        provider: "onepassword",
+        id: "op://Engineering/OpenRouter/apiKey",
+      });
     });
 
     it("exports plugin install specs into the env file", () => {

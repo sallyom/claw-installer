@@ -233,8 +233,8 @@ export async function buildInstanceCommand(instance: DeployResult | null, id: st
       `kubectl scale deployment/openclaw --replicas=0 -n ${namespace}  # stop`,
       `kubectl scale deployment/openclaw --replicas=1 -n ${namespace}  # start`,
       ``,
-      `# Delete everything`,
-      `kubectl delete namespace ${namespace}`,
+      `# Delete OpenClaw resources while preserving the namespace`,
+      `kubectl delete deployment/openclaw service/openclaw serviceaccount/openclaw serviceaccount/openclaw-oauth-proxy secret/openclaw-secrets secret/gcp-sa configmap/openclaw-config configmap/openclaw-agent configmap/openclaw-agent-tree configmap/openclaw-skills configmap/openclaw-cron configmap/openclaw-exec-approvals pvc/openclaw-home-pvc -n ${namespace} --ignore-not-found`,
     ].join("\n");
   }
 

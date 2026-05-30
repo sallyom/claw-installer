@@ -20,6 +20,7 @@ interface ExternalSecretProvidersSectionProps {
   suggestedNamespace: string;
   update: (field: string, value: string) => void;
   onVaultEnabledChange: (enabled: boolean) => void;
+  onOnePasswordEnabledChange: (enabled: boolean) => void;
 }
 
 const VAULT_PROVIDER_PATHS: Partial<Record<InferenceProvider, { label: string; path: string }>> = {
@@ -28,6 +29,14 @@ const VAULT_PROVIDER_PATHS: Partial<Record<InferenceProvider, { label: string; p
   google: { label: "Google API key", path: "providers/google/apiKey" },
   openrouter: { label: "OpenRouter API key", path: "providers/openrouter/apiKey" },
   "custom-endpoint": { label: "OpenAI-compatible endpoint API key", path: "providers/endpoint/apiKey" },
+};
+
+const ONEPASSWORD_PROVIDER_ITEMS: Partial<Record<InferenceProvider, { label: string; item: string }>> = {
+  anthropic: { label: "Anthropic API key", item: "Anthropic" },
+  openai: { label: "OpenAI API key", item: "OpenAI" },
+  google: { label: "Google API key", item: "Google" },
+  openrouter: { label: "OpenRouter API key", item: "OpenRouter" },
+  "custom-endpoint": { label: "OpenAI-compatible endpoint API key", item: "Endpoint" },
 };
 
 export function ExternalSecretProvidersSection({
@@ -39,10 +48,16 @@ export function ExternalSecretProvidersSection({
   suggestedNamespace,
   update,
   onVaultEnabledChange,
+  onOnePasswordEnabledChange,
 }: ExternalSecretProvidersSectionProps) {
   const vaultPaths = selectedProviders
     .map((provider) => VAULT_PROVIDER_PATHS[provider])
     .filter((entry): entry is { label: string; path: string } => Boolean(entry));
+  const onePasswordVault = config.onePasswordVault.trim() || "OpenClaw";
+  const onePasswordRefs = selectedProviders
+    .map((provider) => ONEPASSWORD_PROVIDER_ITEMS[provider])
+    .filter((entry): entry is { label: string; item: string } => Boolean(entry))
+    .map((entry) => ({ ...entry, id: `op://${onePasswordVault}/${entry.item}/apiKey` }));
 
   const namespace = config.namespace.trim() || suggestedNamespace || "<target-namespace>";
   const providerSecretName = config.providerSecretName.trim() || "openclaw-provider-secrets";
@@ -252,6 +267,95 @@ export function ExternalSecretProvidersSection({
         )}
 
         <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="checkbox"
+              checked={config.onePasswordSecretsEnabled}
+              onChange={(e) => onOnePasswordEnabledChange(e.target.checked)}
+              style={{ width: "auto" }}
+            />
+            Configure 1Password SecretRefs
+          </label>
+          <div className="hint">
+            Creates the <code>onepassword</code> SecretRef provider backed by the <code>1password</code> plugin and
+            points selected credential SecretRefs at ids such as <code>op://OpenClaw/OpenRouter/apiKey</code>. {isClusterMode
+              ? "The 1Password service account token must already exist as a Secret in the target namespace."
+              : "For local deploys, the installer passes OP_SERVICE_ACCOUNT_TOKEN from its environment when present."}{" "}
+            The OpenShift deployer installs <code>git:github.com/sallyom/claw-1password</code> automatically when this is enabled.
+          </div>
+        </div>
+
+        {config.onePasswordSecretsEnabled && (
+          <>
+            <div className="form-row">
+              <div className="form-group">
+                <label>1Password Vault</label>
+                <input
+                  type="text"
+                  placeholder="OpenClaw"
+                  value={config.onePasswordVault}
+                  onChange={(e) => update("onePasswordVault", e.target.value)}
+                />
+                <div className="hint">
+                  Used for generated <code>op://</code> SecretRef ids. Your 1Password items should be named
+                  <code> Anthropic</code>, <code> OpenAI</code>, <code> Google</code>, <code> OpenRouter</code>, or
+                  <code> Endpoint</code> with an <code>apiKey</code> field.
+                </div>
+              </div>
+            </div>
+
+            {isClusterMode && (
+              <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Token Secret Name</label>
+                    <input
+                      type="text"
+                      placeholder="openclaw-1password-token"
+                      value={config.onePasswordTokenSecretName}
+                      onChange={(e) => update("onePasswordTokenSecretName", e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Token Secret Key</label>
+                    <input
+                      type="text"
+                      placeholder="OP_SERVICE_ACCOUNT_TOKEN"
+                      value={config.onePasswordTokenSecretKey}
+                      onChange={(e) => update("onePasswordTokenSecretKey", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="hint" style={{ marginTop: "0.75rem" }}>
+                  Create the 1Password token Secret in the target namespace:
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.78rem", marginTop: "0.35rem" }}>
+{`oc create secret generic ${config.onePasswordTokenSecretName.trim() || "openclaw-1password-token"} \\
+  -n ${namespace} \\
+  --from-literal=${config.onePasswordTokenSecretKey.trim() || "OP_SERVICE_ACCOUNT_TOKEN"}=ops_...`}
+                </pre>
+              </>
+            )}
+
+            {onePasswordRefs.length > 0 && (
+              <div className="form-group">
+                <label>Generated 1Password SecretRefs</label>
+                <div className="hint">
+                  The installer will configure selected providers to resolve credentials from these 1Password ids.
+                </div>
+                <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem", color: "var(--text-secondary)" }}>
+                  {onePasswordRefs.map((entry) => (
+                    <li key={entry.id}>
+                      {entry.label}: <code>{entry.id}</code>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="form-group">
           <label>Additional Secret Providers JSON (optional)</label>
           <textarea
             rows={6}
@@ -260,7 +364,8 @@ export function ExternalSecretProvidersSection({
             onChange={(e) => update("secretsProvidersJson", e.target.value)}
           />
           <div className="hint">
-            Do not define <code>vault</code> here when Vault SecretRef wiring is enabled; the installer generates it.
+            Do not define <code>vault</code> or <code>onepassword</code> here when managed SecretRef wiring is enabled;
+            the installer generates those providers.
           </div>
         </div>
       </div>

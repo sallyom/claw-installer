@@ -8,6 +8,7 @@ import { bindMountSpec, runCommand, runtimeOwnershipFixupCommand } from "./local
 const OPENCLAW_LOCAL_HOME = "/home/node";
 const OPENCLAW_LOCAL_STATE_DIR = `${OPENCLAW_LOCAL_HOME}/.openclaw`;
 const OPENCLAW_LOCAL_TMP_DIR = `${OPENCLAW_LOCAL_STATE_DIR}/tmp`;
+const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 
 export async function installLocalPlugins(params: {
   runtime: ContainerRuntime;
@@ -70,7 +71,10 @@ function nonFatalPluginInstallCommand(spec: string): string {
 function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const seen = new Set<string>();
   const specs: string[] = [];
-  for (const spec of config.pluginInstallSpecs ?? []) {
+  for (const spec of [
+    ...(config.pluginInstallSpecs ?? []),
+    ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
+  ]) {
     const trimmed = spec.trim();
     if (!trimmed || seen.has(trimmed)) {
       continue;
