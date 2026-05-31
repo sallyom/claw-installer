@@ -329,6 +329,22 @@ describe("redactCommandArgs", () => {
       "VAULT_ADDR=https://vault.example.test",
     ]);
   });
+
+  it("redacts shell scripts from deploy logs", () => {
+    expect(redactCommandArgs([
+      "run",
+      "image",
+      "sh",
+      "-c",
+      "echo 'encoded-openclaw-config' | base64 -d > /home/node/.openclaw/openclaw.json",
+    ])).toEqual([
+      "run",
+      "image",
+      "sh",
+      "-c",
+      "<shell script redacted>",
+    ]);
+  });
 });
 
 // Regression test for https://github.com/sallyom/openclaw-installer/issues/71:

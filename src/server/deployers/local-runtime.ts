@@ -91,6 +91,9 @@ export function runCommand(
 
 export function redactCommandArgs(args: string[]): string[] {
   return args.map((arg, index) => {
+    if (args[index - 1] === "-c") {
+      return "<shell script redacted>";
+    }
     if (args[index - 1] !== "-e") {
       return arg;
     }
