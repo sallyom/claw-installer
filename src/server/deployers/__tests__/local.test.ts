@@ -60,6 +60,7 @@ describe("applyGatewayRuntimeConfig", () => {
       },
     }, 18789) as {
       gateway?: {
+        mode?: string;
         auth?: { token?: string };
         controlUi?: { allowedOrigins?: string[] };
         http?: {
@@ -71,6 +72,7 @@ describe("applyGatewayRuntimeConfig", () => {
       };
     };
 
+    expect(updated.gateway?.mode).toBe("local");
     expect(updated.gateway?.auth?.token).toBe("abc");
     expect(updated.gateway?.http?.endpoints?.chatCompletions?.enabled).toBe(true);
     expect(updated.gateway?.http?.endpoints?.responses?.enabled).toBe(true);
@@ -100,6 +102,34 @@ describe("applyGatewayRuntimeConfig", () => {
 
     expect(updated.gateway?.http?.endpoints?.chatCompletions?.enabled).toBe(false);
     expect(updated.gateway?.http?.endpoints?.responses?.enabled).toBe(false);
+  });
+
+  it("preserves remote Control UI origins while refreshing the local port", () => {
+    const updated = applyGatewayRuntimeConfig({
+      gateway: {
+        auth: { mode: "token", token: "abc" },
+        controlUi: {
+          enabled: true,
+          allowedOrigins: [
+            "http://localhost:18789",
+            "http://127.0.0.1:18789",
+            "https://openclaw-device.example-tailnet.ts.net",
+          ],
+        },
+      },
+    }, 18800) as {
+      gateway?: {
+        mode?: string;
+        controlUi?: { allowedOrigins?: string[] };
+      };
+    };
+
+    expect(updated.gateway?.mode).toBe("local");
+    expect(updated.gateway?.controlUi?.allowedOrigins).toEqual([
+      "http://localhost:18800",
+      "http://127.0.0.1:18800",
+      "https://openclaw-device.example-tailnet.ts.net",
+    ]);
   });
 });
 

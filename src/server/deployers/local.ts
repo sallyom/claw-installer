@@ -109,6 +109,29 @@ const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.p
 const SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/known_hosts`;
 const AUTH_PROFILE_IMPORT_CONTAINER_PATH = "/tmp/openclaw-auth-profiles/auth-profiles.json";
 
+function localGatewayAllowedOrigins(port: number, existingOrigins: unknown): string[] {
+  const localOrigins = [
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+  ];
+  const origins = new Set(localOrigins);
+  if (Array.isArray(existingOrigins)) {
+    for (const origin of existingOrigins) {
+      if (
+        typeof origin === "string" &&
+        !/^http:\/\/(?:localhost|127\.0\.0\.1):\d+$/.test(origin)
+      ) {
+        origins.add(origin);
+      }
+    }
+  }
+  return Array.from(origins);
+}
+
+function gatewayRuntimeConfigUpdateScript(port: number, openaiCompatibleEndpointsEnabled: boolean): string {
+  return `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.mode ||= 'local';c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.http.endpoints.responses={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.controlUi ||= {};const origins=new Set(['http://localhost:${port}','http://127.0.0.1:${port}']);for(const o of Array.isArray(c.gateway.controlUi.allowedOrigins)?c.gateway.controlUi.allowedOrigins:[]){if(typeof o==='string'&&!/^http:\\/\\/(?:localhost|127\\.0\\.0\\.1):\\d+$/.test(o))origins.add(o)}c.gateway.controlUi.allowedOrigins=[...origins];fs.writeFileSync(p,JSON.stringify(c,null,2))"`;
+}
+
 /** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
 export function shouldAlwaysPull(image: string): boolean {
   // Digest references (image@sha256:...) are immutable — never need to re-pull
@@ -132,6 +155,7 @@ export function applyGatewayRuntimeConfig(
     ...config,
     gateway: {
       ...gateway,
+      mode: gateway.mode || "local",
       http: {
         ...http,
         endpoints: {
@@ -142,10 +166,7 @@ export function applyGatewayRuntimeConfig(
       },
       controlUi: {
         ...controlUi,
-        allowedOrigins: [
-          `http://localhost:${port}`,
-          `http://127.0.0.1:${port}`,
-        ],
+        allowedOrigins: localGatewayAllowedOrigins(port, controlUi.allowedOrigins),
       },
     },
   };
@@ -1463,7 +1484,7 @@ Use this table to track verified peer OpenClaw instances.
       // Write openclaw.json only if missing (don't overwrite live config)
       `test -f /home/node/.openclaw/openclaw.json || echo '${esc(ocConfig)}' > /home/node/.openclaw/openclaw.json`,
       // Always update allowedOrigins to match the current port (fixes re-deploy with different port)
-      `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${config.openaiCompatibleEndpointsEnabled !== false}};c.gateway.http.endpoints.responses={enabled:${config.openaiCompatibleEndpointsEnabled !== false}};c.gateway.controlUi ||= {};c.gateway.controlUi.allowedOrigins=['http://localhost:${port}','http://127.0.0.1:${port}'];fs.writeFileSync(p,JSON.stringify(c,null,2))"`,
+      gatewayRuntimeConfigUpdateScript(port, config.openaiCompatibleEndpointsEnabled !== false),
       // Materialize SSH sandbox auth files into the writable volume for the node user.
       `mkdir -p '${SANDBOX_SSH_DIR}'`,
       ...(localSandboxPrepared.effectiveConfig.sandboxSshIdentity
@@ -1927,7 +1948,7 @@ Use this table to track verified peer OpenClaw instances.
       [
         "mkdir -p /home/node/.openclaw",
         `test -f /home/node/.openclaw/openclaw.json || echo '${ocConfigB64}' | base64 -d > /home/node/.openclaw/openclaw.json`,
-        `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${effectiveConfig.openaiCompatibleEndpointsEnabled !== false}};c.gateway.http.endpoints.responses={enabled:${effectiveConfig.openaiCompatibleEndpointsEnabled !== false}};c.gateway.controlUi ||= {};c.gateway.controlUi.allowedOrigins=['http://localhost:${port}','http://127.0.0.1:${port}'];fs.writeFileSync(p,JSON.stringify(c,null,2))"`,
+        gatewayRuntimeConfigUpdateScript(port, effectiveConfig.openaiCompatibleEndpointsEnabled !== false),
         ...workspaceSetupCommands,
         "mkdir -p /home/node/.openclaw/skills",
         runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
