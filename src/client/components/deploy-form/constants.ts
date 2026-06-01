@@ -21,7 +21,7 @@ export const PROVIDER_OPTIONS: Array<{ id: InferenceProvider; label: string; des
 export const MODEL_DEFAULTS: Record<InferenceProvider, string> = {
   "anthropic": "claude-sonnet-4-6",
   "openai": "openai/gpt-5.5",
-  "openai-codex": "openai/gpt-5.5",
+  "openai-codex": "gpt-5.5",
   "google": "google/gemini-3.1-pro-preview",
   "openrouter": "openrouter/auto",
   "vertex-anthropic": "anthropic-vertex/claude-sonnet-4-6",

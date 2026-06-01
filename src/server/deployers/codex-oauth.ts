@@ -2,6 +2,7 @@ import type { DeployConfig } from "./types.js";
 import {
   CODEX_AGENT_RUNTIME_ID,
   CODEX_PLUGIN_ID,
+  CODEX_PROVIDER,
   DEFAULT_CODEX_MODEL,
   OPENAI_CODEX_PROVIDER,
   OPENAI_PROVIDER,
@@ -10,11 +11,12 @@ import {
 export {
   CODEX_AGENT_RUNTIME_ID,
   CODEX_PLUGIN_ID,
+  CODEX_PROVIDER,
   DEFAULT_CODEX_MODEL,
   OPENAI_CODEX_PROVIDER,
   OPENAI_PROVIDER,
 };
-export const DEFAULT_CODEX_PROFILE_ID = `${OPENAI_CODEX_PROVIDER}:default`;
+export const DEFAULT_CODEX_PROFILE_ID = `${OPENAI_PROVIDER}:chatgpt-default`;
 export const CODEX_AUTH_PROFILES_SECRET_KEY = "OPENAI_CODEX_AUTH_PROFILES_JSON";
 
 type CodexCliAuthFile = {
@@ -70,23 +72,39 @@ export function normalizeCodexOauthProfileId(value?: string): string {
   if (!trimmed) {
     return DEFAULT_CODEX_PROFILE_ID;
   }
-  return trimmed.includes(":") ? trimmed : `${OPENAI_CODEX_PROVIDER}:${trimmed}`;
+  const separatorIndex = trimmed.indexOf(":");
+  if (separatorIndex < 0) {
+    return `${OPENAI_PROVIDER}:${trimmed}`;
+  }
+  const provider = trimmed.slice(0, separatorIndex);
+  const profile = trimmed.slice(separatorIndex + 1) || "default";
+  if (
+    provider === OPENAI_CODEX_PROVIDER
+    || provider === CODEX_PROVIDER
+    || provider === CODEX_PLUGIN_ID
+  ) {
+    return `${OPENAI_PROVIDER}:chatgpt-${profile}`;
+  }
+  return trimmed;
 }
 
 export function normalizeCodexModelRef(modelRef?: string): string {
   const trimmed = modelRef?.trim() || DEFAULT_CODEX_MODEL;
-  if (trimmed.startsWith(`${OPENAI_PROVIDER}/`)) {
+  if (trimmed.startsWith(`${CODEX_PROVIDER}/`)) {
     return trimmed;
   }
-  if (trimmed.startsWith(`${OPENAI_CODEX_PROVIDER}/`)) {
-    return `${OPENAI_PROVIDER}/${trimmed.slice(`${OPENAI_CODEX_PROVIDER}/`.length)}`;
+  if (trimmed.startsWith(`${OPENAI_PROVIDER}/`)) {
+    return `${CODEX_PROVIDER}/${trimmed.slice(`${OPENAI_PROVIDER}/`.length)}`;
   }
-  return `${OPENAI_PROVIDER}/${trimmed}`;
+  if (trimmed.startsWith(`${OPENAI_CODEX_PROVIDER}/`)) {
+    return `${CODEX_PROVIDER}/${trimmed.slice(`${OPENAI_CODEX_PROVIDER}/`.length)}`;
+  }
+  return `${CODEX_PROVIDER}/${trimmed}`;
 }
 
 export function codexModelIdFromRef(modelRef?: string): string {
   const ref = normalizeCodexModelRef(modelRef);
-  return ref.slice(`${OPENAI_PROVIDER}/`.length);
+  return ref.slice(`${CODEX_PROVIDER}/`.length);
 }
 
 export function shouldUseCodexOauth(config: DeployConfig): boolean {
@@ -115,7 +133,7 @@ export function buildCodexOauthCredentialFromCliAuthJson(raw: string): Record<st
   const accountId = readString(parsed.tokens?.account_id);
   return {
     type: "oauth",
-    provider: OPENAI_CODEX_PROVIDER,
+    provider: OPENAI_PROVIDER,
     access,
     refresh,
     expires: resolveJwtExpiresMs(access),
@@ -158,10 +176,10 @@ export function attachCodexOauthConfig(ocConfig: Record<string, unknown>, config
   const profiles = (auth.profiles as Record<string, unknown> | undefined) || {};
   const order = (auth.order as Record<string, string[]> | undefined) || {};
   profiles[profileId] = {
-    provider: OPENAI_CODEX_PROVIDER,
+    provider: OPENAI_PROVIDER,
     mode: "oauth",
   };
-  order[OPENAI_CODEX_PROVIDER] = [profileId];
+  order[OPENAI_PROVIDER] = [profileId];
   ocConfig.auth = {
     ...auth,
     profiles,

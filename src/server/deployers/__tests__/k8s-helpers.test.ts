@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildManagedAgentAuthProfiles,
+  buildManagedAgentAuthProfilesSecretJson,
   buildOpenClawConfig,
   defaultImage,
   deriveModel,
@@ -95,9 +96,10 @@ describe("model config generation", () => {
       codexModels: ["gpt-5.4-mini"],
     });
 
-    expect(normalizeModelRef(config, "gpt-5.5")).toBe("openai/gpt-5.5");
-    expect(normalizeModelRef(config, "openai-codex/gpt-5.5")).toBe("openai/gpt-5.5");
-    expect(deriveModel(config)).toBe("openai/gpt-5.5");
+    expect(normalizeModelRef(config, "gpt-5.5")).toBe("codex/gpt-5.5");
+    expect(normalizeModelRef(config, "openai-codex/gpt-5.5")).toBe("codex/gpt-5.5");
+    expect(normalizeModelRef(config, "openai/gpt-5.5")).toBe("codex/gpt-5.5");
+    expect(deriveModel(config)).toBe("codex/gpt-5.5");
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       plugins?: {
@@ -119,16 +121,17 @@ describe("model config generation", () => {
     expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["openai", "codex"]));
     expect(rendered.plugins?.entries?.openai?.enabled).toBe(true);
     expect(rendered.plugins?.entries?.codex?.enabled).toBe(true);
-    expect(rendered.auth?.profiles?.["openai-codex:default"]).toEqual({
-      provider: "openai-codex",
+    expect(rendered.auth?.profiles?.["openai:chatgpt-default"]).toEqual({
+      provider: "openai",
       mode: "oauth",
     });
-    expect(rendered.auth?.order?.["openai-codex"]).toEqual(["openai-codex:default"]);
-    expect(rendered.agents?.defaults?.model?.primary).toBe("openai/gpt-5.5");
+    expect(rendered.auth?.order?.openai).toEqual(["openai:chatgpt-default"]);
+    expect(rendered.agents?.defaults?.model?.primary).toBe("codex/gpt-5.5");
     expect(rendered.agents?.defaults?.models?.["openai-codex/gpt-5.5"]).toBeUndefined();
+    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]).toBeUndefined();
     expect(rendered.agents?.defaults?.models).toMatchObject({
-      "openai/gpt-5.5": { alias: "gpt-5.5", agentRuntime: { id: "codex" } },
-      "openai/gpt-5.4-mini": { alias: "gpt-5.4-mini", agentRuntime: { id: "codex" } },
+      "codex/gpt-5.5": { alias: "gpt-5.5", agentRuntime: { id: "codex" } },
+      "codex/gpt-5.4-mini": { alias: "gpt-5.4-mini", agentRuntime: { id: "codex" } },
     });
   });
 
@@ -162,16 +165,19 @@ describe("model config generation", () => {
       };
     };
     const authProfiles = buildManagedAgentAuthProfiles(config);
+    const authProfilesSecret = JSON.parse(buildManagedAgentAuthProfilesSecretJson(config) || "{}") as {
+      profiles?: Record<string, { provider?: string; type?: string }>;
+    };
 
-    expect(rendered.agents?.defaults?.model?.primary).toBe("openai/gpt-5.5");
-    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]?.agentRuntime).toEqual({
+    expect(rendered.agents?.defaults?.model?.primary).toBe("codex/gpt-5.5");
+    expect(rendered.agents?.defaults?.models?.["codex/gpt-5.5"]?.agentRuntime).toEqual({
       id: "codex",
     });
-    expect(rendered.auth?.profiles?.["openai-codex:default"]).toEqual({
-      provider: "openai-codex",
+    expect(rendered.auth?.profiles?.["openai:chatgpt-default"]).toEqual({
+      provider: "openai",
       mode: "oauth",
     });
-    expect(rendered.auth?.order?.["openai-codex"]).toEqual(["openai-codex:default"]);
+    expect(rendered.auth?.order?.openai).toEqual(["openai:chatgpt-default"]);
     expect(rendered.secrets?.providers).toMatchObject({ default: { source: "env" } });
     expect(rendered.models?.providers?.openai).toMatchObject({
       baseUrl: "https://api.openai.com/v1",
@@ -190,6 +196,11 @@ describe("model config generation", () => {
         provider: "default",
         id: "OPENAI_API_KEY",
       },
+    });
+    expect(authProfilesSecret.profiles?.["openai:default"]?.type).toBe("api_key");
+    expect(authProfilesSecret.profiles?.["openai:chatgpt-default"]).toMatchObject({
+      type: "oauth",
+      provider: "openai",
     });
   });
 
@@ -274,7 +285,7 @@ describe("model config generation", () => {
     expect(rendered.plugins?.entries?.openai?.enabled).toBe(true);
     expect(rendered.plugins?.entries?.codex?.enabled).toBe(true);
     expect(rendered.agents?.defaults?.model?.primary).toBe("anthropic-vertex/claude-sonnet-4-6");
-    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]).toMatchObject({
+    expect(rendered.agents?.defaults?.models?.["codex/gpt-5.5"]).toMatchObject({
       alias: "gpt-5.5",
       agentRuntime: { id: "codex" },
     });
@@ -1371,18 +1382,20 @@ describe("detectUnavailableProvider", () => {
     expect(detectUnavailableProvider("openai/gpt-5.4", config)).toBe(false);
   });
 
-  it("returns false for OpenAI refs backed by configured Codex OAuth models", () => {
+  it("returns false for Codex refs backed by configured Codex OAuth models", () => {
     const config = makeConfig({
       inferenceProvider: "openai-codex",
       codexModels: ["gpt-5.2"],
     });
 
-    expect(detectUnavailableProvider("openai/gpt-5.5", config)).toBe(false);
-    expect(detectUnavailableProvider("openai/gpt-5.2", config)).toBe(false);
-    expect(detectUnavailableProvider("openai/gpt-5.4", config)).toBe(true);
+    expect(detectUnavailableProvider("codex/gpt-5.5", config)).toBe(false);
+    expect(detectUnavailableProvider("codex/gpt-5.2", config)).toBe(false);
+    expect(detectUnavailableProvider("codex/gpt-5.4", config)).toBe(true);
+    expect(detectUnavailableProvider("openai/gpt-5.2", config)).toBe(true);
+    expect(detectUnavailableProvider("openai-codex/gpt-5.2", config)).toBe(true);
   });
 
-  it("preserves subagent OpenAI refs backed by configured Codex OAuth models", () => {
+  it("falls back from subagent OpenAI refs when only Codex OAuth is configured", () => {
     const config = makeConfig({
       inferenceProvider: "openai-codex",
       codexModels: ["gpt-5.2"],
@@ -1390,11 +1403,11 @@ describe("detectUnavailableProvider", () => {
 
     expect(resolveSubagentModel(
       { primary: "openai/gpt-5.2" },
-      "openai/gpt-5.5",
+      "codex/gpt-5.5",
       config,
     )).toEqual({
-      primary: "openai/gpt-5.2",
-      fallbacks: ["openai/gpt-5.5"],
+      primary: "codex/gpt-5.5",
+      fallbacks: ["openai/gpt-5.2"],
     });
   });
 

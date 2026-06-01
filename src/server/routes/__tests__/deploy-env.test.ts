@@ -219,7 +219,7 @@ describe("applyProviderSecretDataDefaults", () => {
       mode: "openshift",
       inferenceProvider: "openai-codex",
       codexOauthMode: "codex-cli",
-      codexOauthProfileId: "openai-codex:default",
+      codexOauthProfileId: "openai:chatgpt-default",
     });
     const authJson = JSON.stringify({
       auth_mode: "chatgpt",

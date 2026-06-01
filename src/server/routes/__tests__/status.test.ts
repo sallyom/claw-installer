@@ -78,7 +78,7 @@ describe("parseSavedLocalInstanceConfig", () => {
     const config = makeConfig({
       inferenceProvider: "openai-codex",
       codexOauthMode: "codex-cli",
-      codexOauthProfileId: "openai-codex:default",
+      codexOauthProfileId: "openai:chatgpt-default",
       codexOauthAuthJsonPath: "/Users/example/.codex/auth.json",
       codexModel: "gpt-5.4",
       codexModels: ["gpt-5.4-mini"],
@@ -89,7 +89,7 @@ describe("parseSavedLocalInstanceConfig", () => {
 
     expect(parsed.inferenceProvider).toBe("openai-codex");
     expect(parsed.codexOauthMode).toBe("codex-cli");
-    expect(parsed.codexOauthProfileId).toBe("openai-codex:default");
+    expect(parsed.codexOauthProfileId).toBe("openai:chatgpt-default");
     expect(parsed.codexOauthAuthJsonPath).toBe("/Users/example/.codex/auth.json");
     expect(parsed.codexModel).toBe("gpt-5.4");
     expect(parsed.codexModels).toEqual(["gpt-5.4-mini"]);
