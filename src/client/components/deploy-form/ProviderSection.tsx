@@ -515,7 +515,7 @@ export function ProviderSection({
                 onChange={(e) => update("codexOauthAuthJsonPath", e.target.value)}
               />
               <div className="hint">
-                The installer reads this file on the server host and imports ChatGPT OAuth as <code>openai-codex:default</code>. Add OpenAI separately when platform APIs need <code>OPENAI_API_KEY</code>.
+                The installer reads this file on the server host and imports ChatGPT OAuth as <code>openai:chatgpt-default</code>. Add OpenAI separately when platform APIs need <code>OPENAI_API_KEY</code>.
               </div>
             </div>
             <div className="form-group">
@@ -551,7 +551,7 @@ export function ProviderSection({
                 onChange={(e) => update("codexModel", e.target.value)}
               />
               <div className="hint">
-                The primary model is used as <code>openai/&lt;model&gt;</code> with the Codex runtime.
+                The primary model is used as <code>codex/&lt;model&gt;</code> with ChatGPT OAuth.
               </div>
             </div>
             <div className="form-group">
@@ -622,7 +622,7 @@ export function ProviderSection({
                 + Add Model
               </button>
               <div className="hint">
-                Additional models appear in the OpenClaw model picker as <code>openai/&lt;model&gt;</code> with the Codex runtime.
+                Additional models appear in the OpenClaw model picker as <code>codex/&lt;model&gt;</code> with ChatGPT OAuth.
               </div>
             </div>
           </>

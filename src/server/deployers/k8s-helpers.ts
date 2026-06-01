@@ -12,6 +12,7 @@ import { normalizeManagedVaultProviders } from "./vault-helper.js";
 import { hasPodmanSecretTarget } from "../../shared/podman-secrets.js";
 import {
   CODEX_PLUGIN_ID,
+  CODEX_PROVIDER,
   OPENAI_CODEX_PROVIDER,
   OPENAI_PROVIDER,
   attachCodexOauthConfig,
@@ -499,12 +500,11 @@ export function detectUnavailableProvider(
         && config.inferenceProvider !== "anthropic";
     case "openai":
       return !config.openaiApiKey && !config.openaiApiKeyRef
-        && config.inferenceProvider !== "openai"
-        && !isConfiguredCodexModelRef(modelRef, config);
+        && config.inferenceProvider !== "openai";
+    case CODEX_PROVIDER:
+      return !isConfiguredCodexModelRef(modelRef, config);
     case OPENAI_CODEX_PROVIDER:
-      return config.inferenceProvider !== OPENAI_CODEX_PROVIDER
-        && !config.codexOauthAuthJson
-        && !config.codexOauthProfileId;
+      return true;
     case GOOGLE_PROVIDER:
       return !config.googleApiKey && !config.googleApiKeyRef
         && config.inferenceProvider !== GOOGLE_PROVIDER;

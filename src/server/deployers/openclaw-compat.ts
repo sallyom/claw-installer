@@ -1,5 +1,6 @@
 export const OPENAI_PROVIDER = "openai";
 export const OPENAI_CODEX_PROVIDER = "openai-codex";
+export const CODEX_PROVIDER = "codex";
 export const CODEX_AGENT_RUNTIME_ID = "codex";
 export const CODEX_PLUGIN_ID = "codex";
 export const DEFAULT_OPENAI_MODEL = "gpt-5.5";

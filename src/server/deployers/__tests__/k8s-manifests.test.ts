@@ -338,7 +338,7 @@ describe("k8s state sync manifests", () => {
     const deployment = deploymentManifest("openclaw-alpha-openclaw", codexConfig);
     const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
 
-    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"openai-codex:default"');
+    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"openai:chatgpt-default"');
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain("codex-refresh-token");
     expect(initScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
     expect(initScript).not.toContain("codex-refresh-token");

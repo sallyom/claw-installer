@@ -115,7 +115,7 @@ Use consistent secret names so scripts and docs are predictable:
 | GitHub PAT | `gh_token` | `GH_TOKEN` |
 | Anthropic API key | `anthropic_api_key` | `ANTHROPIC_API_KEY` |
 | OpenAI API key | `openai_api_key` | `OPENAI_API_KEY` |
-| OpenAI Codex OAuth | handled automatically | `openai-codex:default` auth profile |
+| OpenAI Codex OAuth | handled automatically | `openai:chatgpt-default` auth profile |
 | Telegram bot token | `telegram_bot_token` | `TELEGRAM_BOT_TOKEN` |
 | OpenClaw gateway token | `openclaw_gateway_token` | `OPENCLAW_GATEWAY_TOKEN` |
 

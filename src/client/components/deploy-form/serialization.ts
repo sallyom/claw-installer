@@ -92,7 +92,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     googleApiKey: "",
     openrouterApiKey: "",
     codexOauthMode: "codex-cli",
-    codexOauthProfileId: "openai-codex:default",
+    codexOauthProfileId: "openai:chatgpt-default",
     codexOauthAuthJsonPath: "",
     anthropicModel: "",
     openaiModel: "",
