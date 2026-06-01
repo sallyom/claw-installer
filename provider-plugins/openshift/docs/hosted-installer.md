@@ -5,6 +5,10 @@ current browser user for cluster operations.
 
 ## Deploy the Installer
 
+Build and push a regular container image first. The OpenShift template deploys
+that image directly; it does not create an ImageStream, BuildConfig, or
+in-cluster build.
+
 ```bash
 podman build -t quay.io/sallyom/openclaw-installer:latest -f Dockerfile .
 podman push quay.io/sallyom/openclaw-installer:latest
@@ -19,9 +23,10 @@ oc rollout status deployment/openclaw-installer -n openclaw-installer
 ```
 
 The template creates the `openclaw-installer` namespace, OAuthClient,
-ServiceAccount, OAuth-protected Deployment, Service, and Route. It does not
-create an ImageStream or BuildConfig; rebuild and push the image when you update
-the installer, then restart the Deployment.
+ServiceAccount, OAuth-protected Deployment, Service, and Route. The installer
+container image defaults to `quay.io/sallyom/openclaw-installer:latest` and can
+be overridden with `-p INSTALLER_IMAGE=...`. Rebuild and push the image when you
+update the installer, then restart the Deployment so it pulls the new image.
 
 ## Provider Secrets
 
