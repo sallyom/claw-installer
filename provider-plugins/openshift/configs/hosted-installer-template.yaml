@@ -3,7 +3,7 @@ kind: Template
 metadata:
   name: openclaw-hosted-installer
   annotations:
-    description: Hosted OpenClaw installer for OpenShift. Build and push the installer image from the repo Dockerfile, then process this template.
+    description: Hosted OpenClaw installer for OpenShift. The Deployment pulls INSTALLER_IMAGE directly; build and push the image before processing this template.
 parameters:
   - name: NAMESPACE
     value: openclaw-installer
@@ -11,7 +11,7 @@ parameters:
     value: openclaw-installer
   - name: INSTALLER_IMAGE
     value: quay.io/sallyom/openclaw-installer:latest
-    description: Pre-built installer image produced from this repository's Dockerfile.
+    description: Pre-built installer image produced from this repository's Dockerfile. No ImageStream or BuildConfig is created.
   - name: APPS_DOMAIN
     required: true
     description: OpenShift apps domain, for example apps.example.com.
