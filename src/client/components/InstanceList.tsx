@@ -147,7 +147,12 @@ function RemoteClusterNotice({ namespace }: { namespace: string }) {
   );
 }
 
-export default function InstanceList({ active }: { active: boolean }) {
+interface InstanceListProps {
+  active: boolean;
+  onCountChange?: (count: number) => void;
+}
+
+export default function InstanceList({ active, onCountChange }: InstanceListProps) {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +180,10 @@ export default function InstanceList({ active }: { active: boolean }) {
       }
       const data = await res.json();
       setInstances(data);
+      const runningCount = Array.isArray(data)
+        ? data.filter((inst: Instance) => inst.status === "running").length
+        : 0;
+      onCountChange?.(runningCount);
       setPairingMessages((prev) => {
         const runningIds = new Set(
           Array.isArray(data)

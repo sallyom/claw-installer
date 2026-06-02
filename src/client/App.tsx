@@ -10,6 +10,7 @@ const SHOW_PLUGINS_TAB = false;
 export default function App() {
   const [tab, setTab] = useState<Tab>("deploy");
   const [activeDeployId, setActiveDeployId] = useState<string | null>(null);
+  const [instanceCount, setInstanceCount] = useState<number>(0);
 
   return (
     <div className="app">
@@ -30,6 +31,7 @@ export default function App() {
           onClick={() => setTab("instances")}
         >
           Instances
+          {instanceCount > 0 && <span className="tab-badge">{instanceCount}</span>}
         </button>
         {SHOW_PLUGINS_TAB && (
           <button
@@ -46,12 +48,16 @@ export default function App() {
           onDeployStarted={(id) => {
             setActiveDeployId(id);
           }}
+          instanceCount={instanceCount}
+          onShowInstances={() => setTab("instances")}
         />
-        {activeDeployId && <LogStream deployId={activeDeployId} />}
+        {activeDeployId && (
+          <LogStream deployId={activeDeployId} onDeploySuccess={() => setTab("instances")} />
+        )}
       </div>
 
       <div style={{ display: tab === "instances" ? "block" : "none" }}>
-        <InstanceList active={tab === "instances"} />
+        <InstanceList active={tab === "instances"} onCountChange={setInstanceCount} />
       </div>
 
       {SHOW_PLUGINS_TAB && (

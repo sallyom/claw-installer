@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 
 interface Props {
   deployId: string;
+  onDeploySuccess?: () => void;
 }
 
 interface LogEntry {
@@ -21,7 +22,7 @@ function classifyLine(line: string): LogEntry["type"] {
   return "log";
 }
 
-export default function LogStream({ deployId }: Props) {
+export default function LogStream({ deployId, onDeploySuccess }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<string>("connecting");
   const logRef = useRef<HTMLDivElement>(null);
@@ -44,6 +45,9 @@ export default function LogStream({ deployId }: Props) {
         ]);
       } else if (msg.type === "status") {
         setStatus(msg.status);
+        if (msg.status === "running") {
+          onDeploySuccess?.();
+        }
       }
     };
 

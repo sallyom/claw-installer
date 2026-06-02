@@ -32,6 +32,8 @@ export interface DeployerInfo {
 
 export interface DeployFormProps {
   onDeployStarted: (deployId: string) => void;
+  instanceCount?: number;
+  onShowInstances?: () => void;
 }
 
 export interface ServerDefaults {
