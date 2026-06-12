@@ -237,7 +237,18 @@ describe("local Vault SecretRef wiring", () => {
     expect(args.slice(imageIndex - 2, imageIndex)).toEqual(["--user", "501:20"]);
   });
 
-  it("keeps plugin installs plugin-root owned for plugin-managed Vault providers", () => {
+  it("auto-installs the Vault plugin for local containers", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      vaultSecretsEnabled: true,
+    });
+
+    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-vault"]);
+  });
+
+  it("deduplicates configured Vault plugin installs", () => {
     const plan = localPluginsTesting.localPluginInstallPlan({
       mode: "local",
       agentName: "demo",

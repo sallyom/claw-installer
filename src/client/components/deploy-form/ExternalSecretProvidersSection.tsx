@@ -176,7 +176,7 @@ export function ExternalSecretProvidersSection({
             selected credential SecretRefs at Vault paths such as <code>providers/openai/apiKey</code>. {isClusterMode
               ? "The Vault token must already exist as a Secret in the target namespace."
               : "For local deploys, the installer passes VAULT_TOKEN from its environment when present; otherwise provide it with container run args."}{" "}
-            Add <code>git:github.com/sallyom/claw-vault</code>, a ClawHub Vault plugin, or bundled <code>extensions/vault</code> in the Plugins section unless it is already installed in OpenClaw's home volume.
+            The installer installs <code>git:github.com/sallyom/claw-vault</code> automatically when this is enabled.
           </div>
         </div>
 

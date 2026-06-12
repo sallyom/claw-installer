@@ -196,6 +196,20 @@ describe("k8s state sync manifests", () => {
     );
   });
 
+  it("installs the Vault plugin when Vault SecretRefs are enabled", () => {
+    const deployment = deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({
+        vaultSecretsEnabled: true,
+      }),
+    );
+
+    const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
+    const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
+
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-vault' --force");
+  });
+
   it("installs the Anthropic Vertex provider plugin for direct Claude Vertex mode", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
