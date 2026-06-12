@@ -325,7 +325,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
     expect(screen.queryByText("OpenAI SecretRef Source")).toBeNull();
   });
 
-  it("shows generated Vault ids instead of editable SecretRef fields", async () => {
+  it("shows editable Vault ids instead of raw SecretRef fields", async () => {
     global.fetch = mockHealthResponse([
       { mode: "openshift", title: "OpenShift", description: "Deploy to OpenShift", available: true, priority: 10, builtIn: false },
     ], {
@@ -352,8 +352,10 @@ describe("DeployForm agent name validation (issue #7)", () => {
     fireEvent.click(screen.getByText("External Secret Providers"));
     fireEvent.click(screen.getByLabelText("Configure HashiCorp Vault SecretRefs"));
 
-    expect(await screen.findByText("Generated Vault SecretRefs")).toBeTruthy();
-    expect(screen.getByText("providers/anthropic/apiKey")).toBeTruthy();
+    expect(await screen.findByText("Vault SecretRef IDs")).toBeTruthy();
+    const anthropicId = screen.getByDisplayValue("providers/anthropic/apiKey");
+    fireEvent.change(anthropicId, { target: { value: "sallyom/anthropic/apiKey" } });
+    expect(screen.getByDisplayValue("sallyom/anthropic/apiKey")).toBeTruthy();
     expect(screen.queryByText("Anthropic SecretRef Source")).toBeNull();
   });
 

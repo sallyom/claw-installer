@@ -34,6 +34,11 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     vaultNamespace: "",
     vaultKvMount: "secret",
     vaultKvVersion: "2",
+    vaultAuthMethod: "token",
+    vaultAuthRole: "",
+    vaultAuthMount: "",
+    vaultJwtFile: "",
+    vaultTokenFile: "",
     vaultTokenSecretName: "openclaw-vault-token",
     vaultTokenSecretKey: "VAULT_TOKEN",
     onePasswordSecretsEnabled: false,
@@ -377,8 +382,25 @@ export function applySavedVarsToConfig(
           || prev.vaultSecretsEnabled,
       vaultAddr: getStringVar(vars, "VAULT_ADDR", "vaultAddr") || prev.vaultAddr,
       vaultNamespace: getStringVar(vars, "VAULT_NAMESPACE", "vaultNamespace") || prev.vaultNamespace,
-      vaultKvMount: getStringVar(vars, "CLAW_VAULT_KV_MOUNT", "vaultKvMount") || prev.vaultKvMount,
-      vaultKvVersion: getStringVar(vars, "CLAW_VAULT_KV_VERSION", "vaultKvVersion") || prev.vaultKvVersion,
+      vaultKvMount:
+        getStringVar(vars, "OPENCLAW_VAULT_KV_MOUNT", "vaultKvMount")
+        || getStringVar(vars, "CLAW_VAULT_KV_MOUNT")
+        || prev.vaultKvMount,
+      vaultKvVersion:
+        getStringVar(vars, "OPENCLAW_VAULT_KV_VERSION", "vaultKvVersion")
+        || getStringVar(vars, "CLAW_VAULT_KV_VERSION")
+        || prev.vaultKvVersion,
+      vaultAuthMethod:
+        (getStringVar(vars, "OPENCLAW_VAULT_AUTH_METHOD", "vaultAuthMethod") as DeployFormConfig["vaultAuthMethod"])
+        || prev.vaultAuthMethod,
+      vaultAuthRole:
+        getStringVar(vars, "OPENCLAW_VAULT_AUTH_ROLE", "vaultAuthRole") || prev.vaultAuthRole,
+      vaultAuthMount:
+        getStringVar(vars, "OPENCLAW_VAULT_AUTH_MOUNT", "vaultAuthMount") || prev.vaultAuthMount,
+      vaultJwtFile:
+        getStringVar(vars, "OPENCLAW_VAULT_JWT_FILE", "vaultJwtFile") || prev.vaultJwtFile,
+      vaultTokenFile:
+        getStringVar(vars, "VAULT_TOKEN_FILE", "vaultTokenFile") || prev.vaultTokenFile,
       vaultTokenSecretName:
         getStringVar(vars, "VAULT_TOKEN_SECRET_NAME", "vaultTokenSecretName") || prev.vaultTokenSecretName,
       vaultTokenSecretKey:
@@ -694,6 +716,11 @@ export function buildDeployRequestBody(params: {
     vaultNamespace: config.vaultSecretsEnabled ? trimToUndefined(config.vaultNamespace) : undefined,
     vaultKvMount: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvMount) : undefined,
     vaultKvVersion: config.vaultSecretsEnabled ? trimToUndefined(config.vaultKvVersion) : undefined,
+    vaultAuthMethod: config.vaultSecretsEnabled ? config.vaultAuthMethod : undefined,
+    vaultAuthRole: config.vaultSecretsEnabled ? trimToUndefined(config.vaultAuthRole) : undefined,
+    vaultAuthMount: config.vaultSecretsEnabled ? trimToUndefined(config.vaultAuthMount) : undefined,
+    vaultJwtFile: config.vaultSecretsEnabled ? trimToUndefined(config.vaultJwtFile) : undefined,
+    vaultTokenFile: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenFile) : undefined,
     vaultTokenSecretName: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretName) : undefined,
     vaultTokenSecretKey: config.vaultSecretsEnabled ? trimToUndefined(config.vaultTokenSecretKey) : undefined,
     onePasswordSecretsEnabled: config.onePasswordSecretsEnabled || undefined,
@@ -907,6 +934,8 @@ export function buildEnvFileContent(params: {
     `VAULT_SECRETS_ENABLED=${config.vaultSecretsEnabled}`,
     `VAULT_ADDR=${config.vaultAddr}`,
     `VAULT_NAMESPACE=${config.vaultNamespace}`,
+    `OPENCLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`,
+    `OPENCLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`,
     `CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`,
     `CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`,
     `VAULT_TOKEN_SECRET_NAME=${config.vaultTokenSecretName}`,

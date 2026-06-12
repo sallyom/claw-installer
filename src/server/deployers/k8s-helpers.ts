@@ -676,7 +676,13 @@ export function buildManagedAgentAuthProfiles(config: DeployConfig): {
 
 export function buildManagedAgentAuthProfilesSecretJson(config: DeployConfig): string | undefined {
   const baseProfiles = buildManagedAgentAuthProfiles(config)?.profiles || {};
-  return codexOauthAuthProfileStoreJson(config, baseProfiles);
+  const codexProfilesJson = codexOauthAuthProfileStoreJson(config, baseProfiles);
+  if (codexProfilesJson) {
+    return codexProfilesJson;
+  }
+  return Object.keys(baseProfiles).length > 0
+    ? JSON.stringify({ version: 1, profiles: baseProfiles }, null, 2)
+    : undefined;
 }
 
 function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: DeployConfig): void {

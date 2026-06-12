@@ -39,6 +39,11 @@ export interface DeployConfig {
   vaultNamespace?: string;
   vaultKvMount?: string;
   vaultKvVersion?: string;
+  vaultAuthMethod?: "token" | "token_file" | "jwt" | "kubernetes";
+  vaultAuthRole?: string;
+  vaultAuthMount?: string;
+  vaultJwtFile?: string;
+  vaultTokenFile?: string;
   vaultTokenSecretName?: string;
   vaultTokenSecretKey?: string;
   onePasswordSecretsEnabled?: boolean;

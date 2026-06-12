@@ -290,31 +290,42 @@ describe("k8s state sync manifests", () => {
   });
 
   it("writes SecretRef-backed auth profiles into each managed agent directory", () => {
+    const config = makeConfig({
+      anthropicApiKeyRef: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/anthropic/apiKey",
+      },
+      openaiApiKeyRef: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/openai/apiKey",
+      },
+    });
+    const secret = secretManifest("openclaw-alpha-openclaw", config, "gateway-token");
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
-      makeConfig({
-        anthropicApiKeyRef: {
-          source: "exec",
-          provider: "vault",
-          id: "providers/anthropic/apiKey",
-        },
-        openaiApiKeyRef: {
-          source: "exec",
-          provider: "vault",
-          id: "providers/openai/apiKey",
-        },
-      }),
+      config,
     );
     const initContainer = deployment.spec?.template.spec?.initContainers?.[0];
     const initScript = initContainer?.command?.[2] ?? "";
+    const gateway = gatewayContainer(deployment);
+    const gatewayScript = gateway?.command?.[2] ?? "";
+    const gatewayVolumeMounts = gateway?.volumeMounts?.map((mount) => mount.mountPath) ?? [];
 
-    expect(initScript).toContain("mkdir -p /home/node/.openclaw/agents/openclaw-alpha/agent");
-    expect(initScript).toContain("/home/node/.openclaw/agents/openclaw-alpha/agent/auth-profiles.json");
-    expect(initScript).toContain('"anthropic:default"');
-    expect(initScript).toContain('"openai:default"');
-    expect(initScript).toContain('"provider": "vault"');
-    expect(initScript).toContain('"id": "providers/anthropic/apiKey"');
-    expect(initScript).toContain('"id": "providers/openai/apiKey"');
+    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"anthropic:default"');
+    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"openai:default"');
+    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"provider": "vault"');
+    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"id": "providers/anthropic/apiKey"');
+    expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"id": "providers/openai/apiKey"');
+    expect(initScript).not.toContain("auth-profiles.json");
+    expect(initScript).not.toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
+    expect(gatewayVolumeMounts).toContain("/openclaw-secrets");
+    expect(gatewayScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
+    expect(gatewayScript).toContain("openclaw-agent.sqlite");
+    expect(gatewayScript).toContain("auth_profile_store");
+    expect(gatewayScript).toContain('"openclaw-alpha"');
+    expect(gatewayScript).not.toContain("doctor --non-interactive --fix");
   });
 
   it("creates the session store directory for each managed agent", () => {
@@ -351,10 +362,12 @@ describe("k8s state sync manifests", () => {
     const secret = secretManifest("openclaw-alpha-openclaw", codexConfig, "gateway-token");
     const deployment = deploymentManifest("openclaw-alpha-openclaw", codexConfig);
     const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
+    const gatewayScript = gatewayContainer(deployment)?.command?.[2] ?? "";
 
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"openai:chatgpt-default"');
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain("codex-refresh-token");
-    expect(initScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
+    expect(gatewayScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
+    expect(initScript).not.toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
     expect(initScript).not.toContain("codex-refresh-token");
   });
 
@@ -625,12 +638,56 @@ describe("gateway env vars in proxy mode", () => {
 
     expect(env.VAULT_ADDR).toBe("http://vault.vault.svc:8200");
     expect(env.VAULT_NAMESPACE).toBe("admin");
+    expect(env.OPENCLAW_VAULT_KV_MOUNT).toBe("secret");
+    expect(env.OPENCLAW_VAULT_KV_VERSION).toBe("2");
     expect(env.CLAW_VAULT_KV_MOUNT).toBe("secret");
     expect(env.CLAW_VAULT_KV_VERSION).toBe("2");
     expect(gatewayEnv(deployment, "VAULT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
       name: "openclaw-vault-token",
       key: "token",
     });
+  });
+
+  it("wires Vault Kubernetes auth without a token Secret", () => {
+    const config = makeConfig({
+      vaultSecretsEnabled: true,
+      vaultAddr: "http://vault.vault.svc:8200",
+      vaultKvMount: "secret",
+      vaultKvVersion: "2",
+      vaultAuthMethod: "kubernetes",
+      vaultAuthRole: "openclaw",
+    });
+
+    const deployment = deploymentManifest("ns", config);
+    const env = gatewayEnvMap(deployment);
+    const envNames = gatewayEnvNames(deployment);
+
+    expect(env.OPENCLAW_VAULT_AUTH_METHOD).toBe("kubernetes");
+    expect(env.OPENCLAW_VAULT_AUTH_ROLE).toBe("openclaw");
+    expect(envNames).not.toContain("VAULT_TOKEN");
+  });
+
+  it("wires Vault JWT auth with role and JWT file", () => {
+    const config = makeConfig({
+      vaultSecretsEnabled: true,
+      vaultAddr: "http://vault.vault.svc:8200",
+      vaultKvMount: "secret",
+      vaultKvVersion: "2",
+      vaultAuthMethod: "jwt",
+      vaultAuthRole: "openclaw",
+      vaultAuthMount: "oidc",
+      vaultJwtFile: "/var/run/secrets/openclaw/vault-jwt",
+    });
+
+    const deployment = deploymentManifest("ns", config);
+    const env = gatewayEnvMap(deployment);
+    const envNames = gatewayEnvNames(deployment);
+
+    expect(env.OPENCLAW_VAULT_AUTH_METHOD).toBe("jwt");
+    expect(env.OPENCLAW_VAULT_AUTH_ROLE).toBe("openclaw");
+    expect(env.OPENCLAW_VAULT_AUTH_MOUNT).toBe("oidc");
+    expect(env.OPENCLAW_VAULT_JWT_FILE).toBe("/var/run/secrets/openclaw/vault-jwt");
+    expect(envNames).not.toContain("VAULT_TOKEN");
   });
 
   it("installs the 1Password plugin and injects its token Secret", () => {
