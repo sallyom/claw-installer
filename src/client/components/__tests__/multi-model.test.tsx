@@ -355,6 +355,10 @@ describe("Multi-model per provider", () => {
 
       expect(env).toContain("VAULT_SECRETS_ENABLED=true");
       expect(env).toContain("VAULT_ADDR=http://vault.vault.svc:8200");
+      expect(env).toContain("OPENCLAW_VAULT_KV_MOUNT=secret");
+      expect(env).toContain("OPENCLAW_VAULT_KV_VERSION=2");
+      expect(env).toContain("CLAW_VAULT_KV_MOUNT=secret");
+      expect(env).toContain("CLAW_VAULT_KV_VERSION=2");
       expect(env).toContain("VAULT_TOKEN_SECRET_NAME=openclaw-vault-token");
       expect(env).toContain("VAULT_TOKEN_SECRET_KEY=token");
     });

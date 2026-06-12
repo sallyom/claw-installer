@@ -13,6 +13,7 @@ import {
 const OPENCLAW_LOCAL_HOME = "/home/node";
 const OPENCLAW_LOCAL_STATE_DIR = `${OPENCLAW_LOCAL_HOME}/.openclaw`;
 const OPENCLAW_LOCAL_TMP_DIR = `${OPENCLAW_LOCAL_STATE_DIR}/tmp`;
+const VAULT_PLUGIN_SPEC = "git:github.com/sallyom/claw-vault";
 const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 
 export async function installLocalPlugins(params: {
@@ -79,6 +80,7 @@ function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const specs: string[] = [];
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
+    ...(config.vaultSecretsEnabled ? [VAULT_PLUGIN_SPEC] : []),
     ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();

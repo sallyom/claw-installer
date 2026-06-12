@@ -23,12 +23,48 @@ interface ExternalSecretProvidersSectionProps {
   onOnePasswordEnabledChange: (enabled: boolean) => void;
 }
 
-const VAULT_PROVIDER_PATHS: Partial<Record<InferenceProvider, { label: string; path: string }>> = {
-  anthropic: { label: "Anthropic API key", path: "providers/anthropic/apiKey" },
-  openai: { label: "OpenAI API key", path: "providers/openai/apiKey" },
-  google: { label: "Google API key", path: "providers/google/apiKey" },
-  openrouter: { label: "OpenRouter API key", path: "providers/openrouter/apiKey" },
-  "custom-endpoint": { label: "OpenAI-compatible endpoint API key", path: "providers/endpoint/apiKey" },
+const VAULT_PROVIDER_REFS: Partial<Record<InferenceProvider, {
+  label: string;
+  idField: keyof DeployFormConfig;
+  sourceField: keyof DeployFormConfig;
+  providerField: keyof DeployFormConfig;
+  defaultId: string;
+}>> = {
+  anthropic: {
+    label: "Anthropic API key",
+    idField: "anthropicApiKeyRefId",
+    sourceField: "anthropicApiKeyRefSource",
+    providerField: "anthropicApiKeyRefProvider",
+    defaultId: "providers/anthropic/apiKey",
+  },
+  openai: {
+    label: "OpenAI API key",
+    idField: "openaiApiKeyRefId",
+    sourceField: "openaiApiKeyRefSource",
+    providerField: "openaiApiKeyRefProvider",
+    defaultId: "providers/openai/apiKey",
+  },
+  google: {
+    label: "Google API key",
+    idField: "googleApiKeyRefId",
+    sourceField: "googleApiKeyRefSource",
+    providerField: "googleApiKeyRefProvider",
+    defaultId: "providers/google/apiKey",
+  },
+  openrouter: {
+    label: "OpenRouter API key",
+    idField: "openrouterApiKeyRefId",
+    sourceField: "openrouterApiKeyRefSource",
+    providerField: "openrouterApiKeyRefProvider",
+    defaultId: "providers/openrouter/apiKey",
+  },
+  "custom-endpoint": {
+    label: "OpenAI-compatible endpoint API key",
+    idField: "modelEndpointApiKeyRefId",
+    sourceField: "modelEndpointApiKeyRefSource",
+    providerField: "modelEndpointApiKeyRefProvider",
+    defaultId: "providers/endpoint/apiKey",
+  },
 };
 
 const ONEPASSWORD_PROVIDER_ITEMS: Partial<Record<InferenceProvider, { label: string; item: string }>> = {
@@ -50,9 +86,9 @@ export function ExternalSecretProvidersSection({
   onVaultEnabledChange,
   onOnePasswordEnabledChange,
 }: ExternalSecretProvidersSectionProps) {
-  const vaultPaths = selectedProviders
-    .map((provider) => VAULT_PROVIDER_PATHS[provider])
-    .filter((entry): entry is { label: string; path: string } => Boolean(entry));
+  const vaultRefs = selectedProviders
+    .map((provider) => VAULT_PROVIDER_REFS[provider])
+    .filter((entry): entry is NonNullable<typeof VAULT_PROVIDER_REFS[InferenceProvider]> => Boolean(entry));
   const onePasswordVault = config.onePasswordVault.trim() || "OpenClaw";
   const onePasswordRefs = selectedProviders
     .map((provider) => ONEPASSWORD_PROVIDER_ITEMS[provider])
@@ -61,6 +97,18 @@ export function ExternalSecretProvidersSection({
 
   const namespace = config.namespace.trim() || suggestedNamespace || "<target-namespace>";
   const providerSecretName = config.providerSecretName.trim() || "openclaw-provider-secrets";
+  const updateVaultRefId = (entry: NonNullable<typeof VAULT_PROVIDER_REFS[InferenceProvider]>, value: string) => {
+    update(entry.sourceField, "exec");
+    update(entry.providerField, "vault");
+    update(entry.idField, value);
+  };
+
+  const nestedDetailsStyle: React.CSSProperties = {
+    marginTop: "1rem",
+    paddingTop: "0.75rem",
+    borderTop: "1px solid var(--border)",
+  };
+  const nestedSummaryStyle: React.CSSProperties = { cursor: "pointer", fontWeight: 600 };
 
   return (
     <details open={isHostedMode} style={{ marginTop: "1rem" }}>
@@ -68,11 +116,13 @@ export function ExternalSecretProvidersSection({
       <div className="card" style={{ marginTop: "0.75rem" }}>
         <div className="hint" style={{ marginBottom: "0.75rem" }}>
           Configure OpenClaw to resolve credentials through SecretRef providers instead of writing provider API keys
-          into the installer-managed Secret.
+          into the installer-managed Secret. Each provider below is configured independently.
         </div>
 
         {isClusterMode && (
-          <div className="form-group">
+          <details open={isHostedMode} style={nestedDetailsStyle}>
+            <summary style={nestedSummaryStyle}>OpenShift Provider Secret</summary>
+          <div className="form-group" style={{ marginTop: "0.75rem" }}>
             <label>OpenShift Provider Secret Name</label>
             <input
               type="text"
@@ -159,9 +209,12 @@ export function ExternalSecretProvidersSection({
               </>
             )}
           </div>
+          </details>
         )}
 
-        <div className="form-group">
+        <details open={config.vaultSecretsEnabled} style={nestedDetailsStyle}>
+          <summary style={nestedSummaryStyle}>HashiCorp Vault</summary>
+        <div className="form-group" style={{ marginTop: "0.75rem" }}>
           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <input
               type="checkbox"
@@ -176,7 +229,7 @@ export function ExternalSecretProvidersSection({
             selected credential SecretRefs at Vault paths such as <code>providers/openai/apiKey</code>. {isClusterMode
               ? "The Vault token must already exist as a Secret in the target namespace."
               : "For local deploys, the installer passes VAULT_TOKEN from its environment when present; otherwise provide it with container run args."}{" "}
-            Add <code>git:github.com/sallyom/claw-vault</code>, a ClawHub Vault plugin, or bundled <code>extensions/vault</code> in the Plugins section unless it is already installed in OpenClaw's home volume.
+            The installer installs <code>git:github.com/sallyom/claw-vault</code> automatically when this is enabled.
           </div>
         </div>
 
@@ -208,10 +261,13 @@ export function ExternalSecretProvidersSection({
                 <label>KV Mount</label>
                 <input
                   type="text"
-                  placeholder="secret"
+                  placeholder="users"
                   value={config.vaultKvMount}
                   onChange={(e) => update("vaultKvMount", e.target.value)}
                 />
+                <div className="hint">
+                  For API paths like <code>/v1/users/data/team-name/anthropic</code>, use mount <code>users</code>.
+                </div>
               </div>
               <div className="form-group">
                 <label>KV Version</label>
@@ -225,7 +281,86 @@ export function ExternalSecretProvidersSection({
               </div>
             </div>
 
-            {isClusterMode && (
+            <div className="form-group">
+              <label>Auth Method</label>
+              <select
+                value={config.vaultAuthMethod}
+                onChange={(e) => update("vaultAuthMethod", e.target.value)}
+              >
+                <option value="token">token</option>
+                <option value="kubernetes">kubernetes</option>
+                <option value="jwt">jwt</option>
+                <option value="token_file">token_file</option>
+              </select>
+              <div className="hint">
+                {config.vaultAuthMethod === "token" && (isClusterMode
+                  ? <>The client token is read from the Secret below. Mint it however your Vault allows (for an OIDC/Keycloak Vault, run <code>vault login -method=oidc</code> and store the resulting token).</>
+                  : <>The installer forwards <code>VAULT_TOKEN</code> from its own environment. For an OIDC/Keycloak Vault, run <code>vault login -method=oidc</code>, then <code>export VAULT_TOKEN=$(vault print token)</code> before deploying.</>)}
+                {config.vaultAuthMethod === "kubernetes" &&
+                  <>Vault authenticates the pod&apos;s ServiceAccount token via Vault&apos;s <code>kubernetes</code> backend. <strong>Only works for in-cluster (OpenShift) deploys</strong> — a local podman container has no ServiceAccount token to present.</>}
+                {config.vaultAuthMethod === "jwt" &&
+                  <>Non-interactive login with a JWT file (e.g. a Keycloak-issued token). Requires a Vault <code>role_type=jwt</code> role on the JWT/OIDC backend. Works locally and in-cluster.</>}
+                {config.vaultAuthMethod === "token_file" &&
+                  <>Reads the client token from a file (e.g. a Vault Agent token sink).</>}
+              </div>
+            </div>
+
+            {(config.vaultAuthMethod === "jwt" || config.vaultAuthMethod === "kubernetes") && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Auth Role</label>
+                  <input
+                    type="text"
+                    placeholder="openclaw"
+                    value={config.vaultAuthRole}
+                    onChange={(e) => update("vaultAuthRole", e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Auth Mount (optional)</label>
+                  <input
+                    type="text"
+                    placeholder={config.vaultAuthMethod}
+                    value={config.vaultAuthMount}
+                    onChange={(e) => update("vaultAuthMount", e.target.value)}
+                  />
+                  <div className="hint">
+                    Vault auth path. Defaults to <code>{config.vaultAuthMethod}</code>; set it if your role lives on a
+                    different mount (e.g. <code>oidc</code>).
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {config.vaultAuthMethod === "jwt" && (
+              <div className="form-group">
+                <label>JWT File Path</label>
+                <input
+                  type="text"
+                  placeholder="/home/node/.config/openclaw/vault-jwt"
+                  value={config.vaultJwtFile}
+                  onChange={(e) => update("vaultJwtFile", e.target.value)}
+                />
+                <div className="hint">
+                  Path, inside the OpenClaw container, to the JWT the plugin presents to Vault. The token is re-read on
+                  each resolve, so keep it fresh (refresh job or Vault Agent).
+                </div>
+              </div>
+            )}
+
+            {config.vaultAuthMethod === "token_file" && (
+              <div className="form-group">
+                <label>Token File Path</label>
+                <input
+                  type="text"
+                  placeholder="/vault/secrets/token"
+                  value={config.vaultTokenFile}
+                  onChange={(e) => update("vaultTokenFile", e.target.value)}
+                />
+              </div>
+            )}
+
+            {isClusterMode && config.vaultAuthMethod === "token" && (
               <div className="form-row">
                 <div className="form-group">
                   <label>Token Secret Name</label>
@@ -248,25 +383,33 @@ export function ExternalSecretProvidersSection({
               </div>
             )}
 
-            {vaultPaths.length > 0 && (
+            {vaultRefs.length > 0 && (
               <div className="form-group">
-                <label>Generated Vault SecretRefs</label>
+                <label>Vault SecretRef IDs</label>
                 <div className="hint">
-                  The installer will configure selected providers to resolve credentials from these Vault ids.
+                  Use <code>{"<secret path>/<field>"}</code>. For <code>vault kv get -mount=&quot;users&quot; &quot;team-name/anthropic&quot;</code>
+                  with an <code>apiKey</code> field, use <code>team-name/anthropic/apiKey</code>.
                 </div>
-                <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem", color: "var(--text-secondary)" }}>
-                  {vaultPaths.map((entry) => (
-                    <li key={entry.path}>
-                      {entry.label}: <code>{entry.path}</code>
-                    </li>
-                  ))}
-                </ul>
+                {vaultRefs.map((entry) => (
+                  <div className="form-group" key={entry.idField} style={{ marginTop: "0.75rem" }}>
+                    <label>{entry.label}</label>
+                    <input
+                      type="text"
+                      placeholder={entry.defaultId}
+                      value={String(config[entry.idField] || "")}
+                      onChange={(e) => updateVaultRefId(entry, e.target.value)}
+                    />
+                  </div>
+                ))}
               </div>
             )}
           </>
         )}
+        </details>
 
-        <div className="form-group">
+        <details open={config.onePasswordSecretsEnabled} style={nestedDetailsStyle}>
+          <summary style={nestedSummaryStyle}>1Password</summary>
+        <div className="form-group" style={{ marginTop: "0.75rem" }}>
           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <input
               type="checkbox"
@@ -354,9 +497,11 @@ export function ExternalSecretProvidersSection({
             )}
           </>
         )}
+        </details>
 
-        <div className="form-group">
-          <label>Additional Secret Providers JSON (optional)</label>
+        <details style={nestedDetailsStyle}>
+          <summary style={nestedSummaryStyle}>Additional Secret Providers JSON (advanced)</summary>
+        <div className="form-group" style={{ marginTop: "0.75rem" }}>
           <textarea
             rows={6}
             placeholder={`{\n  "default": { "source": "env" },\n  "custom": {\n    "source": "file",\n    "baseDir": "/var/run/secrets/openclaw"\n  }\n}`}
@@ -368,6 +513,7 @@ export function ExternalSecretProvidersSection({
             the installer generates those providers.
           </div>
         </div>
+        </details>
       </div>
     </details>
   );

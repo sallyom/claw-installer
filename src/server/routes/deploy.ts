@@ -364,6 +364,10 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.vaultNamespace = trimOptional(config.vaultNamespace);
   config.vaultKvMount = trimOptional(config.vaultKvMount);
   config.vaultKvVersion = trimOptional(config.vaultKvVersion);
+  config.vaultAuthRole = trimOptional(config.vaultAuthRole);
+  config.vaultAuthMount = trimOptional(config.vaultAuthMount);
+  config.vaultJwtFile = trimOptional(config.vaultJwtFile);
+  config.vaultTokenFile = trimOptional(config.vaultTokenFile);
   config.vaultTokenSecretName = trimOptional(config.vaultTokenSecretName);
   config.vaultTokenSecretKey = trimOptional(config.vaultTokenSecretKey);
   config.onePasswordVault = trimOptional(config.onePasswordVault);
@@ -426,8 +430,25 @@ router.post("/", deploymentRateLimit, async (req, res) => {
       return;
     }
     const isClusterMode = config.mode === "kubernetes" || config.mode === "openshift";
-    if (isClusterMode && (!config.vaultTokenSecretName || !config.vaultTokenSecretKey)) {
-      res.status(400).json({ error: "vaultTokenSecretName and vaultTokenSecretKey are required when vaultSecretsEnabled is true" });
+    const authMethod = config.vaultAuthMethod || "token";
+    if (authMethod !== "token" && authMethod !== "token_file" && authMethod !== "jwt" && authMethod !== "kubernetes") {
+      res.status(400).json({ error: "vaultAuthMethod must be token, token_file, jwt, or kubernetes" });
+      return;
+    }
+    if (isClusterMode && authMethod === "token" && (!config.vaultTokenSecretName || !config.vaultTokenSecretKey)) {
+      res.status(400).json({ error: "vaultTokenSecretName and vaultTokenSecretKey are required for token auth" });
+      return;
+    }
+    if ((authMethod === "jwt" || authMethod === "kubernetes") && !config.vaultAuthRole) {
+      res.status(400).json({ error: "vaultAuthRole is required for jwt and kubernetes auth" });
+      return;
+    }
+    if (authMethod === "jwt" && !config.vaultJwtFile) {
+      res.status(400).json({ error: "vaultJwtFile is required for jwt auth" });
+      return;
+    }
+    if (authMethod === "token_file" && !config.vaultTokenFile) {
+      res.status(400).json({ error: "vaultTokenFile is required for token_file auth" });
       return;
     }
     if (customSecretProviders && "vault" in customSecretProviders) {

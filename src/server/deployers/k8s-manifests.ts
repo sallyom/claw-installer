@@ -4,7 +4,6 @@ import {
   agentId,
   tryParseProjectId,
   buildOpenClawConfig,
-  buildManagedAgentAuthProfiles,
   buildManagedAgentAuthProfilesSecretJson,
   resolveEnvSecretRefId,
 } from "./k8s-helpers.js";
@@ -31,6 +30,7 @@ export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
 const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
 const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
 const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
+const VAULT_PLUGIN_SPEC = "git:github.com/sallyom/claw-vault";
 const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 const ONEPASSWORD_CLI_IMAGE = "docker.io/1password/op:2";
 const ONEPASSWORD_CLI_BINARY_PATH = `${OPENCLAW_RUNTIME_DIR}/bin/op`;
@@ -42,6 +42,7 @@ function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const specs: string[] = [];
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
+    ...(config.vaultSecretsEnabled ? [VAULT_PLUGIN_SPEC] : []),
     ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
     ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
@@ -99,12 +100,68 @@ ${OPENSHELL_CLI_PATH} -g openshell status
 `.trim();
 }
 
-function gatewayStartupScript(useOpenShell: boolean): string {
+function managedAuthProfilesSqliteImportScript(agentIds: string[], sourcePath: string): string {
+  const uniqueAgentIds = Array.from(new Set(agentIds));
+  if (uniqueAgentIds.length === 0) {
+    return "";
+  }
+  const nodeScript = [
+    "const { existsSync, mkdirSync, readFileSync, chmodSync } = require('node:fs');",
+    "const path = require('node:path');",
+    "let DatabaseSync;",
+    "try { ({ DatabaseSync } = require('node:sqlite')); } catch { process.exit(0); }",
+    `const agentIds = ${JSON.stringify(uniqueAgentIds)};`,
+    `const runtimeDir = ${JSON.stringify(OPENCLAW_RUNTIME_DIR)};`,
+    `const sourcePath = ${JSON.stringify(sourcePath)};`,
+    "if (!existsSync(sourcePath)) process.exit(0);",
+    "const incoming = JSON.parse(readFileSync(sourcePath, 'utf8'));",
+    "if (!incoming || typeof incoming !== 'object' || !incoming.profiles || typeof incoming.profiles !== 'object') process.exit(0);",
+    "for (const agentId of agentIds) {",
+    "  const agentDir = path.join(runtimeDir, 'agents', agentId, 'agent');",
+    "  mkdirSync(agentDir, { recursive: true, mode: 0o700 });",
+    "  const dbPath = path.join(agentDir, 'openclaw-agent.sqlite');",
+    "  const db = new DatabaseSync(dbPath);",
+    "  try {",
+    "    db.exec('PRAGMA busy_timeout = 5000');",
+    "    db.exec('CREATE TABLE IF NOT EXISTS schema_meta (meta_key TEXT NOT NULL PRIMARY KEY, role TEXT NOT NULL, schema_version INTEGER NOT NULL, agent_id TEXT, app_version TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)');",
+    "    db.exec('CREATE TABLE IF NOT EXISTS auth_profile_store (store_key TEXT NOT NULL PRIMARY KEY, store_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
+    "    db.exec('CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT NOT NULL PRIMARY KEY, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
+    "    const now = Date.now();",
+    "    db.prepare('INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(meta_key) DO UPDATE SET role=excluded.role, schema_version=excluded.schema_version, agent_id=excluded.agent_id, updated_at=excluded.updated_at').run('primary', 'agent', 1, agentId, null, now, now);",
+    "    const row = db.prepare(\"SELECT store_json FROM auth_profile_store WHERE store_key = 'primary'\").get();",
+    "    let existing = { version: 1, profiles: {} };",
+    "    if (row && typeof row.store_json === 'string') {",
+    "      try {",
+    "        const parsed = JSON.parse(row.store_json);",
+    "        if (parsed && typeof parsed === 'object') existing = parsed;",
+    "      } catch {}",
+    "    }",
+    "    const next = { ...existing, version: Number(existing.version) || 1, profiles: { ...(existing.profiles || {}), ...incoming.profiles } };",
+    "    db.prepare('INSERT INTO auth_profile_store (store_key, store_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(store_key) DO UPDATE SET store_json=excluded.store_json, updated_at=excluded.updated_at').run('primary', JSON.stringify(next), now);",
+    "  } finally {",
+    "    db.close();",
+    "    chmodSync(agentDir, 0o700);",
+    "    if (existsSync(dbPath)) chmodSync(dbPath, 0o600);",
+    "  }",
+    "}",
+  ].join("\n");
+  return [
+    "node <<'EOF_OPENCLAW_AUTH_IMPORT'",
+    nodeScript,
+    "EOF_OPENCLAW_AUTH_IMPORT",
+  ].join("\n");
+}
+
+function gatewayStartupScript(useOpenShell: boolean, managedAgentIds: string[]): string {
   return [
     "umask 007",
+    managedAuthProfilesSqliteImportScript(
+      managedAgentIds,
+      `/openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY}`,
+    ),
     ...(useOpenShell ? [openShellGatewayRegistrationScript()] : []),
     "exec node openclaw.mjs gateway run --bind lan --port 18789",
-  ].join("\n");
+  ].filter((line) => line.length > 0).join("\n");
 }
 
 function pluginInstallEnv(): k8s.V1EnvVar[] {
@@ -395,11 +452,19 @@ function appendVaultPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): vo
   if (!config.vaultSecretsEnabled) {
     return;
   }
+  const authMethod = config.vaultAuthMethod || "token";
   envVars.push(
     { name: "VAULT_ADDR", value: config.vaultAddr || DEFAULT_VAULT_ADDR },
+    { name: "OPENCLAW_VAULT_KV_MOUNT", value: config.vaultKvMount || "secret" },
+    { name: "OPENCLAW_VAULT_KV_VERSION", value: config.vaultKvVersion || "2" },
     { name: "CLAW_VAULT_KV_MOUNT", value: config.vaultKvMount || "secret" },
     { name: "CLAW_VAULT_KV_VERSION", value: config.vaultKvVersion || "2" },
-    {
+  );
+  if (authMethod !== "token") {
+    envVars.push({ name: "OPENCLAW_VAULT_AUTH_METHOD", value: authMethod });
+  }
+  if (authMethod === "token") {
+    envVars.push({
       name: "VAULT_TOKEN",
       valueFrom: {
         secretKeyRef: {
@@ -407,8 +472,24 @@ function appendVaultPluginEnv(envVars: k8s.V1EnvVar[], config: DeployConfig): vo
           key: config.vaultTokenSecretKey || "VAULT_TOKEN",
         },
       },
-    },
-  );
+    });
+  } else if (authMethod === "token_file") {
+    if (config.vaultTokenFile) {
+      envVars.push({ name: "VAULT_TOKEN_FILE", value: config.vaultTokenFile });
+    }
+  } else {
+    // jwt or kubernetes
+    if (config.vaultAuthRole) {
+      envVars.push({ name: "OPENCLAW_VAULT_AUTH_ROLE", value: config.vaultAuthRole });
+    }
+    if (config.vaultAuthMount) {
+      envVars.push({ name: "OPENCLAW_VAULT_AUTH_MOUNT", value: config.vaultAuthMount });
+    }
+    // kubernetes defaults to the in-pod service account token; jwt needs an explicit file.
+    if (config.vaultJwtFile) {
+      envVars.push({ name: "OPENCLAW_VAULT_JWT_FILE", value: config.vaultJwtFile });
+    }
+  }
   if (config.vaultNamespace) {
     envVars.push({ name: "VAULT_NAMESPACE", value: config.vaultNamespace });
   }
@@ -486,8 +567,6 @@ export function buildInitScript(config: DeployConfig): string {
   const mainWorkspaceDest = `${OPENCLAW_RUNTIME_DIR}/workspace-${id}`;
   const workspaceRouting = mainWorkspaceShellCondition(mainWorkspaceDest, bundle);
   const vaultHelperScript = buildManagedVaultHelperScript();
-  const authProfiles = buildManagedAgentAuthProfiles(config);
-  const authProfilesSecretJson = buildManagedAgentAuthProfilesSecretJson(config);
   const managedAgentIds = Array.from(new Set([id, ...((bundle?.agents || []).map((entry) => entry.id).filter(Boolean))]));
   const openShellPolicyLines = usesOpenShellSandbox(config)
     ? [
@@ -509,25 +588,6 @@ export function buildInitScript(config: DeployConfig): string {
   const sessionStoreLines = managedAgentIds
     .map((agentId) => `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/sessions`)
     .join("\n");
-  const authProfileLines = authProfilesSecretJson
-    ? managedAgentIds
-      .map((agentId) => [
-        `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent`,
-        `if [ -f /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ]; then cp /openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY} ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json; fi`,
-        `chmod 600 ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json 2>/dev/null || true`,
-      ].join("\n"))
-      .join("\n")
-    : authProfiles
-      ? managedAgentIds
-      .map((agentId) => [
-        `mkdir -p ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent`,
-        `cat > ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json <<'EOF_AUTH_PROFILES'`,
-        JSON.stringify(authProfiles, null, 2),
-        "EOF_AUTH_PROFILES",
-        `chmod 600 ${OPENCLAW_RUNTIME_DIR}/agents/${agentId}/agent/auth-profiles.json`,
-      ].join("\n"))
-      .join("\n")
-      : "";
 
   return `
 mkdir -p ${OPENCLAW_RUNTIME_HOME} ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR}
@@ -567,7 +627,6 @@ cp -r /skills-src/. ${OPENCLAW_RUNTIME_DIR}/skills/ 2>/dev/null || true
 cp /cron-src/jobs.json ${OPENCLAW_RUNTIME_DIR}/cron/jobs.json 2>/dev/null || true
 cp /exec-approvals-src/exec-approvals.json ${OPENCLAW_RUNTIME_DIR}/exec-approvals.json 2>/dev/null || true
 ${sessionStoreLines}
-${authProfileLines}
 chown -R 1000:0 ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R g=u ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
 chmod -R o-rwx ${OPENCLAW_RUNTIME_DIR} 2>/dev/null || true
@@ -613,6 +672,12 @@ export function deploymentManifest(
   const useChromium = shouldUseChromiumSidecar(config);
   const useOpenShell = usesOpenShellSandbox(config);
   const pluginInstallSpecs = configuredPluginInstallSpecs(config);
+  const sourceBundle = loadAgentSourceBundle(config);
+  const managedAgentIds = Array.from(new Set([
+    agentId(config),
+    ...((sourceBundle?.agents || []).map((entry) => entry.id).filter(Boolean)),
+  ]));
+  const authProfilesSecretJson = buildManagedAgentAuthProfilesSecretJson(config);
 
   const optionalKeys = [
     // Gateway always gets provider API keys so it can route to OpenAI/Anthropic
@@ -761,7 +826,7 @@ export function deploymentManifest(
               name: "gateway",
               image,
               imagePullPolicy: "IfNotPresent",
-              command: ["sh", "-c", gatewayStartupScript(useOpenShell)],
+              command: ["sh", "-c", gatewayStartupScript(useOpenShell, managedAgentIds)],
               ports: [
                 { name: "gateway", containerPort: 18789, protocol: "TCP" },
                 ...(withA2a ? [{ name: "bridge", containerPort: 18790, protocol: "TCP" as const }] : []),
@@ -801,6 +866,9 @@ export function deploymentManifest(
               volumeMounts: [
                 { name: "openclaw-home", mountPath: OPENCLAW_HOME_VOLUME_MOUNT },
                 { name: "tmp-volume", mountPath: "/tmp" },
+                ...(authProfilesSecretJson
+                  ? [{ name: "openclaw-secrets", mountPath: "/openclaw-secrets", readOnly: true }]
+                  : []),
                 // Only mount GCP creds on gateway in direct (non-proxy) mode
                 ...(!useProxy && config.gcpServiceAccountJson
                   ? [{ name: "gcp-sa", mountPath: "/home/node/gcp", readOnly: true }]

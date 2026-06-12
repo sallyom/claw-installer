@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   applyGatewayRuntimeConfig,
+  buildLocalManagedAuthProfilesJson,
+  buildLocalManagedAuthProfilesImportScript,
   buildOpenClawConfig,
   buildRunArgs,
   parseContainerRunArgs,
@@ -155,6 +157,43 @@ describe("resolveLocalRuntimeModelEndpoint", () => {
 });
 
 describe("local Vault SecretRef wiring", () => {
+  it("builds Vault-backed Anthropic auth profiles for local Podman agents", () => {
+    const authProfiles = JSON.parse(buildLocalManagedAuthProfilesJson({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      inferenceProvider: "anthropic",
+      vaultSecretsEnabled: true,
+      anthropicApiKeyRef: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/anthropic/apiKey",
+      },
+    }) || "{}");
+
+    expect(authProfiles.profiles?.["anthropic:default"]).toEqual({
+      type: "api_key",
+      provider: "anthropic",
+      keyRef: {
+        source: "exec",
+        provider: "vault",
+        id: "providers/anthropic/apiKey",
+      },
+    });
+  });
+
+  it("imports managed local auth profiles into the SQLite auth store", () => {
+    const script = buildLocalManagedAuthProfilesImportScript(
+      ["openclaw-demo"],
+      "/run/secrets/openclaw-auth",
+    );
+
+    expect(script).toContain("openclaw-agent.sqlite");
+    expect(script).toContain("auth_profile_store");
+    expect(script).not.toContain("auth-profiles.json");
+    expect(script).not.toContain("doctor --non-interactive --fix");
+  });
+
   it("generates Vault and OpenAI provider config for local deploys", () => {
     const rendered = JSON.parse(buildOpenClawConfig({
       mode: "local",
@@ -211,10 +250,44 @@ describe("local Vault SecretRef wiring", () => {
 
       expect(args).toContain("VAULT_ADDR=https://vault.example.test");
       expect(args).toContain("VAULT_NAMESPACE=admin");
+      expect(args).toContain("OPENCLAW_VAULT_KV_MOUNT=secret");
+      expect(args).toContain("OPENCLAW_VAULT_KV_VERSION=2");
       expect(args).toContain("CLAW_VAULT_KV_MOUNT=secret");
       expect(args).toContain("CLAW_VAULT_KV_VERSION=2");
       expect(args).toContain("VAULT_TOKEN=test-vault-token");
       expect(args).toContain("TMPDIR=/home/node/.openclaw/tmp");
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.VAULT_TOKEN;
+      } else {
+        process.env.VAULT_TOKEN = previousToken;
+      }
+    }
+  });
+
+  it("passes local Vault JWT auth env without forwarding VAULT_TOKEN", () => {
+    const previousToken = process.env.VAULT_TOKEN;
+    process.env.VAULT_TOKEN = "should-not-be-forwarded";
+    try {
+      const args = buildRunArgs({
+        mode: "local",
+        agentName: "demo",
+        agentDisplayName: "Demo",
+        vaultSecretsEnabled: true,
+        vaultAddr: "https://vault.example.test",
+        vaultKvMount: "secret",
+        vaultKvVersion: "2",
+        vaultAuthMethod: "jwt",
+        vaultAuthRole: "openclaw",
+        vaultAuthMount: "oidc",
+        vaultJwtFile: "/home/node/.config/openclaw/vault-jwt",
+      }, "podman", "openclaw-demo", 18789);
+
+      expect(args).toContain("OPENCLAW_VAULT_AUTH_METHOD=jwt");
+      expect(args).toContain("OPENCLAW_VAULT_AUTH_ROLE=openclaw");
+      expect(args).toContain("OPENCLAW_VAULT_AUTH_MOUNT=oidc");
+      expect(args).toContain("OPENCLAW_VAULT_JWT_FILE=/home/node/.config/openclaw/vault-jwt");
+      expect(args).not.toContain("VAULT_TOKEN=should-not-be-forwarded");
     } finally {
       if (previousToken === undefined) {
         delete process.env.VAULT_TOKEN;
@@ -237,7 +310,18 @@ describe("local Vault SecretRef wiring", () => {
     expect(args.slice(imageIndex - 2, imageIndex)).toEqual(["--user", "501:20"]);
   });
 
-  it("keeps plugin installs plugin-root owned for plugin-managed Vault providers", () => {
+  it("auto-installs the Vault plugin for local containers", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      vaultSecretsEnabled: true,
+    });
+
+    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-vault"]);
+  });
+
+  it("deduplicates configured Vault plugin installs", () => {
     const plan = localPluginsTesting.localPluginInstallPlan({
       mode: "local",
       agentName: "demo",

@@ -53,6 +53,7 @@ import {
   ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID,
   VAULT_SECRET_PROVIDER_ALIAS,
   VAULT_SECRET_PROVIDER_PLUGIN_ID,
+  buildManagedAgentAuthProfilesSecretJson,
   detectUnavailableProvider,
   generateToken,
   normalizeModelRef,
@@ -65,7 +66,6 @@ import {
   OPENAI_PROVIDER,
   attachCodexOauthConfig,
   buildCodexOauthCredentialFromCliAuthJson,
-  codexOauthAuthProfileStoreJson,
   normalizeCodexModelRef,
   shouldUseCodexOauth,
 } from "./codex-oauth.js";
@@ -107,7 +107,62 @@ const SANDBOX_SSH_DIR = "/home/node/.openclaw/sandbox-ssh";
 const SANDBOX_SSH_IDENTITY_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/identity`;
 const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.pub`;
 const SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/known_hosts`;
-const AUTH_PROFILE_IMPORT_CONTAINER_PATH = "/tmp/openclaw-auth-profiles/auth-profiles.json";
+const AUTH_PROFILE_IMPORT_CONTAINER_PATH = "/tmp/openclaw-auth-import/auth.json";
+
+export function buildLocalManagedAuthProfilesJson(config: DeployConfig): string | undefined {
+  return buildManagedAgentAuthProfilesSecretJson(config);
+}
+
+export function buildLocalManagedAuthProfilesImportScript(agentIds: string[], sourcePath: string, localFileOwner?: string): string {
+  const sqliteImports = Array.from(new Set(agentIds))
+    .map((agentId) =>
+      `if [ -f '${sourcePath}' ]; then OPENCLAW_AUTH_IMPORT_AGENT_ID='${agentId}' OPENCLAW_AUTH_IMPORT_SOURCE='${sourcePath}' node <<'EOF_OPENCLAW_AUTH_IMPORT'\n${localManagedAuthProfilesSqliteImportScript()}\nEOF_OPENCLAW_AUTH_IMPORT\nfi`
+    );
+  return [
+    ...sqliteImports,
+    runtimeOwnershipFixupCommand(localFileOwner),
+  ].join("\n");
+}
+
+function localManagedAuthProfilesSqliteImportScript(): string {
+  return [
+    "const { existsSync, mkdirSync, readFileSync, chmodSync } = require('node:fs');",
+    "const path = require('node:path');",
+    "let DatabaseSync;",
+    "try { ({ DatabaseSync } = require('node:sqlite')); } catch { process.exit(0); }",
+    "const agentId = process.env.OPENCLAW_AUTH_IMPORT_AGENT_ID;",
+    "const sourcePath = process.env.OPENCLAW_AUTH_IMPORT_SOURCE;",
+    "if (!agentId || !sourcePath || !existsSync(sourcePath)) process.exit(0);",
+    "const incoming = JSON.parse(readFileSync(sourcePath, 'utf8'));",
+    "if (!incoming || typeof incoming !== 'object' || !incoming.profiles || typeof incoming.profiles !== 'object') process.exit(0);",
+    "const agentDir = `/home/node/.openclaw/agents/${agentId}/agent`;",
+    "mkdirSync(agentDir, { recursive: true, mode: 0o700 });",
+    "const dbPath = path.join(agentDir, 'openclaw-agent.sqlite');",
+    "const db = new DatabaseSync(dbPath);",
+    "try {",
+    "  db.exec('PRAGMA busy_timeout = 5000');",
+    "  db.exec('CREATE TABLE IF NOT EXISTS schema_meta (meta_key TEXT NOT NULL PRIMARY KEY, role TEXT NOT NULL, schema_version INTEGER NOT NULL, agent_id TEXT, app_version TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)');",
+    "  db.exec('CREATE TABLE IF NOT EXISTS auth_profile_store (store_key TEXT NOT NULL PRIMARY KEY, store_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
+    "  db.exec('CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT NOT NULL PRIMARY KEY, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
+    "  const now = Date.now();",
+    "  db.prepare('INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(meta_key) DO UPDATE SET role=excluded.role, schema_version=excluded.schema_version, agent_id=excluded.agent_id, updated_at=excluded.updated_at').run('primary', 'agent', 1, agentId, null, now, now);",
+    "  const row = db.prepare(\"SELECT store_json FROM auth_profile_store WHERE store_key = 'primary'\").get();",
+    "  let existing = { version: 1, profiles: {} };",
+    "  if (row && typeof row.store_json === 'string') {",
+    "    try {",
+    "      const parsed = JSON.parse(row.store_json);",
+    "      if (parsed && typeof parsed === 'object') existing = parsed;",
+    "    } catch {}",
+    "  }",
+    "  const next = { ...existing, version: Number(existing.version) || 1, profiles: { ...(existing.profiles || {}), ...incoming.profiles } };",
+    "  db.prepare('INSERT INTO auth_profile_store (store_key, store_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(store_key) DO UPDATE SET store_json=excluded.store_json, updated_at=excluded.updated_at').run('primary', JSON.stringify(next), now);",
+    "} finally {",
+    "  db.close();",
+    "  chmodSync(agentDir, 0o700);",
+    "  if (existsSync(dbPath)) chmodSync(dbPath, 0o600);",
+    "}",
+  ].join("\n");
+}
 
 function localGatewayAllowedOrigins(port: number, existingOrigins: unknown): string[] {
   const localOrigins = [
@@ -209,8 +264,22 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     lines.push(`VAULT_SECRETS_ENABLED=true`);
     if (config.vaultAddr) lines.push(`VAULT_ADDR=${config.vaultAddr}`);
     if (config.vaultNamespace) lines.push(`VAULT_NAMESPACE=${config.vaultNamespace}`);
-    if (config.vaultKvMount) lines.push(`CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`);
-    if (config.vaultKvVersion) lines.push(`CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`);
+    if (config.vaultKvMount) {
+      lines.push(`OPENCLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`);
+      lines.push(`CLAW_VAULT_KV_MOUNT=${config.vaultKvMount}`);
+    }
+    if (config.vaultKvVersion) {
+      lines.push(`OPENCLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`);
+      lines.push(`CLAW_VAULT_KV_VERSION=${config.vaultKvVersion}`);
+    }
+    const authMethod = config.vaultAuthMethod || "token";
+    if (authMethod !== "token") {
+      lines.push(`OPENCLAW_VAULT_AUTH_METHOD=${authMethod}`);
+    }
+    if (config.vaultAuthRole) lines.push(`OPENCLAW_VAULT_AUTH_ROLE=${config.vaultAuthRole}`);
+    if (config.vaultAuthMount) lines.push(`OPENCLAW_VAULT_AUTH_MOUNT=${config.vaultAuthMount}`);
+    if (config.vaultJwtFile) lines.push(`OPENCLAW_VAULT_JWT_FILE=${config.vaultJwtFile}`);
+    if (config.vaultTokenFile) lines.push(`VAULT_TOKEN_FILE=${config.vaultTokenFile}`);
   }
   if (config.onePasswordSecretsEnabled) {
     lines.push(`ONEPASSWORD_SECRETS_ENABLED=true`);
@@ -473,48 +542,38 @@ function prepareLocalCodexOauthConfig(config: DeployConfig): DeployConfig {
   };
 }
 
-async function importLocalCodexAuthProfiles(params: {
+async function importLocalManagedAuthProfiles(params: {
   runtime: ContainerRuntime;
   config: DeployConfig;
   image: string;
   agentIds: string[];
   log: LogCallback;
 }): Promise<void> {
-  const authProfilesJson = codexOauthAuthProfileStoreJson(params.config);
+  const authProfilesJson = buildLocalManagedAuthProfilesJson(params.config);
   if (!authProfilesJson) {
     return;
   }
 
-  const authProfileImportLines = (sourcePath: string) =>
-    Array.from(new Set(params.agentIds))
-      .map((agentId) =>
-        `if [ -f '${sourcePath}' ]; then mkdir -p /home/node/.openclaw/agents/${agentId}/agent && cp '${sourcePath}' /home/node/.openclaw/agents/${agentId}/agent/auth-profiles.json && chmod 600 /home/node/.openclaw/agents/${agentId}/agent/auth-profiles.json; fi`
-      )
-      .join("\n");
-
   if (params.runtime === "podman") {
-    const secretName = `openclaw-codex-auth-${uuid()}`;
+    const secretName = `openclaw-auth-import-${uuid()}`;
     const secretPath = `/run/secrets/${secretName}`;
-    const authProfileImportDir = join(tmpdir(), `openclaw-auth-profiles-${uuid()}`);
-    const authProfileImportPath = join(authProfileImportDir, "auth-profiles.json");
+    const authProfileImportDir = join(tmpdir(), `openclaw-auth-import-${uuid()}`);
+    const authProfileImportPath = join(authProfileImportDir, "auth.json");
     await mkdir(authProfileImportDir, { recursive: true });
     await writeFile(authProfileImportPath, authProfilesJson, { mode: 0o600 });
     try {
       await execFileAsync("podman", ["secret", "create", secretName, authProfileImportPath]);
-      params.log("Importing Codex OAuth profile into local OpenClaw state via Podman secret");
+      params.log("Importing managed auth profiles into local OpenClaw state via Podman secret");
       const result = await runCommand(params.runtime, [
         "run", "--rm",
         ...localStateMaintenanceUserArgs(params.config.localFileOwner),
         ...localStateMountArgs(params.config),
         "--secret", `${secretName},type=mount`,
         params.image,
-        "sh", "-c", [
-          authProfileImportLines(secretPath),
-          runtimeOwnershipFixupCommand(params.config.localFileOwner),
-        ].join("\n"),
+        "sh", "-c", buildLocalManagedAuthProfilesImportScript(params.agentIds, secretPath, params.config.localFileOwner),
       ], params.log);
       if (result.code !== 0) {
-        throw new Error("Failed to import Codex OAuth profile into local runtime state");
+        throw new Error("Failed to import managed auth profiles into local runtime state");
       }
       return;
     } finally {
@@ -523,25 +582,26 @@ async function importLocalCodexAuthProfiles(params: {
     }
   }
 
-  const authProfileImportDir = join(tmpdir(), `openclaw-auth-profiles-${uuid()}`);
+  const authProfileImportDir = join(tmpdir(), `openclaw-auth-import-${uuid()}`);
   await mkdir(authProfileImportDir, { recursive: true });
-  await writeFile(join(authProfileImportDir, "auth-profiles.json"), authProfilesJson, { mode: 0o600 });
+  await writeFile(join(authProfileImportDir, "auth.json"), authProfilesJson, { mode: 0o600 });
 
   try {
-    params.log("Importing Codex OAuth profile into local OpenClaw state");
+    params.log("Importing managed auth profiles into local OpenClaw state");
     const result = await runCommand(params.runtime, [
       "run", "--rm",
       "--user", "0",
       ...localStateMountArgs(params.config),
-      "-v", bindMountSpec(authProfileImportDir, "/tmp/openclaw-auth-profiles", "ro"),
+      "-v", bindMountSpec(authProfileImportDir, "/tmp/openclaw-auth-import", "ro"),
       params.image,
-      "sh", "-c", [
-        authProfileImportLines(AUTH_PROFILE_IMPORT_CONTAINER_PATH),
-        runtimeOwnershipFixupCommand(params.config.localFileOwner),
-      ].join("\n"),
+      "sh", "-c", buildLocalManagedAuthProfilesImportScript(
+        params.agentIds,
+        AUTH_PROFILE_IMPORT_CONTAINER_PATH,
+        params.config.localFileOwner,
+      ),
     ], params.log);
     if (result.code !== 0) {
-      throw new Error("Failed to import Codex OAuth profile into local runtime state");
+      throw new Error("Failed to import managed auth profiles into local runtime state");
     }
   } finally {
     await rm(authProfileImportDir, { recursive: true, force: true });
@@ -1235,10 +1295,33 @@ export function buildRunArgs(
     if (effectiveConfig.vaultNamespace) {
       env.VAULT_NAMESPACE = effectiveConfig.vaultNamespace;
     }
+    env.OPENCLAW_VAULT_KV_MOUNT = effectiveConfig.vaultKvMount || "secret";
+    env.OPENCLAW_VAULT_KV_VERSION = effectiveConfig.vaultKvVersion || "2";
     env.CLAW_VAULT_KV_MOUNT = effectiveConfig.vaultKvMount || "secret";
     env.CLAW_VAULT_KV_VERSION = effectiveConfig.vaultKvVersion || "2";
-    if (process.env.VAULT_TOKEN) {
-      env.VAULT_TOKEN = process.env.VAULT_TOKEN;
+    const authMethod = effectiveConfig.vaultAuthMethod || "token";
+    if (authMethod !== "token") {
+      env.OPENCLAW_VAULT_AUTH_METHOD = authMethod;
+    }
+    if (authMethod === "token") {
+      if (process.env.VAULT_TOKEN) {
+        env.VAULT_TOKEN = process.env.VAULT_TOKEN;
+      }
+    } else if (authMethod === "token_file") {
+      if (effectiveConfig.vaultTokenFile) {
+        env.VAULT_TOKEN_FILE = effectiveConfig.vaultTokenFile;
+      }
+    } else {
+      // jwt or kubernetes
+      if (effectiveConfig.vaultAuthRole) {
+        env.OPENCLAW_VAULT_AUTH_ROLE = effectiveConfig.vaultAuthRole;
+      }
+      if (effectiveConfig.vaultAuthMount) {
+        env.OPENCLAW_VAULT_AUTH_MOUNT = effectiveConfig.vaultAuthMount;
+      }
+      if (effectiveConfig.vaultJwtFile) {
+        env.OPENCLAW_VAULT_JWT_FILE = effectiveConfig.vaultJwtFile;
+      }
     }
   }
   if (effectiveConfig.onePasswordSecretsEnabled) {
@@ -1562,7 +1645,7 @@ Use this table to track verified peer OpenClaw instances.
       log,
       stateMountArgs: localStateMountArgs(runtimeConfig),
     });
-    await importLocalCodexAuthProfiles({
+    await importLocalManagedAuthProfiles({
       runtime,
       config: runtimeConfig,
       image,
@@ -1958,7 +2041,7 @@ Use this table to track verified peer OpenClaw instances.
       throw new Error("Failed to initialize local runtime state");
     }
 
-    await importLocalCodexAuthProfiles({
+    await importLocalManagedAuthProfiles({
       runtime,
       config: runtimeConfig,
       image,
