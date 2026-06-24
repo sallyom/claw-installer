@@ -5,6 +5,7 @@ import {
   buildLocalManagedAuthProfilesImportScript,
   buildOpenClawConfig,
   buildRunArgs,
+  __testing as localTesting,
   parseContainerRunArgs,
   redactCommandArgs,
   resolveLocalRuntimeModelEndpoint,
@@ -256,6 +257,13 @@ describe("local Vault SecretRef wiring", () => {
       expect(args).toContain("CLAW_VAULT_KV_VERSION=2");
       expect(args).toContain("VAULT_TOKEN=test-vault-token");
       expect(args).toContain("TMPDIR=/home/node/.openclaw/tmp");
+      expect(args).toContain("OPENCLAW_CONFIG_DIR=/home/node/.openclaw");
+      expect(args).toContain("OPENCLAW_STATE_DIR=/home/node/.openclaw");
+      expect(args).toContain("NPM_CONFIG_CACHE=/home/node/.npm");
+      expect(args).toContain("npm_config_cache=/home/node/.npm");
+      expect(args).toContain("XDG_CACHE_HOME=/home/node/.cache");
+      expect(args).toContain("XDG_CONFIG_HOME=/home/node/.config");
+      expect(args).toContain("openclaw-openclaw-demo-data:/home/node:nocopy");
     } finally {
       if (previousToken === undefined) {
         delete process.env.VAULT_TOKEN;
@@ -308,6 +316,37 @@ describe("local Vault SecretRef wiring", () => {
 
     const imageIndex = args.indexOf("ghcr.io/openclaw/openclaw:latest");
     expect(args.slice(imageIndex - 2, imageIndex)).toEqual(["--user", "501:20"]);
+  });
+
+  it("mounts the local data volume as the writable OpenClaw home", () => {
+    expect(localTesting.localStateMountArgs({
+      mode: "local",
+      prefix: "sally",
+      agentName: "lynx",
+    })).toEqual(["-v", "openclaw-sally-lynx-data:/home/node:nocopy"]);
+  });
+
+  it("migrates legacy local volume-root state into .openclaw", () => {
+    const script = localTesting.localRuntimeHomeInitCommand();
+
+    expect(script).toContain("if [ -f /home/node/openclaw.json ] || [ -d /home/node/workspace ]; then");
+    expect(script).toContain(`case "$base" in .|..|.openclaw|.npm|.cache|.config|lost+found) continue ;; esac`);
+    expect(script).toContain(`mv "$path" "/home/node/.openclaw/$base"`);
+    expect(script).toContain("mkdir -p /home/node/.openclaw/tmp /home/node/.npm /home/node/.cache /home/node/.config /home/node/.config/openclaw");
+  });
+
+  it("backs up unparsable existing config instead of failing volume initialization", () => {
+    const script = localTesting.gatewayRuntimeConfigUpdateScript(
+      18789,
+      true,
+      JSON.stringify({ gateway: { auth: { token: "fallback" } } }),
+    );
+
+    expect(script).toContain("try{c=JSON.parse");
+    expect(script).toContain(".invalid-");
+    expect(script).toContain("could not be parsed as JSON");
+    expect(script).toContain("Buffer.from");
+    expect(script).toContain("chatCompletions={enabled:true}");
   });
 
   it("auto-installs the Vault plugin for local containers", () => {
@@ -469,9 +508,11 @@ describe("runtimeOwnershipFixupCommand", () => {
   it("sets doctor-clean state directory and config file permissions after chown (issue #71)", () => {
     const cmd = runtimeOwnershipFixupCommand();
 
-    expect(cmd).toContain("chown -R node:node /home/node/.openclaw");
+    expect(cmd).toContain("chown node:node /home/node");
+    expect(cmd).toContain("chown -R node:node /home/node/.openclaw /home/node/.npm /home/node/.cache /home/node/.config");
     expect(cmd).toContain("chmod -R o-rwx /home/node/.openclaw");
     expect(cmd).toContain("chmod 700 /home/node/.openclaw");
+    expect(cmd).toContain("chmod 700 /home/node/.openclaw/tmp /home/node/.npm /home/node/.cache /home/node/.config /home/node/.config/openclaw");
     expect(cmd).toContain("chmod 600 /home/node/.openclaw/openclaw.json");
 
     // chmod must run AFTER chown so ownership is correct before mode change.
@@ -487,7 +528,8 @@ describe("runtimeOwnershipFixupCommand", () => {
   it("can target a configured local file owner", () => {
     const cmd = runtimeOwnershipFixupCommand("501:20");
 
-    expect(cmd).toContain("chown -R 501:20 /home/node/.openclaw");
+    expect(cmd).toContain("chown 501:20 /home/node");
+    expect(cmd).toContain("chown -R 501:20 /home/node/.openclaw /home/node/.npm /home/node/.cache /home/node/.config");
     expect(cmd).toContain("chmod -R o-rwx /home/node/.openclaw");
   });
 

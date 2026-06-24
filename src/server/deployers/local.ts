@@ -103,6 +103,13 @@ export function resolveLocalRuntimeModelEndpoint(endpoint: string, runtime?: Con
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 const LITELLM_CONFIG_PATH = "/home/node/.openclaw/litellm/config.yaml";
 const LITELLM_KEY_PATH = "/home/node/.openclaw/litellm/master-key";
+const OPENCLAW_LOCAL_HOME = "/home/node";
+const OPENCLAW_LOCAL_STATE_DIR = `${OPENCLAW_LOCAL_HOME}/.openclaw`;
+const OPENCLAW_LOCAL_TMP_DIR = `${OPENCLAW_LOCAL_STATE_DIR}/tmp`;
+const OPENCLAW_LOCAL_NPM_CACHE_DIR = `${OPENCLAW_LOCAL_HOME}/.npm`;
+const OPENCLAW_LOCAL_CACHE_DIR = `${OPENCLAW_LOCAL_HOME}/.cache`;
+const OPENCLAW_LOCAL_CONFIG_HOME = `${OPENCLAW_LOCAL_HOME}/.config`;
+const OPENCLAW_LOCAL_CONFIG_DIR = `${OPENCLAW_LOCAL_CONFIG_HOME}/openclaw`;
 const SANDBOX_SSH_DIR = "/home/node/.openclaw/sandbox-ssh";
 const SANDBOX_SSH_IDENTITY_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/identity`;
 const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.pub`;
@@ -183,8 +190,13 @@ function localGatewayAllowedOrigins(port: number, existingOrigins: unknown): str
   return Array.from(origins);
 }
 
-function gatewayRuntimeConfigUpdateScript(port: number, openaiCompatibleEndpointsEnabled: boolean): string {
-  return `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.gateway ||= {};c.gateway.mode ||= 'local';c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.http.endpoints.responses={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.controlUi ||= {};const origins=new Set(['http://localhost:${port}','http://127.0.0.1:${port}']);for(const o of Array.isArray(c.gateway.controlUi.allowedOrigins)?c.gateway.controlUi.allowedOrigins:[]){if(typeof o==='string'&&!/^http:\\/\\/(?:localhost|127\\.0\\.0\\.1):\\d+$/.test(o))origins.add(o)}c.gateway.controlUi.allowedOrigins=[...origins];fs.writeFileSync(p,JSON.stringify(c,null,2))"`;
+function gatewayRuntimeConfigUpdateScript(
+  port: number,
+  openaiCompatibleEndpointsEnabled: boolean,
+  fallbackConfig: string,
+): string {
+  const fallbackB64 = Buffer.from(fallbackConfig).toString("base64");
+  return `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';let c;try{c=JSON.parse(fs.readFileSync(p,'utf8'))}catch(err){const backup=p+'.invalid-'+Date.now()+'.bak';try{fs.copyFileSync(p,backup);console.error('WARNING: existing OpenClaw config could not be parsed as JSON; backed it up to '+backup+' and regenerated deploy config: '+err.message)}catch(copyErr){console.error('WARNING: existing OpenClaw config could not be parsed as JSON and backup failed: '+copyErr.message)}c=JSON.parse(Buffer.from('${fallbackB64}','base64').toString('utf8'))}c.gateway ||= {};c.gateway.mode ||= 'local';c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.http.endpoints.responses={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.controlUi ||= {};const origins=new Set(['http://localhost:${port}','http://127.0.0.1:${port}']);for(const o of Array.isArray(c.gateway.controlUi.allowedOrigins)?c.gateway.controlUi.allowedOrigins:[]){if(typeof o==='string'&&!/^http:\\/\\/(?:localhost|127\\.0\\.0\\.1):\\d+$/.test(o))origins.add(o)}c.gateway.controlUi.allowedOrigins=[...origins];fs.writeFileSync(p,JSON.stringify(c,null,2))"`;
 }
 
 /** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
@@ -194,6 +206,28 @@ export function shouldAlwaysPull(image: string): boolean {
   const ref = image.split("/").pop() || image;
   const tag = ref.includes(":") ? ref.split(":").pop() : undefined;
   return !tag || tag === "latest";
+}
+
+async function ensureLocalRuntimeImage(
+  runtime: ContainerRuntime,
+  image: string,
+  log: LogCallback,
+): Promise<void> {
+  try {
+    await execFileAsync(runtime, ["image", "exists", image]);
+    if (!shouldAlwaysPull(image)) {
+      log(`Using local image: ${image}`);
+      return;
+    }
+    log(`Refreshing mutable image before initialization: ${image}`);
+  } catch {
+    log(`Pulling ${image}...`);
+  }
+
+  const pull = await runCommand(runtime, ["pull", image], log);
+  if (pull.code !== 0) {
+    throw new Error("Failed to pull image");
+  }
 }
 
 export function applyGatewayRuntimeConfig(
@@ -1203,8 +1237,30 @@ function defaultAgentSourceDir(isContainerized: boolean): string | null {
 }
 
 function localStateMountArgs(config: DeployConfig): string[] {
-  return ["-v", `${volumeName(config)}:/home/node/.openclaw`];
+  return ["-v", `${volumeName(config)}:${OPENCLAW_LOCAL_HOME}:nocopy`];
 }
+
+function localRuntimeHomeInitCommand(): string {
+  return [
+    `mkdir -p ${OPENCLAW_LOCAL_HOME} ${OPENCLAW_LOCAL_STATE_DIR} ${OPENCLAW_LOCAL_TMP_DIR}`,
+    `if [ -f ${OPENCLAW_LOCAL_HOME}/openclaw.json ] || [ -d ${OPENCLAW_LOCAL_HOME}/workspace ]; then`,
+    `  for path in ${OPENCLAW_LOCAL_HOME}/* ${OPENCLAW_LOCAL_HOME}/.[!.]* ${OPENCLAW_LOCAL_HOME}/..?*; do`,
+    `    [ -e "$path" ] || continue`,
+    `    base="$(basename "$path")"`,
+    `    case "$base" in .|..|.openclaw|.npm|.cache|.config|lost+found) continue ;; esac`,
+    `    [ -e "${OPENCLAW_LOCAL_STATE_DIR}/$base" ] && continue`,
+    `    mv "$path" "${OPENCLAW_LOCAL_STATE_DIR}/$base" 2>/dev/null || cp -R "$path" "${OPENCLAW_LOCAL_STATE_DIR}/$base" 2>/dev/null || true`,
+    `  done`,
+    `fi`,
+    `mkdir -p ${OPENCLAW_LOCAL_TMP_DIR} ${OPENCLAW_LOCAL_NPM_CACHE_DIR} ${OPENCLAW_LOCAL_CACHE_DIR} ${OPENCLAW_LOCAL_CONFIG_HOME} ${OPENCLAW_LOCAL_CONFIG_DIR}`,
+  ].join("\n");
+}
+
+export const __testing = {
+  gatewayRuntimeConfigUpdateScript,
+  localRuntimeHomeInitCommand,
+  localStateMountArgs,
+};
 
 /**
  * Build the podman/docker run args for a given config.
@@ -1259,9 +1315,15 @@ export function buildRunArgs(
   );
 
   const env: Record<string, string> = {
-    HOME: "/home/node",
-    TMPDIR: "/home/node/.openclaw/tmp",
+    HOME: OPENCLAW_LOCAL_HOME,
+    TMPDIR: OPENCLAW_LOCAL_TMP_DIR,
     NODE_ENV: "production",
+    OPENCLAW_CONFIG_DIR: OPENCLAW_LOCAL_STATE_DIR,
+    OPENCLAW_STATE_DIR: OPENCLAW_LOCAL_STATE_DIR,
+    NPM_CONFIG_CACHE: OPENCLAW_LOCAL_NPM_CACHE_DIR,
+    npm_config_cache: OPENCLAW_LOCAL_NPM_CACHE_DIR,
+    XDG_CACHE_HOME: OPENCLAW_LOCAL_CACHE_DIR,
+    XDG_CONFIG_HOME: OPENCLAW_LOCAL_CONFIG_HOME,
   };
 
   // Pass API keys to the gateway so it can route to OpenAI/Anthropic natively.
@@ -1427,23 +1489,7 @@ export class LocalDeployer implements Deployer {
 
       const image = resolveImage(config);
 
-    // Pull the image if it doesn't exist locally.
-    // For mutable tags (:latest/untagged), --pull=newer on `podman run` handles
-    // checking for updates efficiently via digest comparison (Fix for #28).
-    try {
-      await execFileAsync(runtime, ["image", "exists", image]);
-      if (shouldAlwaysPull(image)) {
-        log(`Image ${image} found locally; will check for updates at startup`);
-      } else {
-        log(`Using local image: ${image}`);
-      }
-    } catch {
-      log(`Pulling ${image}...`);
-      const pull = await runCommand(runtime, ["pull", image], log);
-      if (pull.code !== 0) {
-        throw new Error("Failed to pull image");
-      }
-    }
+    await ensureLocalRuntimeImage(runtime, image, log);
 
     // Ensure local state store has openclaw.json + default agent workspace
     const vol = volumeName(config);
@@ -1478,9 +1524,6 @@ export class LocalDeployer implements Deployer {
 
     const agentsMd = buildDefaultAgentsMd(config);
     const agentJson = buildAgentJson(config);
-
-    // Escape single quotes for shell embedding
-    const esc = (s: string) => s.replace(/'/g, "'\\''");
 
     const displayName = config.agentDisplayName || config.agentName;
 
@@ -1563,11 +1606,25 @@ Use this table to track verified peer OpenClaw instances.
 | Namespace | URL | Capabilities | Last Verified | Notes |
 | --- | --- | --- | --- | --- |`;
 
+    const initPayloadRoot = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+    const initPayloadDir = join(initPayloadRoot, `openclaw-local-init-${uuid()}`);
+    await mkdir(initPayloadDir, { recursive: true });
+    await writeFile(join(initPayloadDir, "openclaw.json"), ocConfig, { mode: 0o600 });
+    await writeFile(join(initPayloadDir, "AGENTS.md"), agentsMd);
+    await writeFile(join(initPayloadDir, "agent.json"), agentJson);
+    await writeFile(join(initPayloadDir, "SOUL.md"), soulMd);
+    await writeFile(join(initPayloadDir, "IDENTITY.md"), identityMd);
+    await writeFile(join(initPayloadDir, "TOOLS.md"), toolsMd);
+    await writeFile(join(initPayloadDir, "USER.md"), userMd);
+    await writeFile(join(initPayloadDir, "HEARTBEAT.md"), heartbeatMd);
+    await writeFile(join(initPayloadDir, "MEMORY.md"), memoryMd);
+
     const initScript = [
+      localRuntimeHomeInitCommand(),
       // Write openclaw.json only if missing (don't overwrite live config)
-      `test -f /home/node/.openclaw/openclaw.json || echo '${esc(ocConfig)}' > /home/node/.openclaw/openclaw.json`,
+      `test -f /home/node/.openclaw/openclaw.json || cp /tmp/openclaw-init/openclaw.json /home/node/.openclaw/openclaw.json`,
       // Always update allowedOrigins to match the current port (fixes re-deploy with different port)
-      gatewayRuntimeConfigUpdateScript(port, config.openaiCompatibleEndpointsEnabled !== false),
+      gatewayRuntimeConfigUpdateScript(port, config.openaiCompatibleEndpointsEnabled !== false, ocConfig),
       // Materialize SSH sandbox auth files into the writable volume for the node user.
       `mkdir -p '${SANDBOX_SSH_DIR}'`,
       ...(localSandboxPrepared.effectiveConfig.sandboxSshIdentity
@@ -1594,16 +1651,16 @@ Use this table to track verified peer OpenClaw instances.
       // Create skills directory
       `mkdir -p /home/node/.openclaw/skills`,
       // Write AGENTS.md (always update — lets user change agent name/display on re-deploy)
-      `cat > '${workspaceDir}/AGENTS.md' << 'AGENTSEOF'\n${agentsMd}\nAGENTSEOF`,
+      `cp /tmp/openclaw-init/AGENTS.md '${workspaceDir}/AGENTS.md'`,
       // Write agent.json
-      `cat > '${workspaceDir}/agent.json' << 'JSONEOF'\n${agentJson}\nJSONEOF`,
+      `cp /tmp/openclaw-init/agent.json '${workspaceDir}/agent.json'`,
       // Write workspace files only on first deploy (don't overwrite user edits)
-      `test -f '${workspaceDir}/SOUL.md' || cat > '${workspaceDir}/SOUL.md' << 'SOULEOF'\n${soulMd}\nSOULEOF`,
-      `test -f '${workspaceDir}/IDENTITY.md' || cat > '${workspaceDir}/IDENTITY.md' << 'IDEOF'\n${identityMd}\nIDEOF`,
-      `test -f '${workspaceDir}/TOOLS.md' || cat > '${workspaceDir}/TOOLS.md' << 'TOOLSEOF'\n${toolsMd}\nTOOLSEOF`,
-      `test -f '${workspaceDir}/USER.md' || cat > '${workspaceDir}/USER.md' << 'USEREOF'\n${userMd}\nUSEREOF`,
-      `test -f '${workspaceDir}/HEARTBEAT.md' || cat > '${workspaceDir}/HEARTBEAT.md' << 'HBEOF'\n${heartbeatMd}\nHBEOF`,
-      `test -f '${workspaceDir}/MEMORY.md' || cat > '${workspaceDir}/MEMORY.md' << 'MEMEOF'\n${memoryMd}\nMEMEOF`,
+      `test -f '${workspaceDir}/SOUL.md' || cp /tmp/openclaw-init/SOUL.md '${workspaceDir}/SOUL.md'`,
+      `test -f '${workspaceDir}/IDENTITY.md' || cp /tmp/openclaw-init/IDENTITY.md '${workspaceDir}/IDENTITY.md'`,
+      `test -f '${workspaceDir}/TOOLS.md' || cp /tmp/openclaw-init/TOOLS.md '${workspaceDir}/TOOLS.md'`,
+      `test -f '${workspaceDir}/USER.md' || cp /tmp/openclaw-init/USER.md '${workspaceDir}/USER.md'`,
+      `test -f '${workspaceDir}/HEARTBEAT.md' || cp /tmp/openclaw-init/HEARTBEAT.md '${workspaceDir}/HEARTBEAT.md'`,
+      `test -f '${workspaceDir}/MEMORY.md' || cp /tmp/openclaw-init/MEMORY.md '${workspaceDir}/MEMORY.md'`,
       // If user provided agent source files via mount, copy them in (overrides defaults).
       // Fix for #62: infer the main agent workspace by elimination — any workspace-*
       // directory that doesn't match a subagent ID is the main agent's workspace.
@@ -1613,6 +1670,7 @@ Use this table to track verified peer OpenClaw instances.
       `if [ -f /tmp/agent-source/exec-approvals.json ]; then cp /tmp/agent-source/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true; fi`,
       runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner),
     ].join("\n");
+    await writeFile(join(initPayloadDir, "init.sh"), initScript, { mode: 0o700 });
 
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
 
@@ -1620,6 +1678,7 @@ Use this table to track verified peer OpenClaw instances.
       "run", "--rm",
       ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
       ...localStateMountArgs(config),
+      "-v", bindMountSpec(initPayloadDir, "/tmp/openclaw-init", "ro"),
     ];
 
     // Mount agent source directory if explicitly provided, or auto-detect on host.
@@ -1632,11 +1691,16 @@ Use this table to track verified peer OpenClaw instances.
       log(`Mounting agent source: ${agentSourceDir}`);
     }
 
-    initArgs.push(image, "sh", "-c", initScript);
+    initArgs.push(image, "sh", "/tmp/openclaw-init/init.sh");
 
-    const initResult = await runCommand(runtime, initArgs, log);
+    let initResult: { code: number };
+    try {
+      initResult = await runCommand(runtime, initArgs, log);
+    } finally {
+      await rm(initPayloadDir, { recursive: true, force: true });
+    }
     if (initResult.code !== 0) {
-      throw new Error("Failed to initialize config volume");
+      throw new Error(`Failed to initialize config volume (exit ${initResult.code})`);
     }
     await installLocalPlugins({
       runtime,
@@ -2002,6 +2066,7 @@ Use this table to track verified peer OpenClaw instances.
     const image = resolveImage(runtimeConfig);
     const vol = result.volumeName ?? volumeName(runtimeConfig);
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
+    await ensureLocalRuntimeImage(runtime, image, log);
 
     // Copy updated agent files from host into volume before starting
       const agentId = `${runtimeConfig.prefix || "openclaw"}_${runtimeConfig.agentName}`;
@@ -2029,9 +2094,9 @@ Use this table to track verified peer OpenClaw instances.
       "sh",
       "-c",
       [
-        "mkdir -p /home/node/.openclaw",
+        localRuntimeHomeInitCommand(),
         `test -f /home/node/.openclaw/openclaw.json || echo '${ocConfigB64}' | base64 -d > /home/node/.openclaw/openclaw.json`,
-        gatewayRuntimeConfigUpdateScript(port, effectiveConfig.openaiCompatibleEndpointsEnabled !== false),
+        gatewayRuntimeConfigUpdateScript(port, effectiveConfig.openaiCompatibleEndpointsEnabled !== false, ocConfig),
         ...workspaceSetupCommands,
         "mkdir -p /home/node/.openclaw/skills",
         runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
