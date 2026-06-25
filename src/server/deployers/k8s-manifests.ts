@@ -6,6 +6,7 @@ import {
   buildOpenClawConfig,
   buildManagedAgentAuthProfilesSecretJson,
   resolveEnvSecretRefId,
+  KEYLESS_ENDPOINT_PLACEHOLDER,
 } from "./k8s-helpers.js";
 import type { DeployConfig } from "./types.js";
 import { shouldUseLitellmProxy, LITELLM_IMAGE, LITELLM_PORT } from "./litellm.js";
@@ -416,7 +417,11 @@ export function secretManifest(ns: string, config: DeployConfig, gatewayToken: s
     data[openrouterEnvRefId] = config.openrouterApiKey;
   }
   if (config.modelEndpoint) data.MODEL_ENDPOINT = config.modelEndpoint;
-  if (config.modelEndpointApiKey) data.MODEL_ENDPOINT_API_KEY = config.modelEndpointApiKey;
+  if (config.modelEndpointApiKey) {
+    data.MODEL_ENDPOINT_API_KEY = config.modelEndpointApiKey;
+  } else if (config.modelEndpoint) {
+    data.MODEL_ENDPOINT_API_KEY = KEYLESS_ENDPOINT_PLACEHOLDER;
+  }
   const authProfilesJson = buildManagedAgentAuthProfilesSecretJson(config);
   if (authProfilesJson) data[CODEX_AUTH_PROFILES_SECRET_KEY] = authProfilesJson;
   const telegramEnvRefId = resolveEnvSecretRefId(config.telegramBotTokenRef, "TELEGRAM_BOT_TOKEN");

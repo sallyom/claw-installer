@@ -36,6 +36,7 @@ export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "ghcr.io/openclaw/ope
 export const DEFAULT_OPENSHELL_IMAGE = process.env.OPENCLAW_OPENSHELL_IMAGE || "quay.io/sallyom/openclaw:latest";
 export const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || DEFAULT_IMAGE;
 export const CUSTOM_ENDPOINT_PROVIDER = "endpoint";
+export const KEYLESS_ENDPOINT_PLACEHOLDER = "no-key-required";
 export const GOOGLE_PROVIDER = "google";
 export const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 export const OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -705,7 +706,7 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
   const openrouterApiKeyRef = resolveEffectiveOpenRouterApiKeyRef(config);
   const modelEndpointApiKeyRef = hasSecretRef(config.modelEndpointApiKeyRef)
     ? config.modelEndpointApiKeyRef
-    : config.modelEndpointApiKey
+    : (config.modelEndpointApiKey || config.modelEndpoint?.trim())
       ? envSecretRef("MODEL_ENDPOINT_API_KEY")
       : undefined;
   if (openaiApiKeyRef) {

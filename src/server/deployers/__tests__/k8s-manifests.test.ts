@@ -767,4 +767,30 @@ describe("litellm sidecar env vars in proxy mode", () => {
     expect(gwEnvNames).toContain("OPENAI_API_KEY");
     expect(gwEnvNames).toContain("ANTHROPIC_API_KEY");
   });
+
+  it("injects placeholder MODEL_ENDPOINT_API_KEY in Secret for keyless custom endpoints", () => {
+    const config = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "http://vllm.local:8000/v1",
+      modelEndpointModel: "mistral-small",
+    });
+
+    const secret = secretManifest("ns", config, "gateway-token");
+
+    expect(secret.stringData?.MODEL_ENDPOINT_API_KEY).toBe("no-key-required");
+    expect(secret.stringData?.MODEL_ENDPOINT).toBe("http://vllm.local:8000/v1");
+  });
+
+  it("uses real API key in Secret when provided for custom endpoints", () => {
+    const config = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "http://vllm.local:8000/v1",
+      modelEndpointApiKey: "real-key",
+      modelEndpointModel: "mistral-small",
+    });
+
+    const secret = secretManifest("ns", config, "gateway-token");
+
+    expect(secret.stringData?.MODEL_ENDPOINT_API_KEY).toBe("real-key");
+  });
 });
