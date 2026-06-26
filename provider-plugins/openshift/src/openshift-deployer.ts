@@ -10,6 +10,7 @@ import { namespaceName } from "../../../src/server/deployers/k8s-helpers.js";
 import { coreApi, appsApi, k8sApiHttpCode, loadKubeConfig } from "../../../src/server/services/k8s.js";
 import { oauthServiceAccount, oauthConfigSecret, oauthProxyContainer } from "./oauth-proxy.js";
 import { applyRoute, getRouteUrl, deleteRoute } from "./route.js";
+import { shouldUseOtel } from "../../../src/server/deployers/otel.js";
 
 // ── Helper: apply or update a resource ─────────────────────────────
 
@@ -239,6 +240,30 @@ export class OpenShiftDeployer implements Deployer {
       "Secret openclaw-oauth-config",
       log,
     );
+
+    // Service CA ConfigMap for OTel TLS verification
+    if (shouldUseOtel(config) && !config.otelTlsSkipVerify) {
+      const serviceCaCm: k8s.V1ConfigMap = {
+        apiVersion: "v1",
+        kind: "ConfigMap",
+        metadata: {
+          name: "otel-service-ca",
+          namespace: ns,
+          labels: { app: "openclaw" },
+          annotations: {
+            "service.beta.openshift.io/inject-cabundle": "true",
+          },
+        },
+        data: {},
+      };
+      await applyResource(
+        () => core.readNamespacedConfigMap({ name: "otel-service-ca", namespace: ns }),
+        () => core.createNamespacedConfigMap({ namespace: ns, body: serviceCaCm }),
+        () => core.replaceNamespacedConfigMap({ name: "otel-service-ca", namespace: ns, body: serviceCaCm }),
+        "ConfigMap otel-service-ca (Service CA)",
+        log,
+      );
+    }
 
     // Phase 2: Delegate to KubernetesDeployer for all base resources
     const result = await this.k8s.deploy(config, log);

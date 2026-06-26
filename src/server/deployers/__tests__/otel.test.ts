@@ -79,6 +79,82 @@ describe("otel config generation", () => {
     const skipVerifyExporter = (skipVerifyConfig.exporters as Record<string, unknown>).otlphttp as Record<string, unknown>;
     expect(skipVerifyExporter.tls).toMatchObject({ insecure_skip_verify: true });
   });
+
+  it("sets ca_file on openshift with HTTPS endpoint and no skip verify", () => {
+    const config: DeployConfig = {
+      mode: "openshift",
+      agentName: "alpha",
+      agentDisplayName: "Alpha",
+      otelEnabled: true,
+      otelEndpoint: "https://mlflow.apps.cluster.example.com",
+    };
+
+    const obj = generateOtelConfigObject(config);
+    const tls = (
+      (obj.exporters as Record<string, Record<string, unknown>>).otlphttp
+        .tls as Record<string, unknown>
+    );
+
+    expect(tls).not.toHaveProperty("insecure_skip_verify");
+    expect(tls.ca_file).toBe("/etc/pki/tls/service-ca/service-ca.crt");
+  });
+
+  it("skips ca_file when otelTlsSkipVerify is true on openshift", () => {
+    const config: DeployConfig = {
+      mode: "openshift",
+      agentName: "alpha",
+      agentDisplayName: "Alpha",
+      otelEnabled: true,
+      otelEndpoint: "https://mlflow.apps.cluster.example.com",
+      otelTlsSkipVerify: true,
+    };
+
+    const obj = generateOtelConfigObject(config);
+    const tls = (
+      (obj.exporters as Record<string, Record<string, unknown>>).otlphttp
+        .tls as Record<string, unknown>
+    );
+
+    expect(tls.insecure_skip_verify).toBe(true);
+    expect(tls).not.toHaveProperty("ca_file");
+  });
+
+  it("does not set ca_file on non-openshift HTTPS endpoints", () => {
+    const config: DeployConfig = {
+      mode: "kubernetes",
+      agentName: "alpha",
+      agentDisplayName: "Alpha",
+      otelEnabled: true,
+      otelEndpoint: "https://mlflow.example.com",
+    };
+
+    const obj = generateOtelConfigObject(config);
+    const tls = (
+      (obj.exporters as Record<string, Record<string, unknown>>).otlphttp
+        .tls as Record<string, unknown>
+    );
+
+    expect(tls).not.toHaveProperty("ca_file");
+  });
+
+  it("does not set ca_file for non-HTTPS endpoints on openshift", () => {
+    const config: DeployConfig = {
+      mode: "openshift",
+      agentName: "alpha",
+      agentDisplayName: "Alpha",
+      otelEnabled: true,
+      otelEndpoint: "http://mlflow.mlflow.svc:5000",
+    };
+
+    const obj = generateOtelConfigObject(config);
+    const tls = (
+      (obj.exporters as Record<string, Record<string, unknown>>).otlphttp
+        .tls as Record<string, unknown>
+    );
+
+    expect(tls.insecure).toBe(true);
+    expect(tls).not.toHaveProperty("ca_file");
+  });
 });
 
 describe("formatScalar", () => {
