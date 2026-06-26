@@ -1513,7 +1513,9 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
                 Skip OTLP HTTPS certificate verification
               </label>
               <div className="hint">
-                Use only for self-signed or internal OTLP HTTPS endpoints.
+                {mode === "openshift"
+                  ? "Disabled by default — OpenShift Service CA verifies in-cluster endpoints. Enable for external endpoints or self-signed certificates."
+                  : "Enable if your OTLP HTTPS endpoint uses a self-signed or untrusted certificate."}
               </div>
             </div>
             <div className="form-group">

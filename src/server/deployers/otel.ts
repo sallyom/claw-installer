@@ -68,12 +68,18 @@ function buildOtelConfig(config: DeployConfig): Record<string, unknown> {
       },
     };
   } else {
+    const isHttps = endpoint.startsWith("https://");
+    const isOpenShift = config.mode === "openshift";
+    const tls: Record<string, unknown> = {
+      insecure: !isHttps,
+      ...(config.otelTlsSkipVerify ? { insecure_skip_verify: true } : {}),
+    };
+    if (isOpenShift && isHttps && !config.otelTlsSkipVerify) {
+      tls.ca_file = "/etc/pki/tls/service-ca/service-ca.crt";
+    }
     const otlpHttpExporter: Record<string, unknown> = {
       endpoint,
-      tls: {
-        insecure: !endpoint.startsWith("https://"),
-        ...(config.otelTlsSkipVerify ? { insecure_skip_verify: true } : {}),
-      },
+      tls,
     };
     if (config.otelExperimentId) {
       const ns = config.namespace || config.prefix || "default";
