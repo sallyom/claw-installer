@@ -318,7 +318,7 @@ describe("k8s state sync manifests", () => {
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"provider": "vault"');
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"id": "providers/anthropic/apiKey"');
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"id": "providers/openai/apiKey"');
-    expect(initScript).not.toContain("auth-profiles.json");
+    expect(initScript).toContain("rm -f /home/node/.openclaw/agents/*/agent/auth-profiles.json");
     expect(initScript).not.toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
     expect(gatewayVolumeMounts).toContain("/openclaw-secrets");
     expect(gatewayScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
