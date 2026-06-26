@@ -149,9 +149,11 @@ export function runtimeOwnershipFixupCommand(localFileOwner?: string): string {
   // host cannot read credentials (gateway tokens, API key refs) from openclaw.json
   // or traverse the state directory.
   return [
-    `chown -R ${owner} /home/node/.openclaw 2>/dev/null || true`,
+    `chown ${owner} /home/node 2>/dev/null || true`,
+    `chown -R ${owner} /home/node/.openclaw /home/node/.npm /home/node/.cache /home/node/.config 2>/dev/null || true`,
     "chmod -R o-rwx /home/node/.openclaw 2>/dev/null || true",
     "chmod 700 /home/node/.openclaw 2>/dev/null || true",
+    "chmod 700 /home/node/.openclaw/tmp /home/node/.npm /home/node/.cache /home/node/.config /home/node/.config/openclaw 2>/dev/null || true",
     "chmod 600 /home/node/.openclaw/openclaw.json 2>/dev/null || true",
   ].join(" && ");
 }
