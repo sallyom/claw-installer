@@ -36,7 +36,7 @@ import type {
 
 const LAST_AGENT_SOURCE_DIR_KEY = "openclaw:last-agent-source-dir";
 
-export default function DeployForm({ onDeployStarted }: DeployFormProps) {
+export default function DeployForm({ onDeployStarted, instanceCount, onShowInstances }: DeployFormProps) {
   const [mode, setMode] = useState("local");
   const [deploying, setDeploying] = useState(false);
   const [defaults, setDefaults] = useState<ServerDefaults | null>(null);
@@ -1010,6 +1010,16 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
       )}
 
       <div className="card">
+        {instanceCount !== undefined && instanceCount > 0 && (
+          <div className="info-banner">
+            <span>
+              {instanceCount} {instanceCount === 1 ? "instance" : "instances"} running
+            </span>
+            <button type="button" className="btn-link" onClick={onShowInstances}>
+              View instances →
+            </button>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
           <h3 style={{ margin: 0 }}>Configuration</h3>
           <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>

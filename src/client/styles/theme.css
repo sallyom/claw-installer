@@ -420,6 +420,43 @@ body {
   color: var(--text-muted);
 }
 
+.tab-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.info-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--success-soft);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--success);
+  cursor: pointer;
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.btn-link:hover {
+  color: var(--success);
+  opacity: 0.8;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;
