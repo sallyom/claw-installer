@@ -50,8 +50,7 @@ The cluster admin does the cluster-scoped and privileged setup:
 - grant privileged SCC only in that user's OpenShell namespace
 - install one OpenShell Helm release per human user
 - provide the OpenShell gateway service URL to the OpenClaw installer/user
-- provide or approve the OpenClaw image that includes the OpenShell CLI at
-  `/opt/openshell/bin/openshell`
+- provide or approve the OpenClaw image and CLI-bearing initContainer image
 
 The OpenShell Helm chart does not install the Agent Sandbox CRDs. It does create
 cluster-scoped RBAC for node reads, so use a unique Helm release name per user to
@@ -86,16 +85,17 @@ http://openshell.openshell-alice.svc.cluster.local:8080
 The OpenClaw owner deploys or requests one normal OpenClaw namespace per user:
 
 - create or select `openclaw-<user>`
-- deploy OpenClaw with the approved CLI-bearing image
+- deploy OpenClaw with the approved image
 - choose the OpenShell sandbox backend only after the cluster admin has provided
   the user's OpenShell gateway endpoint
 - set the OpenShell gateway endpoint in the installer
 - use the normal provider credential flow for that user's OpenClaw instance
 
 The installer installs the external `@openclaw/openshell-sandbox` plugin into
-the PVC-backed OpenClaw home before gateway startup. The OpenShell CLI is baked
-into the OpenClaw image; the installer no longer creates a separate OpenShell CLI
-init container or `openshell-cli` volume.
+the PVC-backed OpenClaw home before gateway startup. It also copies the
+OpenShell CLI from a CLI-bearing image into an `openshell-cli` `emptyDir` with
+an initContainer and mounts it into the gateway at
+`/opt/openshell/bin/openshell`.
 
 ## RBAC and IdP group model
 
@@ -142,7 +142,7 @@ and replace `USER` with the per-user id.
 - `oc`, `helm`, and `podman`
 - access to push an OpenClaw image to a registry reachable by the cluster
 - the `../openclaw`, `../claw-installer`, and `../OpenShell` repos checked out
-- an OpenClaw image that includes `/opt/openshell/bin/openshell`
+- an OpenClaw image reachable by the cluster
 
 ## 1. Install OpenShell cluster prerequisites
 
@@ -192,7 +192,7 @@ http://openshell-bob.openshell-bob.svc.cluster.local:8080
 
 ## 3. Build the OpenClaw image
 
-Build from checked-out `../openclaw`, then layer in the OpenShell CLI:
+Build from checked-out `../openclaw` if you need a custom OpenClaw image:
 
 ```shell
 cd ../claw-installer
@@ -200,14 +200,12 @@ cd ../claw-installer
 podman push quay.io/<org>/openclaw:openshell
 ```
 
-For multi-arch farm builds, build the OpenClaw base first, capture its digest,
-then use that digest as the base for the CLI-bearing image:
+For multi-arch farm builds, build the OpenClaw image and capture its digest:
 
 ```shell
 podman farm build \
   -f ../openclaw/Dockerfile \
   --build-arg OPENCLAW_EXTENSIONS=diagnostics-otel,codex \
-  --build-arg OPENCLAW_IMAGE_APT_PACKAGES="openssh-client rsync" \
   ../openclaw
 
 podman farm build \
@@ -278,7 +276,7 @@ The resulting config must include:
 }
 ```
 
-Before testing an agent turn, verify the baked CLI:
+Before testing an agent turn, verify the mounted CLI:
 
 ```shell
 oc exec -n openclaw-bob deployment/openclaw -c gateway -- \

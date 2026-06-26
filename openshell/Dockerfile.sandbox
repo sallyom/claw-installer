@@ -1,52 +1,41 @@
-FROM quay.io/fedora/fedora:42
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
 
 ARG INSTALL_BUILD_TOOLS=false
 ARG SANDBOX_UID=65532
 ARG SANDBOX_GID=65532
 
 LABEL org.opencontainers.image.title="OpenClaw OpenShell Sandbox"
-LABEL org.opencontainers.image.description="Fedora-based OpenShell sandbox image for OpenClaw exec sessions"
+LABEL org.opencontainers.image.description="UBI Minimal-based OpenShell sandbox image for OpenClaw exec sessions"
 LABEL org.opencontainers.image.source="https://github.com/openclaw/claw-installer"
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-RUN dnf install -y --setopt=install_weak_deps=False \
+# UBI already includes coreutils-single and curl-minimal. Keep those instead of
+# replacing them with the larger conflicting coreutils/curl packages.
+RUN microdnf install -y --nodocs --setopt=install_weak_deps=0 \
       bash \
-      bind-utils \
       ca-certificates \
-      coreutils \
-      curl \
       diffutils \
       findutils \
-      git \
+      git-core \
       gzip \
       hostname \
-      iproute \
-      iputils \
       jq \
       less \
-      nano \
-      nftables \
       nodejs \
       npm \
-      openssh-clients \
       procps-ng \
       python3 \
       python3-pip \
-      rsync \
       sed \
       shadow-utils \
       tar \
       unzip \
       util-linux \
-      vim-minimal \
-      wget \
       which \
       xz \
       zip \
       zstd \
-    && if [[ "${INSTALL_BUILD_TOOLS}" == "true" ]]; then \
-      dnf install -y --setopt=install_weak_deps=False \
+    && if [ "${INSTALL_BUILD_TOOLS}" = "true" ]; then \
+      microdnf install -y --nodocs --setopt=install_weak_deps=0 \
         cmake \
         gcc \
         gcc-c++ \
@@ -56,22 +45,29 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         python3-devel \
         redhat-rpm-config; \
     fi \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf /var/cache/yum /tmp/* /var/tmp/* \
+    && microdnf clean all \
+    && rm -rf /var/cache/dnf /var/cache/yum /root/.cache /root/.npm /tmp/* /var/tmp/* \
     && groupadd --gid "${SANDBOX_GID}" sandbox \
     && useradd --no-log-init --uid "${SANDBOX_UID}" --gid "${SANDBOX_GID}" --create-home --home-dir /home/sandbox --shell /bin/bash sandbox \
-    && mkdir -p /workspace /sandbox /home/sandbox \
+    && mkdir -p /workspace /sandbox /home/sandbox/.cache/pip /home/sandbox/.npm \
     && touch /home/sandbox/.bash_profile /home/sandbox/.bashrc \
     && chown -R sandbox:sandbox /workspace /sandbox /home/sandbox \
     && chmod -R u+rwX,g+rwX,o-rwx /workspace /home/sandbox \
-    && chmod -R u+rwX,g+rwX,o+rX /sandbox
+    && chmod -R u+rwX,g+rwX,o+rX /sandbox \
+    && find / -xdev -perm /6000 -type f -exec chmod ug-s {} +
 
 ENV HOME=/home/sandbox
 ENV PATH=/home/sandbox/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV PYTHONUNBUFFERED=1
+ENV PIP_CACHE_DIR=/home/sandbox/.cache/pip
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV NPM_CONFIG_CACHE=/home/sandbox/.npm
+ENV NPM_CONFIG_PREFIX=/home/sandbox/.local
+ENV NPM_CONFIG_AUDIT=false
+ENV NPM_CONFIG_FUND=false
 
 WORKDIR /workspace
+
+USER ${SANDBOX_UID}:${SANDBOX_GID}
 
 CMD ["/bin/bash"]

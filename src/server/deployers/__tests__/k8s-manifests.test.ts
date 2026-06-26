@@ -110,7 +110,7 @@ describe("k8s state sync manifests", () => {
     expect(env.XDG_CONFIG_HOME).toBe("/home/node/.config");
   });
 
-  it("installs the external OpenShell plugin and registers the baked OpenShell CLI when enabled", () => {
+  it("installs the external OpenShell plugin and uses the image-provided OpenShell CLI when enabled", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
@@ -123,7 +123,6 @@ describe("k8s state sync manifests", () => {
     const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
     const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
     const gatewayContainer = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
-    const volumes = deployment.spec?.template.spec?.volumes ?? [];
 
     expect(pluginInit?.image).toBe("quay.io/sallyom/openclaw:latest");
     expect(gatewayContainer?.image).toBe("quay.io/sallyom/openclaw:latest");
@@ -158,10 +157,8 @@ describe("k8s state sync manifests", () => {
         },
       ]),
     );
-    expect(gatewayContainer?.volumeMounts).not.toEqual(
-      expect.arrayContaining([{ name: "openshell-cli", mountPath: "/opt/openshell", readOnly: true }]),
-    );
-    expect(volumes).not.toEqual(expect.arrayContaining([{ name: "openshell-cli", emptyDir: {} }]));
+    expect(gatewayContainer?.volumeMounts?.find((mount) => mount.name === "openshell-cli")).toBeUndefined();
+    expect(deployment.spec?.template.spec?.volumes?.find((volume) => volume.name === "openshell-cli")).toBeUndefined();
   });
 
   it("installs configured OpenClaw plugins before gateway startup", () => {

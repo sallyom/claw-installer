@@ -46,13 +46,18 @@ reuses OpenShell sandboxes for risky runtime work.
 
 ## Image options
 
-Use an OpenClaw image that includes the OpenShell CLI at `/opt/openshell/bin/openshell`. For this PoC, the Kubernetes/OpenShift installer defaults OpenShell sandbox deployments to:
+Use a normal OpenClaw image for the gateway. When the OpenShell sandbox backend
+is enabled, the Kubernetes/OpenShift installer copies the OpenShell CLI from a
+CLI-bearing image into an `openshell-cli` `emptyDir` and mounts it at
+`/opt/openshell/bin/openshell`.
+For this PoC, the installer defaults OpenShell sandbox deployments to:
 
 ```text
 quay.io/sallyom/openclaw:latest
 ```
 
-Build a CLI-bearing image from the default PoC base:
+You can still build a CLI-bearing image from the default PoC base for offline or
+digest-pinned environments:
 
 ```shell
 podman build -t registry/name/openclaw:openshell -f openshell/Dockerfile .
@@ -74,12 +79,14 @@ OpenClaw from source, then layers the OpenShell CLI on top:
 ./openshell/build-openclaw-source-image.sh quay.io/yourname/openclaw:openshell
 ```
 
-The image installs `openssh-client`, `rsync`, and the OpenShell CLI. It does not
-bundle the OpenShell plugin into `/app/dist/extensions/openshell`; the
-Kubernetes deployer installs the plugin into the PVC-backed OpenClaw home before
-gateway startup. Avoid relying on image-build plugin installs under
-`/home/node`; the Kubernetes deployer mounts the OpenClaw PVC at `/home/node`,
-which hides image-layer home content.
+The optional CLI-bearing image adds the OpenShell CLI plus the minimal local
+`ssh` runtime needed to connect to sandbox sessions. It does not install the
+full OpenSSH client package into the final image, does not include `rsync`, and
+does not bundle the OpenShell plugin into
+`/app/dist/extensions/openshell`; the Kubernetes deployer installs the plugin
+into the PVC-backed OpenClaw home before gateway startup. Avoid relying on
+image-build plugin installs under `/home/node`; the Kubernetes deployer mounts
+the OpenClaw PVC at `/home/node`, which hides image-layer home content.
 
 The OpenShell plugin is intentionally externalized. The Kubernetes deployer installs the published
 `@openclaw/openshell-sandbox` package into the PVC-backed OpenClaw home before
@@ -95,8 +102,8 @@ This can be remedied by running `openclaw doctor` from the OpenClaw container's 
 ## OpenShell sandbox image
 
 The OpenShell `openclaw` community sandbox image is large because it carries
-multiple agent CLIs. For this PoC, build a slimmer Fedora-based sandbox image
-for OpenClaw exec sessions:
+multiple agent CLIs. For this PoC, build a slimmer UBI Minimal-based sandbox
+image for OpenClaw exec sessions:
 
 ```shell
 podman build -t registry/name/openclaw-openshell-sandbox:latest \
@@ -107,15 +114,16 @@ podman image inspect quay.io/sallyom/openclaw-openshell-sandbox:latest \
   --format '{{ index .RepoDigests 0 }}'
 ```
 
-The default image includes common shell, network, archive, Git, Python, and Node
-tooling. It does not include Claude, Codex, Copilot, or OpenCode CLIs.
+The default image includes common shell, archive, Git, Python, and Node tooling.
+It does not include Claude, Codex, Copilot, OpenCode, OpenSSH clients, `curl`,
+`wget`, `rsync`, or privileged network administration tools.
 
-OpenShell's default sandbox policy drops privileges to `sandbox:sandbox`, so the
-image must include a non-root `sandbox` user and group. The Dockerfile uses a
-non-root UID/GID of `65532:65532`: high enough to avoid the common UID 1000
-`RLIMIT_NPROC` collision on shared OpenShift nodes, but still within the
-usual rootless Podman container UID range. Override these only if your cluster
-needs a specific range:
+The image defaults to the non-root `sandbox:sandbox` user, strips setuid/setgid
+bits from packaged binaries, and keeps package-manager caches under
+`/home/sandbox`. The Dockerfile uses a non-root UID/GID of `65532:65532`: high
+enough to avoid the common UID 1000 `RLIMIT_NPROC` collision on shared
+OpenShift nodes, but still within the usual rootless Podman container UID range.
+Override these only if your cluster needs a specific range:
 
 ```shell
 podman build -t quay.io/sallyom/openclaw-openshell-sandbox:build-tools \
@@ -124,7 +132,7 @@ podman build -t quay.io/sallyom/openclaw-openshell-sandbox:build-tools \
 ```
 
 Use the pushed image as the OpenShell sandbox source in the installer. TODO:
-pin this by digest once the Fedora sandbox image contract stabilizes. The
+pin this by digest once the UBI sandbox image contract stabilizes. The
 OpenShift values in this directory also set `server.sandboxImagePullPolicy:
 IfNotPresent` so sandbox pods do not repull the same tag on every start.
 
@@ -142,7 +150,7 @@ node openclaw.mjs plugins list | grep -q openshell
 The install writes to `/home/node/.openclaw` on the OpenClaw PVC, so the plugin
 is present before the gateway reads config and registers sandbox backends.
 
-## OpenShell CLI in the OpenClaw image
+## OpenShell CLI in the OpenClaw pod
 
 The NVIDIA OpenShell CLI must be available inside the OpenClaw gateway container at:
 
@@ -150,14 +158,15 @@ The NVIDIA OpenShell CLI must be available inside the OpenClaw gateway container
 /opt/openshell/bin/openshell
 ```
 
-For this PoC, [Dockerfile](Dockerfile) installs the OpenShell `0.0.44` Debian
-package into the OpenClaw image. The OpenShift deployer no longer creates a
-separate CLI download initContainer or mounts an `openshell-cli` `emptyDir`.
-At gateway startup, the OpenClaw container verifies the baked CLI and registers
-the configured OpenShell gateway endpoint under the local name `openshell`.
+For this PoC, the OpenShift deployer creates an `install-openshell-cli`
+initContainer that copies the CLI from `quay.io/sallyom/openclaw:openshell`
+into an `openshell-cli` `emptyDir`, and mounts that volume into the gateway
+container. At gateway startup, the OpenClaw container verifies the mounted CLI
+and registers the configured OpenShell gateway endpoint under the local name
+`openshell`.
 
-For production, use an admin-owned internal image that carries a digest-pinned
-OpenShell CLI artifact.
+For production, prefer an admin-owned internal CLI-bearing image that is
+digest-pinned.
 
 ## OpenClaw configuration
 
@@ -225,8 +234,7 @@ normal application namespace with only the permissions OpenClaw needs.
 
 Users should select the OpenShell sandbox backend in the installer only after a
 cluster admin has provisioned their OpenShell gateway namespace and confirmed
-their OpenClaw namespace can reach that gateway service and their OpenClaw image
-includes the OpenShell CLI at `/opt/openshell/bin/openshell`.
+their OpenClaw namespace can reach that gateway service.
 
 ## Current installer integration status
 
