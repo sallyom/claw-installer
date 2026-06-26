@@ -61,6 +61,24 @@ describe("otel config generation", () => {
     expect(otlphttp).not.toHaveProperty("auth");
     expect(otlphttp).not.toHaveProperty("headers");
   });
+
+  it("skips OTLP HTTP TLS verification only when explicitly enabled", () => {
+    const baseConfig: DeployConfig = {
+      mode: "kubernetes",
+      agentName: "alpha",
+      agentDisplayName: "Alpha",
+      otelEnabled: true,
+      otelEndpoint: "https://mlflow-service.mlflow.svc.cluster.local:5000",
+    };
+
+    const defaultConfig = generateOtelConfigObject(baseConfig);
+    const defaultExporter = (defaultConfig.exporters as Record<string, unknown>).otlphttp as Record<string, unknown>;
+    expect(defaultExporter.tls).not.toHaveProperty("insecure_skip_verify");
+
+    const skipVerifyConfig = generateOtelConfigObject({ ...baseConfig, otelTlsSkipVerify: true });
+    const skipVerifyExporter = (skipVerifyConfig.exporters as Record<string, unknown>).otlphttp as Record<string, unknown>;
+    expect(skipVerifyExporter.tls).toMatchObject({ insecure_skip_verify: true });
+  });
 });
 
 describe("formatScalar", () => {

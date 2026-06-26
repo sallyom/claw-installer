@@ -1493,6 +1493,20 @@ export default function DeployForm({ onDeployStarted }: DeployFormProps) {
               </div>
             </div>
             <div className="form-group">
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={config.otelTlsSkipVerify}
+                  onChange={(e) => update("otelTlsSkipVerify", e.target.checked)}
+                  style={{ width: "auto" }}
+                />
+                Skip OTLP HTTPS certificate verification
+              </label>
+              <div className="hint">
+                Use only for self-signed or internal OTLP HTTPS endpoints.
+              </div>
+            </div>
+            <div className="form-group">
               <label>MLflow Experiment ID (optional)</label>
               <input
                 type="text"

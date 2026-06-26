@@ -334,6 +334,9 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     if (config.otelExperimentId) {
       lines.push(`OTEL_EXPERIMENT_ID=${config.otelExperimentId}`);
     }
+    if (config.otelTlsSkipVerify) {
+      lines.push(`OTEL_TLS_SKIP_VERIFY=true`);
+    }
     if (config.otelImage) {
       lines.push(`OTEL_IMAGE=${config.otelImage}`);
     }
