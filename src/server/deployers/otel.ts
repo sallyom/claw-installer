@@ -72,7 +72,6 @@ function buildOtelConfig(config: DeployConfig): Record<string, unknown> {
       endpoint,
       tls: {
         insecure: !endpoint.startsWith("https://"),
-        insecure_skip_verify: endpoint.startsWith("https://"),
       },
     };
     if (config.otelExperimentId) {
