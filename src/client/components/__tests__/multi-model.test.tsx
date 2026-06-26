@@ -266,6 +266,34 @@ describe("Multi-model per provider", () => {
 
       expect(body.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
     });
+
+    it("includes OTEL TLS skip verify only when OTEL is enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.otelEnabled = true;
+      config.otelEndpoint = "https://mlflow.example.test:5000";
+      config.otelTlsSkipVerify = true;
+      const body = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(body.otelTlsSkipVerify).toBe(true);
+
+      config.otelEnabled = false;
+      const disabledBody = buildDeployRequestBody({
+        mode: "openshift",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(disabledBody.otelTlsSkipVerify).toBeUndefined();
+    });
   });
 
   describe("buildEnvFileContent", () => {
@@ -455,6 +483,34 @@ describe("Multi-model per provider", () => {
 
       expect(env).toContain("SANDBOX_OPENSHELL_FROM=quay.io/sallyom/openclaw-openshell-sandbox:slim");
       expect(restored.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
+    });
+
+    it("round-trips the OTEL TLS skip verify option through env files", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.otelEnabled = true;
+      config.otelEndpoint = "https://mlflow.example.test:5000";
+      config.otelTlsSkipVerify = true;
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      const vars = Object.fromEntries(
+        env
+          .split("\n")
+          .filter((line) => line && !line.startsWith("#") && line.includes("="))
+          .map((line) => {
+            const index = line.indexOf("=");
+            return [line.slice(0, index), line.slice(index + 1)];
+          }),
+      );
+
+      const { config: restored } = applySavedVarsToConfig(vars, createInitialDeployFormConfig());
+
+      expect(env).toContain("OTEL_TLS_SKIP_VERIFY=true");
+      expect(restored.otelTlsSkipVerify).toBe(true);
     });
   });
 

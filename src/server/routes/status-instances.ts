@@ -142,6 +142,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     otelJaeger: savedVars.OTEL_JAEGER === "true" || undefined,
     otelEndpoint: savedVars.OTEL_ENDPOINT || undefined,
     otelExperimentId: savedVars.OTEL_EXPERIMENT_ID || undefined,
+    otelTlsSkipVerify: savedVars.OTEL_TLS_SKIP_VERIFY === "true" || undefined,
     otelImage: savedVars.OTEL_IMAGE || undefined,
     chromiumSidecar: savedVars.CHROMIUM_SIDECAR === "true" || undefined,
     chromiumImage: savedVars.CHROMIUM_IMAGE || undefined,

@@ -133,6 +133,7 @@ export interface DeployConfig {
   otelEnabled?: boolean;
   otelEndpoint?: string;       // OTLP endpoint (e.g. http://jaeger:4317 or http://mlflow:5000)
   otelExperimentId?: string;   // MLflow experiment ID (optional, for MLflow endpoints)
+  otelTlsSkipVerify?: boolean; // Skip TLS certificate verification for OTLP HTTP endpoints
   otelImage?: string;
   otelJaeger?: boolean;        // Run Jaeger all-in-one as a sidecar (UI on port 16686)
   // Chromium browser sidecar (headless browser for web browsing)

@@ -72,19 +72,35 @@ function buildOtelConfig(config: DeployConfig): Record<string, unknown> {
       endpoint,
       tls: {
         insecure: !endpoint.startsWith("https://"),
+        ...(config.otelTlsSkipVerify ? { insecure_skip_verify: true } : {}),
       },
     };
     if (config.otelExperimentId) {
+      const ns = config.namespace || config.prefix || "default";
       otlpHttpExporter.headers = {
-        "x-mlflow-experiment-id": config.otelExperimentId,
+        "x-mlflow-experiment-id": String(config.otelExperimentId),
+        "x-mlflow-workspace": ns,
       };
+      if (config.mode === "kubernetes" || config.mode === "openshift") {
+        otlpHttpExporter.auth = { authenticator: "bearertokenauth" };
+      }
     }
     exporters.otlphttp = otlpHttpExporter;
   }
 
   exporters.debug = { verbosity: "basic" };
 
-  return {
+  const extensions: Record<string, unknown> = {};
+  const extensionNames: string[] = [];
+
+  if ((config.mode === "kubernetes" || config.mode === "openshift") && config.otelExperimentId) {
+    extensions.bearertokenauth = {
+      filename: "/var/run/secrets/kubernetes.io/serviceaccount/token",
+    };
+    extensionNames.push("bearertokenauth");
+  }
+
+  const result: Record<string, unknown> = {
     receivers: {
       otlp: {
         protocols: {
@@ -121,6 +137,13 @@ function buildOtelConfig(config: DeployConfig): Record<string, unknown> {
       },
     },
   };
+
+  if (extensionNames.length > 0) {
+    result.extensions = extensions;
+    (result.service as Record<string, unknown>).extensions = extensionNames;
+  }
+
+  return result;
 }
 
 function renderOtelConfigYaml(value: unknown, indent = 0): string {
@@ -148,9 +171,9 @@ function renderOtelConfigYaml(value: unknown, indent = 0): string {
   return `${pad}${formatScalar(value)}`;
 }
 
-function formatScalar(value: unknown): string {
+export function formatScalar(value: unknown): string {
   if (typeof value === "string") {
-    if (/^[A-Za-z0-9._/-]+$/.test(value)) {
+    if (/^[A-Za-z0-9._/-]+$/.test(value) && !/^\d+(\.\d+)?$/.test(value)) {
       return value;
     }
     return JSON.stringify(value);

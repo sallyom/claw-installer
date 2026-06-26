@@ -142,6 +142,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     otelJaeger: false,
     otelEndpoint: "",
     otelExperimentId: "",
+    otelTlsSkipVerify: false,
     chromiumSidecar: false,
     chromiumImage: "",
   };
@@ -597,6 +598,8 @@ export function applySavedVarsToConfig(
       otelEndpoint: getStringVar(vars, "OTEL_ENDPOINT", "otelEndpoint") || prev.otelEndpoint,
       otelExperimentId:
         getStringVar(vars, "OTEL_EXPERIMENT_ID", "otelExperimentId") || prev.otelExperimentId,
+      otelTlsSkipVerify:
+        vars.OTEL_TLS_SKIP_VERIFY === "true" || vars.otelTlsSkipVerify === "true" || prev.otelTlsSkipVerify,
       chromiumSidecar:
         vars.CHROMIUM_SIDECAR === "true" || vars.chromiumSidecar === "true" || prev.chromiumSidecar,
       chromiumImage: getStringVar(vars, "CHROMIUM_IMAGE", "chromiumImage") || prev.chromiumImage,
@@ -852,6 +855,7 @@ export function buildDeployRequestBody(params: {
     otelJaeger: config.otelEnabled ? config.otelJaeger || undefined : undefined,
     otelEndpoint: config.otelEnabled ? trimToUndefined(config.otelEndpoint) : undefined,
     otelExperimentId: config.otelEnabled ? trimToUndefined(config.otelExperimentId) : undefined,
+    otelTlsSkipVerify: config.otelEnabled ? config.otelTlsSkipVerify || undefined : undefined,
     chromiumSidecar: config.chromiumSidecar || undefined,
     chromiumImage: config.chromiumSidecar ? trimToUndefined(config.chromiumImage) : undefined,
     cronEnabled: config.cronEnabled || undefined,
@@ -1018,6 +1022,7 @@ export function buildEnvFileContent(params: {
     `OTEL_JAEGER=${config.otelJaeger}`,
     `OTEL_ENDPOINT=${config.otelEndpoint}`,
     `OTEL_EXPERIMENT_ID=${config.otelExperimentId}`,
+    `OTEL_TLS_SKIP_VERIFY=${config.otelTlsSkipVerify}`,
     `CHROMIUM_SIDECAR=${config.chromiumSidecar}`,
     `CHROMIUM_IMAGE=${config.chromiumImage}`,
     "",
