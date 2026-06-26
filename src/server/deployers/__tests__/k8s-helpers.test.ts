@@ -934,7 +934,7 @@ describe("model config generation", () => {
     });
   });
 
-  it("uses the local no-auth marker for unauthenticated model endpoints", () => {
+  it("injects placeholder apiKey ref for keyless custom endpoints", () => {
     const config = makeConfig({
       inferenceProvider: "custom-endpoint",
       openaiApiKey: "openai-key",
@@ -945,7 +945,7 @@ describe("model config generation", () => {
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       models?: {
         providers?: Record<string, {
-          apiKey?: unknown;
+          apiKey?: { source?: string; provider?: string; id?: string };
           baseUrl?: string;
           api?: string;
         }>;
@@ -954,7 +954,11 @@ describe("model config generation", () => {
 
     expect(rendered.models?.providers?.endpoint?.baseUrl).toBe("http://localhost:8080/v1");
     expect(rendered.models?.providers?.endpoint?.api).toBe("openai-completions");
-    expect(rendered.models?.providers?.endpoint?.apiKey).toBeUndefined();
+    expect(rendered.models?.providers?.endpoint?.apiKey).toEqual({
+      source: "env",
+      provider: "default",
+      id: "MODEL_ENDPOINT_API_KEY",
+    });
   });
 
   it("adds installer-provided provider models to the OpenClaw picker allowlist", () => {
@@ -1529,5 +1533,25 @@ describe("MCP servers from agent source", () => {
     };
 
     expect(rendered.mcp).toBeUndefined();
+  });
+
+  it("sets apiKey secret ref for keyless custom endpoints", () => {
+    const config = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "http://vllm.local:8000/v1",
+      modelEndpointModel: "mistral-small",
+    });
+
+    const rendered = buildOpenClawConfig(config, "gateway-token") as {
+      models?: {
+        providers?: Record<string, { apiKey?: { source?: string; id?: string } }>;
+      };
+    };
+
+    expect(rendered.models?.providers?.endpoint?.apiKey).toEqual({
+      source: "env",
+      provider: "default",
+      id: "MODEL_ENDPOINT_API_KEY",
+    });
   });
 });

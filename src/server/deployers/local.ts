@@ -44,6 +44,7 @@ import {
   buildVaultSecretProviderConfig,
   buildConfiguredAgentModelCatalog,
   CUSTOM_ENDPOINT_PROVIDER,
+  KEYLESS_ENDPOINT_PLACEHOLDER,
   GOOGLE_BASE_URL,
   GOOGLE_PROVIDER,
   OPENAI_BASE_URL,
@@ -857,7 +858,7 @@ function attachSecretHandlingConfig(ocConfig: Record<string, unknown>, config: D
   const modelEndpointApiKeyRef = hasSecretRef(config.modelEndpointApiKeyRef)
     ? config.modelEndpointApiKeyRef
     : (
-      config.modelEndpointApiKey || hasPodmanSecretTarget(config.podmanSecretMappings, "MODEL_ENDPOINT_API_KEY")
+      config.modelEndpointApiKey || hasPodmanSecretTarget(config.podmanSecretMappings, "MODEL_ENDPOINT_API_KEY") || config.modelEndpoint?.trim()
     )
       ? envSecretRef("MODEL_ENDPOINT_API_KEY")
       : undefined;
@@ -1349,6 +1350,8 @@ export function buildRunArgs(
   }
   if (effectiveConfig.modelEndpointApiKey) {
     env.MODEL_ENDPOINT_API_KEY = effectiveConfig.modelEndpointApiKey;
+  } else if (effectiveConfig.modelEndpoint?.trim()) {
+    env.MODEL_ENDPOINT_API_KEY = KEYLESS_ENDPOINT_PLACEHOLDER;
   }
   if (effectiveConfig.vaultSecretsEnabled) {
     if (effectiveConfig.vaultAddr) {
