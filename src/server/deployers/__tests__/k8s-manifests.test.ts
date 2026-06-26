@@ -318,7 +318,7 @@ describe("k8s state sync manifests", () => {
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"provider": "vault"');
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"id": "providers/anthropic/apiKey"');
     expect(secret.stringData?.OPENAI_CODEX_AUTH_PROFILES_JSON).toContain('"id": "providers/openai/apiKey"');
-    expect(initScript).not.toContain("auth-profiles.json");
+    expect(initScript).toContain("rm -f /home/node/.openclaw/agents/*/agent/auth-profiles.json");
     expect(initScript).not.toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
     expect(gatewayVolumeMounts).toContain("/openclaw-secrets");
     expect(gatewayScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
@@ -722,6 +722,48 @@ describe("gateway env vars in proxy mode", () => {
       name: "openclaw-1password-token",
       key: "token",
     });
+  });
+});
+
+// Regression test for #140: switching providers should not inject stale env var refs
+describe("gateway env vars with custom endpoint only", () => {
+  it("excludes provider env vars when those providers are not configured", () => {
+    const endpointConfig = makeConfig({
+      inferenceProvider: "custom-endpoint",
+      modelEndpoint: "http://vllm:8000/v1",
+      modelEndpointApiKey: "fake",
+    });
+
+    const deployment = deploymentManifest("ns", endpointConfig);
+    const envNames = gatewayEnvNames(deployment);
+
+    expect(envNames).not.toContain("ANTHROPIC_API_KEY");
+    expect(envNames).not.toContain("OPENAI_API_KEY");
+    expect(envNames).not.toContain("GEMINI_API_KEY");
+    expect(envNames).not.toContain("OPENROUTER_API_KEY");
+    expect(envNames).toContain("MODEL_ENDPOINT");
+    expect(envNames).toContain("MODEL_ENDPOINT_API_KEY");
+  });
+
+  it("removes stale auth-profiles.json before writing new ones (issue #140)", () => {
+    const deployment = deploymentManifest("ns", makeConfig());
+    const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
+
+    const rmIdx = initScript.indexOf("rm -f /home/node/.openclaw/agents/*/agent/auth-profiles.json");
+    expect(rmIdx).toBeGreaterThan(-1);
+
+    const writeIdx = initScript.indexOf("auth-profiles.json", rmIdx + 1);
+    if (writeIdx > -1) {
+      expect(rmIdx).toBeLessThan(writeIdx);
+    }
+  });
+
+  it("removes stale models.json and auth-state.json on redeploy (issue #140)", () => {
+    const deployment = deploymentManifest("ns", makeConfig());
+    const initScript = deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2] ?? "";
+
+    expect(initScript).toContain("/home/node/.openclaw/agents/*/agent/models.json");
+    expect(initScript).toContain("/home/node/.openclaw/agents/*/agent/auth-state.json");
   });
 });
 
