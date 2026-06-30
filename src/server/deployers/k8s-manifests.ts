@@ -937,6 +937,9 @@ export function deploymentManifest(
               ],
               volumeMounts: [
                 { name: "otel-config", mountPath: "/etc/otel", readOnly: true },
+                ...(config.mode === "openshift" && !config.otelTlsSkipVerify
+                  ? [{ name: "otel-service-ca", mountPath: "/etc/pki/tls/service-ca", readOnly: true }]
+                  : []),
               ],
               resources: {
                 requests: { memory: "128Mi", cpu: "100m" },
@@ -1055,6 +1058,9 @@ export function deploymentManifest(
               : []),
             ...(useOtelDirect
               ? [{ name: "otel-config", configMap: { name: "otel-collector-config" } }]
+              : []),
+            ...(useOtelDirect && config.mode === "openshift" && !config.otelTlsSkipVerify
+              ? [{ name: "otel-service-ca", configMap: { name: "otel-service-ca" } }]
               : []),
             ...(useChromium
               ? [
