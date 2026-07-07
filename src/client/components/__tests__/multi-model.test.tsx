@@ -156,7 +156,7 @@ describe("Multi-model per provider", () => {
     it("includes plugin install specs when configured", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
-      config.pluginInstallSpecsText = "\ngit:github.com/sallyom/claw-vault\n# comment\n/app/extensions/vault\n";
+      config.pluginInstallSpecsText = "\ngit:github.com/example/custom-openclaw-plugin\n# comment\n/app/extensions/custom\n";
       const body = buildDeployRequestBody({
         mode: "openshift",
         inferenceProvider: "anthropic",
@@ -165,7 +165,7 @@ describe("Multi-model per provider", () => {
         suggestedNamespace: "test-ns",
       });
 
-      expect(body.pluginInstallSpecs).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
+      expect(body.pluginInstallSpecs).toEqual(["git:github.com/example/custom-openclaw-plugin", "/app/extensions/custom"]);
     });
 
     it("includes Vault plugin deployment settings when enabled", () => {
@@ -443,7 +443,7 @@ describe("Multi-model per provider", () => {
     it("exports plugin install specs into the env file", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
-      config.pluginInstallSpecsText = "git:github.com/sallyom/claw-vault\n/app/extensions/vault";
+      config.pluginInstallSpecsText = "git:github.com/example/custom-openclaw-plugin\n/app/extensions/custom";
       const env = buildEnvFileContent({
         config,
         inferenceProvider: "anthropic",
@@ -454,7 +454,7 @@ describe("Multi-model per provider", () => {
       const match = env.match(/OPENCLAW_PLUGIN_INSTALL_SPECS_B64=(.+)/);
       expect(match).toBeTruthy();
       const decoded = JSON.parse(window.atob(match![1]));
-      expect(decoded).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
+      expect(decoded).toEqual(["git:github.com/example/custom-openclaw-plugin", "/app/extensions/custom"]);
     });
 
     it("round-trips the OpenShell sandbox source through env files", () => {

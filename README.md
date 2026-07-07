@@ -155,8 +155,8 @@ The deploy form also has a **Plugins** section for OpenClaw runtime plugins that
 Use one plugin spec per line:
 
 ```text
-git:github.com/sallyom/claw-vault
 @openclaw/openshell-sandbox
+/app/extensions/custom-plugin
 ```
 
 Supported specs follow the OpenClaw plugin installer: ClawHub specs, npm packages, git specs, and local paths that exist inside the OpenClaw container. For local Podman/Docker deploys, existing host paths are mounted automatically. When the OpenShell sandbox backend is enabled, the installer automatically adds `@openclaw/openshell-sandbox`; you do not need to list it yourself.

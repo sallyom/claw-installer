@@ -709,7 +709,7 @@ describe("model config generation", () => {
     expect(rendered.channels?.telegram?.allowFrom).toEqual([12345]);
   });
 
-  it("generates the installed Vault plugin SecretRef provider", () => {
+  it("generates the bundled Vault plugin SecretRef provider", () => {
     const config = makeConfig({
       inferenceProvider: "openai",
       vaultSecretsEnabled: true,

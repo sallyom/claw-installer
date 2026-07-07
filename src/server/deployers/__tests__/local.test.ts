@@ -349,7 +349,7 @@ describe("local Vault SecretRef wiring", () => {
     expect(script).toContain("chatCompletions={enabled:true}");
   });
 
-  it("auto-installs the Vault plugin for local containers", () => {
+  it("does not install the bundled Vault plugin for local containers", () => {
     const plan = localPluginsTesting.localPluginInstallPlan({
       mode: "local",
       agentName: "demo",
@@ -357,19 +357,19 @@ describe("local Vault SecretRef wiring", () => {
       vaultSecretsEnabled: true,
     });
 
-    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-vault"]);
+    expect(plan.specs).toEqual([]);
   });
 
-  it("deduplicates configured Vault plugin installs", () => {
+  it("keeps explicitly configured plugin installs when Vault SecretRefs are enabled", () => {
     const plan = localPluginsTesting.localPluginInstallPlan({
       mode: "local",
       agentName: "demo",
       agentDisplayName: "Demo",
-      pluginInstallSpecs: ["git:github.com/sallyom/claw-vault"],
+      pluginInstallSpecs: ["git:github.com/example/custom-openclaw-plugin"],
       vaultSecretsEnabled: true,
     });
 
-    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-vault"]);
+    expect(plan.specs).toEqual(["git:github.com/example/custom-openclaw-plugin"]);
   });
 });
 
