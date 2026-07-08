@@ -798,7 +798,7 @@ describe("model config generation", () => {
     expect(rendered.secrets?.providers?.vault?.noOutputTimeoutMs).toBe(15000);
   });
 
-  it("generates the installed 1Password plugin SecretRef provider", () => {
+  it("generates the bundled 1Password plugin SecretRef provider", () => {
     const config = makeConfig({
       inferenceProvider: "openrouter",
       onePasswordSecretsEnabled: true,

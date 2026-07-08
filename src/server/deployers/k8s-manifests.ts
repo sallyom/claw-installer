@@ -32,7 +32,6 @@ const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
 const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
 const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
 const VAULT_PLUGIN_SPEC = "git:github.com/sallyom/claw-vault";
-const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 const ONEPASSWORD_CLI_IMAGE = "docker.io/1password/op:2";
 const ONEPASSWORD_CLI_BINARY_PATH = `${OPENCLAW_RUNTIME_DIR}/bin/op`;
 const ONEPASSWORD_CLI_PATH = `${OPENCLAW_RUNTIME_DIR}/bin/openclaw-op`;
@@ -44,7 +43,6 @@ function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
     ...(config.vaultSecretsEnabled ? [VAULT_PLUGIN_SPEC] : []),
-    ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
     ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
   ]) {

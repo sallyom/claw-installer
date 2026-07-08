@@ -87,6 +87,7 @@ import {
   bindMountSpec,
   localGatewayUserArgs,
   localStateMaintenanceUserArgs,
+  normalizeLocalFileOwner,
   parseContainerRunArgs,
   runCommand,
   runtimeOwnershipFixupCommand,
@@ -111,6 +112,10 @@ const OPENCLAW_LOCAL_NPM_CACHE_DIR = `${OPENCLAW_LOCAL_HOME}/.npm`;
 const OPENCLAW_LOCAL_CACHE_DIR = `${OPENCLAW_LOCAL_HOME}/.cache`;
 const OPENCLAW_LOCAL_CONFIG_HOME = `${OPENCLAW_LOCAL_HOME}/.config`;
 const OPENCLAW_LOCAL_CONFIG_DIR = `${OPENCLAW_LOCAL_CONFIG_HOME}/openclaw`;
+const ONEPASSWORD_LOCAL_CLI_IMAGE = "docker.io/1password/op:2";
+const ONEPASSWORD_LOCAL_CLI_BINARY_PATH = `${OPENCLAW_LOCAL_STATE_DIR}/bin/op`;
+const ONEPASSWORD_LOCAL_CLI_PATH = `${OPENCLAW_LOCAL_STATE_DIR}/bin/op-wrapper`;
+const ONEPASSWORD_LOCAL_CONFIG_DIR = `${OPENCLAW_LOCAL_CONFIG_HOME}/op`;
 const SANDBOX_SSH_DIR = "/home/node/.openclaw/sandbox-ssh";
 const SANDBOX_SSH_IDENTITY_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/identity`;
 const SANDBOX_SSH_CERTIFICATE_CONTAINER_PATH = `${SANDBOX_SSH_DIR}/certificate.pub`;
@@ -228,6 +233,69 @@ async function ensureLocalRuntimeImage(
   const pull = await runCommand(runtime, ["pull", image], log);
   if (pull.code !== 0) {
     throw new Error("Failed to pull image");
+  }
+}
+
+function localOnePasswordCliCopyScript(): string {
+  return [
+    "set -eu",
+    localRuntimeHomeInitCommand(),
+    `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR}/bin ${ONEPASSWORD_LOCAL_CONFIG_DIR}`,
+    `chmod 0700 ${ONEPASSWORD_LOCAL_CONFIG_DIR}`,
+    "op_path=$(command -v op)",
+    `cp "$op_path" ${ONEPASSWORD_LOCAL_CLI_BINARY_PATH}`,
+    `chmod 0755 ${ONEPASSWORD_LOCAL_CLI_BINARY_PATH}`,
+    `${ONEPASSWORD_LOCAL_CLI_BINARY_PATH} --version`,
+  ].join("\n");
+}
+
+function localOnePasswordCliWrapperScript(localFileOwner?: string): string {
+  const owner = normalizeLocalFileOwner(localFileOwner) || "1000:1000";
+  return [
+    "set -eu",
+    `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR}/bin ${ONEPASSWORD_LOCAL_CONFIG_DIR}`,
+    `chmod 0700 ${ONEPASSWORD_LOCAL_CONFIG_DIR}`,
+    `printf '%s\\n' '#!/bin/sh' 'set -eu' 'mkdir -p ${ONEPASSWORD_LOCAL_CONFIG_DIR}' 'chmod 0700 ${ONEPASSWORD_LOCAL_CONFIG_DIR}' 'umask 077' 'exec ${ONEPASSWORD_LOCAL_CLI_BINARY_PATH} --config ${ONEPASSWORD_LOCAL_CONFIG_DIR} "$@"' > ${ONEPASSWORD_LOCAL_CLI_PATH}`,
+    `chmod 0755 ${ONEPASSWORD_LOCAL_CLI_PATH}`,
+    `${ONEPASSWORD_LOCAL_CLI_PATH} --version`,
+    `chown ${owner} ${OPENCLAW_LOCAL_STATE_DIR}/bin ${ONEPASSWORD_LOCAL_CLI_BINARY_PATH} ${ONEPASSWORD_LOCAL_CLI_PATH} ${ONEPASSWORD_LOCAL_CONFIG_DIR} 2>/dev/null || true`,
+    `chmod 0755 ${OPENCLAW_LOCAL_STATE_DIR}/bin ${ONEPASSWORD_LOCAL_CLI_BINARY_PATH} ${ONEPASSWORD_LOCAL_CLI_PATH}`,
+    `chmod 0700 ${ONEPASSWORD_LOCAL_CONFIG_DIR}`,
+  ].join("\n");
+}
+
+async function installLocalOnePasswordCli(params: {
+  runtime: ContainerRuntime;
+  config: DeployConfig;
+  log: LogCallback;
+}): Promise<void> {
+  if (!params.config.onePasswordSecretsEnabled) {
+    return;
+  }
+  params.log("Installing 1Password CLI into local OpenClaw state...");
+  const copyResult = await runCommand(params.runtime, [
+    "run", "--rm",
+    ...localStateMaintenanceUserArgs(params.config.localFileOwner),
+    ...localStateMountArgs(params.config),
+    "--entrypoint", "sh",
+    ONEPASSWORD_LOCAL_CLI_IMAGE,
+    "-c",
+    localOnePasswordCliCopyScript(),
+  ], params.log);
+  if (copyResult.code !== 0) {
+    throw new Error("Failed to install 1Password CLI into local OpenClaw state");
+  }
+  const wrapperResult = await runCommand(params.runtime, [
+    "run", "--rm",
+    ...localStateMaintenanceUserArgs(params.config.localFileOwner),
+    ...localStateMountArgs(params.config),
+    "--entrypoint", "sh",
+    ONEPASSWORD_LOCAL_CLI_IMAGE,
+    "-c",
+    localOnePasswordCliWrapperScript(params.config.localFileOwner),
+  ], params.log);
+  if (wrapperResult.code !== 0) {
+    throw new Error("Failed to configure 1Password CLI wrapper in local OpenClaw state");
   }
 }
 
@@ -1262,6 +1330,8 @@ function localRuntimeHomeInitCommand(): string {
 
 export const __testing = {
   gatewayRuntimeConfigUpdateScript,
+  localOnePasswordCliCopyScript,
+  localOnePasswordCliWrapperScript,
   localRuntimeHomeInitCommand,
   localStateMountArgs,
 };
@@ -1404,6 +1474,7 @@ export function buildRunArgs(
     } else if (process.env.CLAW_1PASSWORD_VAULT) {
       env.CLAW_1PASSWORD_VAULT = process.env.CLAW_1PASSWORD_VAULT;
     }
+    env.CLAW_1PASSWORD_OP = ONEPASSWORD_LOCAL_CLI_PATH;
   }
 
   if (effectiveConfig.vertexEnabled && useProxy) {
@@ -1714,6 +1785,11 @@ Use this table to track verified peer OpenClaw instances.
       image,
       log,
       stateMountArgs: localStateMountArgs(runtimeConfig),
+    });
+    await installLocalOnePasswordCli({
+      runtime,
+      config: runtimeConfig,
+      log,
     });
     await importLocalManagedAuthProfiles({
       runtime,
@@ -2111,6 +2187,12 @@ Use this table to track verified peer OpenClaw instances.
     if (bootstrapResult.code !== 0) {
       throw new Error("Failed to initialize local runtime state");
     }
+
+    await installLocalOnePasswordCli({
+      runtime,
+      config: runtimeConfig,
+      log,
+    });
 
     await importLocalManagedAuthProfiles({
       runtime,
@@ -2568,6 +2650,12 @@ Use this table to track verified peer OpenClaw instances.
         // No key — proxy will not be used for this restart
       }
     }
+
+    await installLocalOnePasswordCli({
+      runtime,
+      config: result.config,
+      log,
+    });
 
     const port = result.config.port ?? DEFAULT_PORT;
     const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey);

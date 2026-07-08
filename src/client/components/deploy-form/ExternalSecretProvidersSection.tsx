@@ -424,7 +424,8 @@ export function ExternalSecretProvidersSection({
             points selected credential SecretRefs at ids such as <code>op://OpenClaw/OpenRouter/credential</code>. {isClusterMode
               ? "The 1Password service account token must already exist as a Secret in the target namespace."
               : "For local deploys, the installer passes OP_SERVICE_ACCOUNT_TOKEN from its environment when present."}{" "}
-            The OpenShift deployer installs <code>git:github.com/sallyom/claw-1password</code> automatically when this is enabled.
+            Use an OpenClaw image that includes the bundled <code>1password</code> plugin, or install
+            <code> @openclaw/1password</code> before deploying.
           </div>
         </div>
 

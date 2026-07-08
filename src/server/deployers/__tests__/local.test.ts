@@ -419,6 +419,7 @@ describe("local 1Password SecretRef wiring", () => {
 
       expect(args).toContain("OP_SERVICE_ACCOUNT_TOKEN=test-op-token");
       expect(args).toContain("CLAW_1PASSWORD_VAULT=Engineering");
+      expect(args).toContain("CLAW_1PASSWORD_OP=/home/node/.openclaw/bin/op-wrapper");
     } finally {
       if (previousToken === undefined) {
         delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
@@ -428,7 +429,7 @@ describe("local 1Password SecretRef wiring", () => {
     }
   });
 
-  it("auto-installs the 1Password plugin for local containers", () => {
+  it("does not install the bundled 1Password plugin for local containers", () => {
     const plan = localPluginsTesting.localPluginInstallPlan({
       mode: "local",
       agentName: "demo",
@@ -436,7 +437,19 @@ describe("local 1Password SecretRef wiring", () => {
       onePasswordSecretsEnabled: true,
     });
 
-    expect(plan.specs).toEqual(["git:github.com/sallyom/claw-1password"]);
+    expect(plan.specs).toEqual([]);
+  });
+
+  it("installs the local 1Password CLI wrapper into OpenClaw state", () => {
+    const copyScript = localTesting.localOnePasswordCliCopyScript();
+    const wrapperScript = localTesting.localOnePasswordCliWrapperScript();
+
+    expect(copyScript).toContain("op_path=$(command -v op)");
+    expect(copyScript).toContain("cp \"$op_path\" /home/node/.openclaw/bin/op");
+    expect(copyScript).toContain("/home/node/.openclaw/bin/op --version");
+    expect(wrapperScript).toContain("exec /home/node/.openclaw/bin/op --config /home/node/.config/op \"$@\"");
+    expect(wrapperScript).toContain("/home/node/.openclaw/bin/op-wrapper --version");
+    expect(wrapperScript).toContain("chown 1000:1000 /home/node/.openclaw/bin");
   });
 });
 

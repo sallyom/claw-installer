@@ -690,7 +690,7 @@ describe("gateway env vars in proxy mode", () => {
     expect(envNames).not.toContain("VAULT_TOKEN");
   });
 
-  it("installs the 1Password plugin and injects its token Secret", () => {
+  it("uses the bundled 1Password plugin and injects its token Secret", () => {
     const config = makeConfig({
       onePasswordSecretsEnabled: true,
       onePasswordVault: "Engineering",
@@ -715,7 +715,7 @@ describe("gateway env vars in proxy mode", () => {
         { name: "tmp-volume", mountPath: "/tmp" },
       ]),
     );
-    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-1password' --force");
+    expect(pluginInit).toBeUndefined();
     expect(env.CLAW_1PASSWORD_VAULT).toBe("Engineering");
     expect(env.CLAW_1PASSWORD_OP).toBe("/home/node/.openclaw/bin/openclaw-op");
     expect(gatewayEnv(deployment, "OP_SERVICE_ACCOUNT_TOKEN")?.valueFrom?.secretKeyRef).toEqual({
