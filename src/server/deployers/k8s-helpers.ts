@@ -33,7 +33,7 @@ import {
 } from "./openclaw-compat.js";
 
 export const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "ghcr.io/openclaw/openclaw:latest";
-export const DEFAULT_OPENSHELL_IMAGE = process.env.OPENCLAW_OPENSHELL_IMAGE || "quay.io/sallyom/openclaw:latest";
+export const DEFAULT_OPENSHELL_IMAGE = process.env.OPENCLAW_OPENSHELL_IMAGE || "quay.io/sallyom/openclaw-openshell:latest";
 export const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || DEFAULT_IMAGE;
 export const CUSTOM_ENDPOINT_PROVIDER = "endpoint";
 export const KEYLESS_ENDPOINT_PLACEHOLDER = "no-key-required";

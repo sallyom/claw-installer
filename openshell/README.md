@@ -49,7 +49,7 @@ reuses OpenShell sandboxes for risky runtime work.
 Use an OpenClaw image that includes the OpenShell CLI at `/opt/openshell/bin/openshell`. For this PoC, the Kubernetes/OpenShift installer defaults OpenShell sandbox deployments to:
 
 ```text
-quay.io/sallyom/openclaw:latest
+quay.io/sallyom/openclaw-openshell:latest
 ```
 
 Build a CLI-bearing image from the default PoC base:

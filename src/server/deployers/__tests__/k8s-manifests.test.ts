@@ -125,8 +125,8 @@ describe("k8s state sync manifests", () => {
     const gatewayContainer = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
     const volumes = deployment.spec?.template.spec?.volumes ?? [];
 
-    expect(pluginInit?.image).toBe("quay.io/sallyom/openclaw:latest");
-    expect(gatewayContainer?.image).toBe("quay.io/sallyom/openclaw:latest");
+    expect(pluginInit?.image).toBe("quay.io/sallyom/openclaw-openshell:latest");
+    expect(gatewayContainer?.image).toBe("quay.io/sallyom/openclaw-openshell:latest");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/openshell-sandbox' --force");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list | grep -q openshell");
     expect(initContainers.find((container) => container.name === "install-openshell-plugin")).toBeUndefined();
