@@ -61,7 +61,7 @@ openshell Helm release: openshell-<user>
 openclaw namespace: openclaw-<user>
 OpenShell version: discover latest release before install; pinned fallback 0.0.44
 OpenShell values: openshell/configs/openshell-values-openshift.yaml
-OpenClaw image: quay.io/sallyom/openclaw:latest
+OpenClaw image: quay.io/sallyom/openclaw-openshell:latest
 OpenShell sandbox image: quay.io/sallyom/openclaw-openshell-sandbox:latest
 OpenShell endpoint: http://openshell-<user>.openshell-<user>.svc.cluster.local:8080
 sandbox backend: openshell
@@ -196,7 +196,7 @@ Required OpenClaw deploy values:
 ```text
 mode: kubernetes/OpenShift
 namespace: openclaw-<user>
-image: CLI-bearing OpenClaw image, default quay.io/sallyom/openclaw:latest
+image: CLI-bearing OpenClaw image, default quay.io/sallyom/openclaw-openshell:latest
 sandbox enabled: true
 sandbox backend: openshell
 OpenShell gateway endpoint: http://openshell-<user>.openshell-<user>.svc.cluster.local:8080
@@ -222,7 +222,7 @@ Minimal OpenShell fields for the POST body:
   "agentName": "<user>",
   "agentDisplayName": "<User>",
   "namespace": "openclaw-<user>",
-  "image": "quay.io/sallyom/openclaw:latest",
+  "image": "quay.io/sallyom/openclaw-openshell:latest",
   "sandboxEnabled": true,
   "sandboxMode": "all",
   "sandboxScope": "session",

@@ -3,7 +3,7 @@
 # This image carries the OS tools and OpenShell CLI needed by the OpenShell
 # sandbox plugin. The plugin itself is installed into the PVC-backed OpenClaw
 # home by the Kubernetes deployer so it is not hidden by the /home/node mount.
-ARG OPENCLAW_BASE_IMAGE=quay.io/sallyom/openclaw:latest
+ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:latest
 FROM ${OPENCLAW_BASE_IMAGE}
 
 ARG OPENSHELL_CLI_VERSION=0.0.44

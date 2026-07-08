@@ -209,7 +209,7 @@ describe("model config generation", () => {
     expect(defaultImage(makeConfig({
       sandboxEnabled: true,
       sandboxBackend: "openshell",
-    }))).toBe("quay.io/sallyom/openclaw:latest");
+    }))).toBe("quay.io/sallyom/openclaw-openshell:latest");
   });
 
   it("renders OpenShell sandbox plugin config for cluster deployments", () => {
