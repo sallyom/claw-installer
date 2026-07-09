@@ -42,7 +42,7 @@ describe("parseSavedLocalInstanceConfig", () => {
         { secretName: "gemini_api_key", targetEnv: "GEMINI_API_KEY" },
         { secretName: "openrouter_api_key", targetEnv: "OPENROUTER_API_KEY" },
       ],
-      pluginInstallSpecs: ["git:github.com/sallyom/claw-vault", "/app/extensions/vault"],
+      pluginInstallSpecs: ["git:github.com/example/custom-openclaw-plugin", "/app/extensions/custom"],
       localFileOwner: "501:20",
     });
 
@@ -70,7 +70,7 @@ describe("parseSavedLocalInstanceConfig", () => {
       { secretName: "gemini_api_key", targetEnv: "GEMINI_API_KEY" },
       { secretName: "openrouter_api_key", targetEnv: "OPENROUTER_API_KEY" },
     ]);
-    expect(parsed.pluginInstallSpecs).toEqual(["git:github.com/sallyom/claw-vault", "/app/extensions/vault"]);
+    expect(parsed.pluginInstallSpecs).toEqual(["git:github.com/example/custom-openclaw-plugin", "/app/extensions/custom"]);
     expect(parsed.localFileOwner).toBe("501:20");
   });
 

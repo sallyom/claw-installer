@@ -21,7 +21,7 @@ export function PluginInstallSection({ config, update }: PluginInstallSectionPro
           <label>Plugins to Install (optional)</label>
           <textarea
             rows={4}
-            placeholder={`git:github.com/sallyom/claw-vault\n@openclaw/openshell-sandbox`}
+            placeholder={`@openclaw/openshell-sandbox\n/app/extensions/custom-plugin`}
             value={config.pluginInstallSpecsText}
             onChange={(e) => update("pluginInstallSpecsText", e.target.value)}
           />

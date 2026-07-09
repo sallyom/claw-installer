@@ -168,7 +168,7 @@ describe("k8s state sync manifests", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
-        pluginInstallSpecs: ["git:github.com/sallyom/claw-vault", "/app/extensions/vault"],
+        pluginInstallSpecs: ["git:github.com/example/custom-openclaw-plugin", "/app/extensions/custom"],
       }),
     );
 
@@ -176,8 +176,8 @@ describe("k8s state sync manifests", () => {
     const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
 
     expect(pluginInit?.image).toBe("ghcr.io/openclaw/openclaw:latest");
-    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-vault' --force");
-    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '/app/extensions/vault' --force");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/example/custom-openclaw-plugin' --force");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '/app/extensions/custom' --force");
     expect(pluginInit?.command?.[2]).toContain("continuing. Run openclaw doctor after install.");
     expect(pluginInit?.command?.[2]).not.toContain("vault-secret-ref-resolver.js");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list || true");
@@ -196,7 +196,7 @@ describe("k8s state sync manifests", () => {
     );
   });
 
-  it("installs the Vault plugin when Vault SecretRefs are enabled", () => {
+  it("does not install the bundled Vault plugin when Vault SecretRefs are enabled", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
@@ -207,7 +207,7 @@ describe("k8s state sync manifests", () => {
     const initContainers = deployment.spec?.template.spec?.initContainers ?? [];
     const pluginInit = initContainers.find((container) => container.name === "install-openclaw-plugins");
 
-    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install 'git:github.com/sallyom/claw-vault' --force");
+    expect(pluginInit).toBeUndefined();
   });
 
   it("installs the Anthropic Vertex provider plugin for direct Claude Vertex mode", () => {
