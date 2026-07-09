@@ -564,6 +564,35 @@ _wait_cert_manager_ready() {
   log_success "cert-manager is ready"
 }
 
+_apply_keycloak_cr() {
+  if $DRY_RUN; then return; fi
+
+  log_info "Applying Keycloak CR..."
+  $KUBECTL apply -f - <<EOF
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: ${KC_NAMESPACE}
+spec:
+  instances: 1
+  db:
+    vendor: postgres
+    host: postgres-kc
+    usernameSecret:
+      name: keycloak-db-secret
+      key: username
+    passwordSecret:
+      name: keycloak-db-secret
+      key: password
+  hostname:
+    hostname: keycloak-${KC_NAMESPACE}.${DOMAIN}
+  http:
+    httpEnabled: true
+EOF
+  log_success "Keycloak CR applied"
+}
+
 _apply_kagenti_deps_hook_resources() {
   if $DRY_RUN; then return; fi
 
@@ -850,6 +879,7 @@ _helm_kagenti_deps() {
       --set components.certManager.enabled="${cert_manager_enabled}" \
       --no-hooks
     _apply_kagenti_deps_hook_resources
+    _apply_keycloak_cr
     _wait_kagenti_deps_ready
     return $?
   fi
@@ -872,6 +902,7 @@ _helm_kagenti_deps() {
 
   # Apply operand CRs that --no-hooks skipped (excluding the conflicting ConfigMap).
   _apply_kagenti_deps_hook_resources
+  _apply_keycloak_cr
   # Create otel-ingress-ca ConfigMap (normally done by pre-install hook Job,
   # skipped by --no-hooks). MLflow and OTEL collector need this to verify
   # Keycloak's TLS certificate via the OpenShift ingress CA.
@@ -1186,17 +1217,94 @@ log_success "Kagenti installed"
 echo ""
 
 # ============================================================================
-# Step 5: Deploy Kagenti namespace controller
+# Step 5: Create ZTWIM/SPIRE operand CRs
 # ============================================================================
-log_info "Step 5: Deploy Kagenti namespace controller"
+log_info "Step 5: Create ZTWIM/SPIRE operand CRs"
+
+_apply_spire_operand_crs() {
+  if $DRY_RUN; then return; fi
+
+  log_info "Applying SPIRE operand CRs..."
+  $KUBECTL apply -f - <<EOF
+apiVersion: spire.openshift.io/v1alpha1
+kind: ZeroTrustWorkloadIdentityManager
+metadata:
+  name: cluster
+spec: {}
+---
+apiVersion: spire.openshift.io/v1alpha1
+kind: SpireServer
+metadata:
+  name: cluster
+spec:
+  caSubject:
+    country: US
+    organization: SPIRE
+    commonName: spire-ca
+  datastore:
+    type: sqlite3
+  jwtIssuer: https://oidc-discovery-spire-server.${DOMAIN}
+  persistence:
+    size: 1Gi
+---
+apiVersion: spire.openshift.io/v1alpha1
+kind: SpireAgent
+metadata:
+  name: cluster
+spec:
+  nodeAttestor:
+    k8sPSATEnabled: true
+  workloadAttestors:
+    k8sEnabled: true
+---
+apiVersion: spire.openshift.io/v1alpha1
+kind: SpiffeCSIDriver
+metadata:
+  name: cluster
+spec: {}
+---
+apiVersion: spire.openshift.io/v1alpha1
+kind: SpireOIDCDiscoveryProvider
+metadata:
+  name: cluster
+spec:
+  jwtIssuer: https://oidc-discovery-spire-server.${DOMAIN}
+EOF
+  log_success "SPIRE operand CRs applied"
+
+  log_info "Waiting for SPIRE agents to be Running..."
+  local tries=0
+  while true; do
+    local not_running
+    not_running=$($KUBECTL get pods -l app=spire-agent -A --no-headers 2>/dev/null \
+      | grep -v Running | wc -l || echo "999")
+    if [ "$not_running" -eq 0 ] && $KUBECTL get pods -l app=spire-agent -A --no-headers 2>/dev/null | grep -q .; then
+      break
+    fi
+    tries=$((tries + 1))
+    if [ $tries -ge 60 ]; then
+      log_warn "SPIRE agents not all Running after 5m"
+      break
+    fi
+    sleep 5
+  done
+  log_success "SPIRE operand CRs ready"
+}
+_apply_spire_operand_crs
+echo ""
+
+# ============================================================================
+# Step 6: Deploy Kagenti namespace controller
+# ============================================================================
+log_info "Step 6: Deploy Kagenti namespace controller"
 
 _deploy_kagenti_namespace_controller
 echo ""
 
 # ============================================================================
-# Step 6: Install MCP Gateway
+# Step 7: Install MCP Gateway
 # ============================================================================
-log_info "Step 6: Install MCP Gateway"
+log_info "Step 7: Install MCP Gateway"
 
 if $SKIP_MCP_GATEWAY; then
   log_info "Skipped (--skip-mcp-gateway)"
@@ -1211,9 +1319,9 @@ fi
 echo ""
 
 # ============================================================================
-# Step 7: Verify Helm releases
+# Step 8: Verify Helm releases
 # ============================================================================
-log_info "Step 7: Verify Helm releases"
+log_info "Step 8: Verify Helm releases"
 echo ""
 
 VERIFY_FAILED=false
@@ -1249,9 +1357,9 @@ if $VERIFY_FAILED; then
 fi
 
 # ============================================================================
-# Step 7: Show access info
+# Step 9: Show access info
 # ============================================================================
-log_info "Step 7: Access info"
+log_info "Step 9: Access info"
 echo ""
 
 log_info "Kagenti pods:"
