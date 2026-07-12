@@ -583,7 +583,7 @@ export class KubernetesDeployer implements Deployer {
 
       try {
         const tPf = performance.now();
-        const { url } = await ensureK8sPortForward(ns);
+        const { url } = await ensureK8sPortForward(ns, result.config.mcpAppsEnabled === true);
         debugPerf(`[perf]         portForward(${ns}): ${(performance.now() - tPf).toFixed(0)}ms`);
 
         // Skip the HTTP probe if gateway was already confirmed healthy

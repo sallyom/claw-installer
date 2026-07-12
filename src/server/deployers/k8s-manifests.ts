@@ -23,6 +23,7 @@ import {
 } from "./vault-helper.js";
 import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
 import { OPEN_SHELL_POLICY_PATH, OPEN_SHELL_POLICY_YAML } from "./sandbox.js";
+import { MCP_APPS_SANDBOX_PORT } from "./mcp-apps.js";
 
 export const OPENCLAW_HOME_VOLUME_MOUNT = "/home/node";
 export const OPENCLAW_RUNTIME_HOME = OPENCLAW_HOME_VOLUME_MOUNT;
@@ -549,6 +550,11 @@ export function serviceManifest(ns: string, config: DeployConfig): k8s.V1Service
             ]
           : []),
         { name: "gateway", port: 18789, targetPort: 18789 as unknown as k8s.IntOrString, protocol: "TCP" },
+        ...(config.mcpAppsEnabled
+          ? [
+              { name: "mcp-apps", port: MCP_APPS_SANDBOX_PORT, targetPort: MCP_APPS_SANDBOX_PORT as unknown as k8s.IntOrString, protocol: "TCP" as const },
+            ]
+          : []),
         ...(withA2a
           ? [
               { name: "bridge", port: 18790, targetPort: 18790 as unknown as k8s.IntOrString, protocol: "TCP" as const },
@@ -837,6 +843,9 @@ export function deploymentManifest(
               command: ["sh", "-c", gatewayStartupScript(useOpenShell, managedAgentIds)],
               ports: [
                 { name: "gateway", containerPort: 18789, protocol: "TCP" },
+                ...(config.mcpAppsEnabled
+                  ? [{ name: "mcp-apps", containerPort: MCP_APPS_SANDBOX_PORT, protocol: "TCP" as const }]
+                  : []),
                 ...(withA2a ? [{ name: "bridge", containerPort: 18790, protocol: "TCP" as const }] : []),
               ],
               env: envVars,

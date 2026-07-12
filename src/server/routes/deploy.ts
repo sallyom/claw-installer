@@ -21,6 +21,7 @@ import {
 import { deploymentRateLimit } from "../rate-limit.js";
 import { isDeployModeAllowed } from "../installer-mode.js";
 import { hostedUserPrefix } from "../hosted-auth.js";
+import { loadAgentSourceMcpAppsEnabled } from "../deployers/agent-source.js";
 
 const router = Router();
 
@@ -539,6 +540,13 @@ router.post("/", deploymentRateLimit, async (req, res) => {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
       return;
     }
+  }
+  config.mcpAppsEnabled = loadAgentSourceMcpAppsEnabled(config.agentSourceDir);
+  if (config.mcpAppsEnabled && config.withA2a) {
+    res.status(400).json({
+      error: "MCP Apps and A2A cannot be enabled together because both require port 18790",
+    });
+    return;
   }
 
   // Default prefix to OS username

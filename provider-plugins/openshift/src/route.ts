@@ -50,7 +50,74 @@ export async function applyRoute(ns: string, log: LogCallback, withOauth = false
   log("Route openclaw applied");
 }
 
+export async function applyMcpAppsRoute(ns: string, log: LogCallback): Promise<void> {
+  const customApi = loadKubeConfig().makeApiClient(k8s.CustomObjectsApi);
+  const routeParams = {
+    group: "route.openshift.io",
+    version: "v1",
+    namespace: ns,
+    plural: "routes",
+    name: "openclaw-mcp-apps",
+  };
+  const route = mcpAppsRouteManifest(ns);
+  let existingRoute: Record<string, unknown> | undefined;
+  try {
+    existingRoute = await customApi.getNamespacedCustomObject(routeParams) as Record<string, unknown>;
+  } catch {
+    // Create below.
+  }
+  if (existingRoute) {
+    const existingMetadata = existingRoute.metadata as Record<string, unknown> | undefined;
+    const existingSpec = existingRoute.spec as Record<string, unknown> | undefined;
+    await customApi.replaceNamespacedCustomObject({
+      ...routeParams,
+      body: {
+        ...existingRoute,
+        ...route,
+        metadata: { ...existingMetadata, ...route.metadata },
+        spec: { ...existingSpec, ...route.spec },
+      },
+    });
+    log("Route openclaw-mcp-apps updated");
+    return;
+  }
+  await customApi.createNamespacedCustomObject({
+    group: routeParams.group,
+    version: routeParams.version,
+    namespace: ns,
+    plural: routeParams.plural,
+    body: route,
+  });
+  log("Route openclaw-mcp-apps applied");
+}
+
+export function mcpAppsRouteManifest(ns: string) {
+  return {
+    apiVersion: "route.openshift.io/v1",
+    kind: "Route",
+    metadata: {
+      name: "openclaw-mcp-apps",
+      namespace: ns,
+      labels: { app: "openclaw" },
+    },
+    spec: {
+      path: "/mcp-app-sandbox",
+      to: { kind: "Service", name: "openclaw", weight: 100 },
+      port: { targetPort: "mcp-apps" },
+      tls: { termination: "edge", insecureEdgeTerminationPolicy: "Redirect" },
+    },
+  };
+}
+
 export async function getRouteUrl(ns: string): Promise<string> {
+  return getNamedRouteUrl(ns, "openclaw");
+}
+
+export async function getMcpAppsRouteUrl(ns: string): Promise<string> {
+  return getNamedRouteUrl(ns, "openclaw-mcp-apps");
+}
+
+async function getNamedRouteUrl(ns: string, name: string): Promise<string> {
   try {
     const kc = loadKubeConfig();
     const customApi = kc.makeApiClient(k8s.CustomObjectsApi);
@@ -59,7 +126,7 @@ export async function getRouteUrl(ns: string): Promise<string> {
       version: "v1",
       namespace: ns,
       plural: "routes",
-      name: "openclaw",
+      name,
     });
     const spec = (result as Record<string, unknown>).spec as Record<string, unknown> | undefined;
     const host = spec?.host as string | undefined;
@@ -70,10 +137,18 @@ export async function getRouteUrl(ns: string): Promise<string> {
   return "";
 }
 
+export async function deleteMcpAppsRoute(ns: string, log: LogCallback): Promise<void> {
+  await deleteNamedRoute(ns, "openclaw-mcp-apps", log);
+}
+
 /**
  * Delete the Route (BUG FIX: claw-installer teardown did not delete Routes).
  */
 export async function deleteRoute(ns: string, log: LogCallback): Promise<void> {
+  await deleteNamedRoute(ns, "openclaw", log);
+}
+
+async function deleteNamedRoute(ns: string, name: string, log: LogCallback): Promise<void> {
   try {
     const kc = loadKubeConfig();
     const customApi = kc.makeApiClient(k8s.CustomObjectsApi);
@@ -82,9 +157,9 @@ export async function deleteRoute(ns: string, log: LogCallback): Promise<void> {
       version: "v1",
       namespace: ns,
       plural: "routes",
-      name: "openclaw",
+      name,
     });
-    log("Deleted Route openclaw");
+    log(`Deleted Route ${name}`);
   } catch {
     // Route may not exist
   }

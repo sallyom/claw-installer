@@ -7,6 +7,7 @@ type PortForwardProcess = ChildProcessByStdio<null, Readable, Readable>;
 type ManagedPortForward = {
   namespace: string;
   localPort: number;
+  mcpAppsEnabled: boolean;
   process: PortForwardProcess;
   ready: Promise<number>;
 };
@@ -59,11 +60,18 @@ function waitForPort(localPort: number, timeoutMs = 10000): Promise<void> {
   });
 }
 
-async function startPortForward(namespace: string): Promise<ManagedPortForward> {
+async function startPortForward(namespace: string, mcpAppsEnabled: boolean): Promise<ManagedPortForward> {
   const localPort = await getFreePort();
   const child = spawn(
     "kubectl",
-    ["port-forward", "svc/openclaw", `${localPort}:18789`, "-n", namespace],
+    [
+      "port-forward",
+      "svc/openclaw",
+      `${localPort}:18789`,
+      ...(mcpAppsEnabled ? ["18790:18790"] : []),
+      "-n",
+      namespace,
+    ],
     {
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -90,6 +98,7 @@ async function startPortForward(namespace: string): Promise<ManagedPortForward> 
   const managed: ManagedPortForward = {
     namespace,
     localPort,
+    mcpAppsEnabled,
     process: child,
     ready,
   };
@@ -107,8 +116,16 @@ async function startPortForward(namespace: string): Promise<ManagedPortForward> 
   return managed;
 }
 
-export async function ensureK8sPortForward(namespace: string): Promise<{ localPort: number; url: string }> {
-  const existing = portForwards.get(namespace);
+export async function ensureK8sPortForward(
+  namespace: string,
+  mcpAppsEnabled = false,
+): Promise<{ localPort: number; url: string }> {
+  let existing = portForwards.get(namespace);
+  if (existing && existing.mcpAppsEnabled !== mcpAppsEnabled) {
+    existing.process.kill();
+    portForwards.delete(namespace);
+    existing = undefined;
+  }
   if (existing) {
     await existing.ready;
     return {
@@ -117,7 +134,7 @@ export async function ensureK8sPortForward(namespace: string): Promise<{ localPo
     };
   }
 
-  const managed = await startPortForward(namespace);
+  const managed = await startPortForward(namespace, mcpAppsEnabled);
   portForwards.set(namespace, managed);
   const localPort = await managed.ready;
   return {

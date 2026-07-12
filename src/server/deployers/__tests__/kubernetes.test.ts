@@ -112,7 +112,7 @@ describe("KubernetesDeployer.status", () => {
     const deployer = new KubernetesDeployer();
     const result = await deployer.status(baseResult);
 
-    expect(ensureK8sPortForward).toHaveBeenCalledWith("user-lynx-openclaw");
+    expect(ensureK8sPortForward).toHaveBeenCalledWith("user-lynx-openclaw", false);
     expect(result.status).toBe("running");
     expect(result.url).toBe("http://localhost:40123");
   });

@@ -66,6 +66,19 @@ kubectl port-forward svc/openclaw 18789:18789 -n <namespace>
 
 Then visit `http://localhost:18789`.
 
+When the Agent Source `mcp.json` contains `"mcpAppsEnabled": true`, the
+generated config and Service also expose the isolated sandbox listener on
+`18790`. The installer-managed **Open** action forwards both ports. For manual
+access, forward both ports:
+
+```bash
+kubectl port-forward svc/openclaw 18789:18789 18790:18790 -n <namespace>
+```
+
+MCP Apps are globally enabled for the instance, not per server. Set the Agent
+Source flag only when every enabled MCP server is trusted. MCP Apps cannot be
+combined with A2A because both currently reserve port `18790`.
+
 ## Sandbox
 
 For Kubernetes deployments, the installer supports both SSH and OpenShell sandbox backends.

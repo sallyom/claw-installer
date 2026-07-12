@@ -198,6 +198,7 @@ Try:
 
 - `demos/builder-research-ops-no-sandbox`
 - `demos/builder-research-ops-ssh-sandbox`
+- `demos/mcp-apps-example`
 - `demos/software-qa-mcp`
 
 This demo includes:
@@ -238,6 +239,11 @@ The installer supports provisioning MCP servers through the Agent Source Directo
 ```
 
 The installer merges these into the generated `openclaw.json` at deploy time.
+For trusted MCP App servers, add `"mcpAppsEnabled": true` alongside
+`mcpServers`. The installer then configures and exposes the isolated MCP Apps
+sandbox listener automatically; no separate form setting is required. Omit the
+field for ordinary MCP servers, and set it only when every configured server is
+trusted to supply interactive UI.
 
 For tool approval policies, add an `exec-approvals.json`:
 
@@ -254,7 +260,8 @@ For tool approval policies, add an `exec-approvals.json`:
 
 This file is copied directly to `~/.openclaw/exec-approvals.json` in the deployed instance.
 
-See `demos/software-qa-mcp` for a complete example.
+See `demos/software-qa-mcp` for a documentation-server example and
+`demos/mcp-apps-example` for an interactive MCP Apps showcase.
 
 ## Agent Workspaces
 

@@ -123,6 +123,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     modelFallbacks: decodeSavedJson(savedVars.MODEL_FALLBACKS_B64),
     openaiCompatibleEndpointsEnabled:
       savedVars.OPENAI_COMPATIBLE_ENDPOINTS_ENABLED === "false" ? false : undefined,
+    mcpAppsEnabled: savedVars.MCP_APPS_ENABLED === "true" || undefined,
     modelEndpoint: savedVars.MODEL_ENDPOINT || undefined,
     modelEndpointApiKey: savedVars.MODEL_ENDPOINT_API_KEY || undefined,
     modelEndpointModel: savedVars.MODEL_ENDPOINT_MODEL || undefined,

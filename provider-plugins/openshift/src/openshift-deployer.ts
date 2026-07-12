@@ -6,11 +6,27 @@ import type {
   DeployResult,
   LogCallback,
 } from "../../../src/server/deployers/types.js";
-import { namespaceName } from "../../../src/server/deployers/k8s-helpers.js";
+import { defaultImage, namespaceName } from "../../../src/server/deployers/k8s-helpers.js";
 import { coreApi, appsApi, k8sApiHttpCode, loadKubeConfig } from "../../../src/server/services/k8s.js";
-import { oauthServiceAccount, oauthConfigSecret, oauthProxyContainer } from "./oauth-proxy.js";
-import { applyRoute, getRouteUrl, deleteRoute } from "./route.js";
+import {
+  mcpAppsSandboxProxyContainer,
+  oauthServiceAccount,
+  oauthConfigSecret,
+  oauthProxyContainer,
+} from "./oauth-proxy.js";
+import {
+  applyMcpAppsRoute,
+  applyRoute,
+  deleteMcpAppsRoute,
+  deleteRoute,
+  getMcpAppsRouteUrl,
+  getRouteUrl,
+} from "./route.js";
 import { shouldUseOtel } from "../../../src/server/deployers/otel.js";
+import {
+  MCP_APPS_OPENSHIFT_PROXY_PORT,
+  MCP_APPS_SANDBOX_PORT,
+} from "../../../src/server/deployers/mcp-apps.js";
 
 // ── Helper: apply or update a resource ─────────────────────────────
 
@@ -300,6 +316,9 @@ export class OpenShiftDeployer implements Deployer {
             ? [{ name: "a2a", port: 8080, targetPort: "a2a" as unknown as k8s.IntOrString, protocol: "TCP" as const }]
             : []),
           { name: "gateway", port: 18789, targetPort: 18789 as unknown as k8s.IntOrString, protocol: "TCP" },
+          ...(config.mcpAppsEnabled
+            ? [{ name: "mcp-apps", port: MCP_APPS_OPENSHIFT_PROXY_PORT, targetPort: MCP_APPS_OPENSHIFT_PROXY_PORT as unknown as k8s.IntOrString, protocol: "TCP" as const }]
+            : []),
           ...(config.withA2a
             ? [{ name: "bridge", port: 18790, targetPort: 18790 as unknown as k8s.IntOrString, protocol: "TCP" as const }]
             : []),
@@ -315,6 +334,14 @@ export class OpenShiftDeployer implements Deployer {
     await applyRoute(ns, log, true);
     const routeUrl = await getRouteUrl(ns);
     if (routeUrl) log(`Route URL: ${routeUrl}`);
+    let mcpAppsRouteUrl = "";
+    if (config.mcpAppsEnabled) {
+      await applyMcpAppsRoute(ns, log);
+      mcpAppsRouteUrl = await getMcpAppsRouteUrl(ns);
+      if (mcpAppsRouteUrl) log(`MCP Apps sandbox URL: ${mcpAppsRouteUrl}`);
+    } else {
+      await deleteMcpAppsRoute(ns, log);
+    }
 
     // 3c. Patch ConfigMap — update openclaw.json with routeUrl for allowedOrigins
     if (routeUrl) {
@@ -327,6 +354,14 @@ export class OpenShiftDeployer implements Deployer {
           // Set allowedOrigins to include the Route URL
           if (parsed.gateway?.controlUi) {
             parsed.gateway.controlUi.allowedOrigins = [routeUrl];
+          }
+          if (config.mcpAppsEnabled && mcpAppsRouteUrl) {
+            parsed.mcp ||= {};
+            parsed.mcp.apps = {
+              enabled: true,
+              sandboxPort: MCP_APPS_SANDBOX_PORT,
+              sandboxOrigin: mcpAppsRouteUrl,
+            };
           }
           // NOTE: we intentionally do NOT set gateway.trustedProxies here.
           // Setting trustedProxies to ["127.0.0.1", "::1"] causes the gateway
@@ -357,6 +392,7 @@ export class OpenShiftDeployer implements Deployer {
 
     // 3d. Patch Deployment — add oauth-proxy sidecar, serviceAccountName, volumes, loopback bind
     const oauthContainer = oauthProxyContainer(ns);
+    const gatewayImage = defaultImage(config);
     const deployPatch = [
       // Add serviceAccountName
       { op: "add", path: "/spec/template/spec/serviceAccountName", value: "openclaw-oauth-proxy" },
@@ -371,6 +407,13 @@ export class OpenShiftDeployer implements Deployer {
       },
       // Add oauth-proxy container at the beginning
       { op: "add", path: "/spec/template/spec/containers/0", value: oauthContainer },
+      ...(config.mcpAppsEnabled
+        ? [{
+            op: "add",
+            path: "/spec/template/spec/containers/-",
+            value: mcpAppsSandboxProxyContainer(gatewayImage),
+          }]
+        : []),
       // Add OAuth volumes
       {
         op: "add",
@@ -442,6 +485,7 @@ export class OpenShiftDeployer implements Deployer {
     // Delete OpenShift-specific resources before delegating to K8s teardown
     // BUG FIX: Route deletion was missing in claw-installer
     await deleteRoute(ns, log);
+    await deleteMcpAppsRoute(ns, log);
 
     // Delete OAuth-specific secrets
     for (const name of ["openclaw-oauth-config", "openclaw-proxy-tls"]) {

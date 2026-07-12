@@ -83,6 +83,7 @@ import { loadAgentSourceBundle, loadAgentSourceMcpServers, mainWorkspaceShellCon
 import { buildPodmanSecretRunArgs, hasPodmanSecretTarget } from "../../shared/podman-secrets.js";
 import { buildAgentJson, buildDefaultAgentsMd } from "./local-agent-files.js";
 import { installLocalPlugins } from "./local-plugins.js";
+import { MCP_APPS_SANDBOX_PORT, mcpAppsPortPublishArgs } from "./mcp-apps.js";
 import {
   bindMountSpec,
   localGatewayUserArgs,
@@ -97,6 +98,13 @@ export { parseContainerRunArgs, redactCommandArgs, runtimeOwnershipFixupCommand 
 const DEFAULT_IMAGE = process.env.OPENCLAW_IMAGE || "ghcr.io/openclaw/openclaw:latest";
 const DEFAULT_VERTEX_IMAGE = process.env.OPENCLAW_VERTEX_IMAGE || DEFAULT_IMAGE;
 const DEFAULT_PORT = 18789;
+
+function localLitellmHostPort(config: DeployConfig, gatewayPort: number): number {
+  const preferred = gatewayPort + 1;
+  return config.mcpAppsEnabled && preferred === MCP_APPS_SANDBOX_PORT
+    ? preferred + 1
+    : preferred;
+}
 
 export function resolveLocalRuntimeModelEndpoint(endpoint: string, runtime?: ContainerRuntime | string): string {
   return resolveEndpointForContainer(endpoint, runtime);
@@ -198,6 +206,16 @@ function gatewayRuntimeConfigUpdateScript(
 ): string {
   const fallbackB64 = Buffer.from(fallbackConfig).toString("base64");
   return `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';let c;try{c=JSON.parse(fs.readFileSync(p,'utf8'))}catch(err){const backup=p+'.invalid-'+Date.now()+'.bak';try{fs.copyFileSync(p,backup);console.error('WARNING: existing OpenClaw config could not be parsed as JSON; backed it up to '+backup+' and regenerated deploy config: '+err.message)}catch(copyErr){console.error('WARNING: existing OpenClaw config could not be parsed as JSON and backup failed: '+copyErr.message)}c=JSON.parse(Buffer.from('${fallbackB64}','base64').toString('utf8'))}c.gateway ||= {};c.gateway.mode ||= 'local';c.gateway.http ||= {};c.gateway.http.endpoints ||= {};c.gateway.http.endpoints.chatCompletions={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.http.endpoints.responses={enabled:${openaiCompatibleEndpointsEnabled}};c.gateway.controlUi ||= {};const origins=new Set(['http://localhost:${port}','http://127.0.0.1:${port}']);for(const o of Array.isArray(c.gateway.controlUi.allowedOrigins)?c.gateway.controlUi.allowedOrigins:[]){if(typeof o==='string'&&!/^http:\\/\\/(?:localhost|127\\.0\\.0\\.1):\\d+$/.test(o))origins.add(o)}c.gateway.controlUi.allowedOrigins=[...origins];fs.writeFileSync(p,JSON.stringify(c,null,2))"`;
+}
+
+function mcpAppsRuntimeConfigUpdateScript(enabled: boolean): string {
+  return `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.mcp ||= {};if(${enabled})c.mcp.apps={enabled:true,sandboxPort:${MCP_APPS_SANDBOX_PORT}};else{delete c.mcp.apps;if(Object.keys(c.mcp).length===0)delete c.mcp}fs.writeFileSync(p,JSON.stringify(c,null,2))"`;
+}
+
+function mcpServersRuntimeConfigUpdateScript(servers?: Record<string, unknown>): string {
+  if (!servers) return "true";
+  const serversB64 = Buffer.from(JSON.stringify(servers)).toString("base64");
+  return `node -e "const fs=require('fs');const p='/home/node/.openclaw/openclaw.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.mcp ||= {};c.mcp.servers=JSON.parse(Buffer.from('${serversB64}','base64').toString('utf8'));fs.writeFileSync(p,JSON.stringify(c,null,2))"`;
 }
 
 /** Returns true if the image tag is `:latest` or absent — mutable tags that should always be pulled. */
@@ -391,6 +409,7 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     lines.push(`MODEL_FALLBACKS_B64=${encodeEnvValue(JSON.stringify(config.modelFallbacks))}`);
   }
   lines.push(`OPENAI_COMPATIBLE_ENDPOINTS_ENABLED=${config.openaiCompatibleEndpointsEnabled !== false}`);
+  lines.push(`MCP_APPS_ENABLED=${config.mcpAppsEnabled === true}`);
   if (config.modelEndpoint) {
     lines.push(`MODEL_ENDPOINT=${config.modelEndpoint}`);
   }
@@ -1201,8 +1220,13 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   }
 
   const mcpServers = loadAgentSourceMcpServers(config.agentSourceDir);
-  if (mcpServers) {
-    ocConfig.mcp = { servers: mcpServers };
+  if (mcpServers || config.mcpAppsEnabled) {
+    ocConfig.mcp = {
+      ...(mcpServers ? { servers: mcpServers } : {}),
+      ...(config.mcpAppsEnabled
+        ? { apps: { enabled: true, sandboxPort: MCP_APPS_SANDBOX_PORT } }
+        : {}),
+    };
   }
 
   attachCodexOauthConfig(ocConfig, config);
@@ -1264,6 +1288,7 @@ export const __testing = {
   gatewayRuntimeConfigUpdateScript,
   localRuntimeHomeInitCommand,
   localStateMountArgs,
+  mcpServersRuntimeConfigUpdateScript,
 };
 
 /**
@@ -1309,7 +1334,7 @@ export function buildRunArgs(
         : chromiumContainerName(effectiveConfig);
     runArgs.push("--network", `container:${networkContainer}`);
   } else {
-    runArgs.push("-p", `${port}:18789`);
+    runArgs.push("-p", `${port}:18789`, ...mcpAppsPortPublishArgs(effectiveConfig));
   }
 
   runArgs.push(
@@ -1485,9 +1510,15 @@ export class LocalDeployer implements Deployer {
     log(`Using container runtime: ${runtime}`);
 
     // Check for port conflicts before attempting to create containers (Fix for #12)
+    if (config.mcpAppsEnabled && port === MCP_APPS_SANDBOX_PORT) {
+      throw new Error(`Gateway port ${port} conflicts with the MCP Apps sandbox port`);
+    }
     await checkPortAvailable(port, runtime);
+    if (config.mcpAppsEnabled) {
+      await checkPortAvailable(MCP_APPS_SANDBOX_PORT, runtime);
+    }
     if (shouldUseLitellmProxy(config)) {
-      await checkPortAvailable(port + 1, runtime);
+      await checkPortAvailable(localLitellmHostPort(config, port), runtime);
     }
 
     // Remove existing container with same name before a fresh deploy.
@@ -1631,6 +1662,8 @@ Use this table to track verified peer OpenClaw instances.
       `test -f /home/node/.openclaw/openclaw.json || cp /tmp/openclaw-init/openclaw.json /home/node/.openclaw/openclaw.json`,
       // Always update allowedOrigins to match the current port (fixes re-deploy with different port)
       gatewayRuntimeConfigUpdateScript(port, config.openaiCompatibleEndpointsEnabled !== false, ocConfig),
+      mcpAppsRuntimeConfigUpdateScript(config.mcpAppsEnabled === true),
+      mcpServersRuntimeConfigUpdateScript(loadAgentSourceMcpServers(config.agentSourceDir)),
       // Materialize SSH sandbox auth files into the writable volume for the node user.
       `mkdir -p '${SANDBOX_SSH_DIR}'`,
       ...(localSandboxPrepared.effectiveConfig.sandboxSshIdentity
@@ -1797,7 +1830,8 @@ Use this table to track verified peer OpenClaw instances.
         await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
         const podPorts = [
           "-p", `${port}:18789`,
-          "-p", `${port + 1}:${LITELLM_PORT}`,
+          ...mcpAppsPortPublishArgs(config),
+          "-p", `${localLitellmHostPort(config, port)}:${LITELLM_PORT}`,
           ...(config.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
         ];
         const podResult = await runCommand(runtime, [
@@ -1830,7 +1864,8 @@ Use this table to track verified peer OpenClaw instances.
           "run", "-d",
           "--name", litellmName,
           "-p", `${port}:18789`,
-          "-p", `${port + 1}:${LITELLM_PORT}`,
+          ...mcpAppsPortPublishArgs(config),
+          "-p", `${localLitellmHostPort(config, port)}:${LITELLM_PORT}`,
           ...localStateMountArgs(config),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
           ...localGatewayUserArgs(config.localFileOwner),
@@ -1900,6 +1935,7 @@ Use this table to track verified peer OpenClaw instances.
       await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
       const podPorts = [
         "-p", `${port}:18789`,
+        ...mcpAppsPortPublishArgs(config),
         ...(config.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
       ];
       await runCommand(runtime, [
@@ -1929,7 +1965,7 @@ Use this table to track verified peer OpenClaw instances.
     if (useChromium && !useProxy && !useOtelSidecars && runtime === "podman") {
       const pod = podName(config);
       await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
-      const podPorts = ["-p", `${port}:18789`];
+      const podPorts = ["-p", `${port}:18789`, ...mcpAppsPortPublishArgs(config)];
       await runCommand(runtime, [
         "pod", "create", "--name", pod, ...podPorts,
       ], log);
@@ -1969,7 +2005,7 @@ Use this table to track verified peer OpenClaw instances.
         chromiumRunArgs.push("--network", `container:${otelContainerName(config)}`);
       } else {
         // Chromium is the only sidecar — publish gateway port
-        chromiumRunArgs.push("-p", `${port}:18789`);
+        chromiumRunArgs.push("-p", `${port}:18789`, ...mcpAppsPortPublishArgs(config));
       }
 
       chromiumRunArgs.push(chromiumImage);
@@ -2103,6 +2139,8 @@ Use this table to track verified peer OpenClaw instances.
         localRuntimeHomeInitCommand(),
         `test -f /home/node/.openclaw/openclaw.json || echo '${ocConfigB64}' | base64 -d > /home/node/.openclaw/openclaw.json`,
         gatewayRuntimeConfigUpdateScript(port, effectiveConfig.openaiCompatibleEndpointsEnabled !== false, ocConfig),
+        mcpAppsRuntimeConfigUpdateScript(effectiveConfig.mcpAppsEnabled === true),
+        mcpServersRuntimeConfigUpdateScript(loadAgentSourceMcpServers(effectiveConfig.agentSourceDir)),
         ...workspaceSetupCommands,
         "mkdir -p /home/node/.openclaw/skills",
         runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
@@ -2258,7 +2296,8 @@ Use this table to track verified peer OpenClaw instances.
         await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
         const podPorts = [
           "-p", `${port}:18789`,
-          "-p", `${port + 1}:${LITELLM_PORT}`,
+          ...mcpAppsPortPublishArgs(effectiveConfig),
+          "-p", `${localLitellmHostPort(effectiveConfig, port)}:${LITELLM_PORT}`,
           ...(effectiveConfig.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
         ];
         await runCommand(runtime, [
@@ -2282,7 +2321,8 @@ Use this table to track verified peer OpenClaw instances.
           "run", "-d",
           "--name", litellmName,
           "-p", `${port}:18789`,
-          "-p", `${port + 1}:${LITELLM_PORT}`,
+          ...mcpAppsPortPublishArgs(effectiveConfig),
+          "-p", `${localLitellmHostPort(effectiveConfig, port)}:${LITELLM_PORT}`,
           ...localStateMountArgs(effectiveConfig),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
           ...localGatewayUserArgs(effectiveConfig.localFileOwner),
@@ -2315,6 +2355,7 @@ Use this table to track verified peer OpenClaw instances.
       await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
       const podPorts = [
         "-p", `${port}:18789`,
+        ...mcpAppsPortPublishArgs(effectiveConfig),
         ...(effectiveConfig.otelJaeger ? ["-p", `${JAEGER_UI_PORT}:${JAEGER_UI_PORT}`] : []),
       ];
       await runCommand(runtime, [
@@ -2327,7 +2368,7 @@ Use this table to track verified peer OpenClaw instances.
     if (useChromiumSidecar && !useProxy && !useOtelSidecars && runtime === "podman") {
       const pod = podName(effectiveConfig);
       await runCommand(runtime, ["pod", "rm", "-f", pod], () => {});
-      const podPorts = ["-p", `${port}:18789`];
+      const podPorts = ["-p", `${port}:18789`, ...mcpAppsPortPublishArgs(effectiveConfig)];
       await runCommand(runtime, [
         "pod", "create", "--name", pod, ...podPorts,
       ], log);
@@ -2372,7 +2413,7 @@ Use this table to track verified peer OpenClaw instances.
       } else if (useOtelSidecars) {
         chromiumRunArgs.push("--network", `container:${otelContainerName(effectiveConfig)}`);
       } else {
-        chromiumRunArgs.push("-p", `${port}:18789`);
+        chromiumRunArgs.push("-p", `${port}:18789`, ...mcpAppsPortPublishArgs(effectiveConfig));
       }
 
       chromiumRunArgs.push(chromiumImage);
