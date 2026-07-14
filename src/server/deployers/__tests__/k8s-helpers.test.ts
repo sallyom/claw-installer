@@ -1464,6 +1464,14 @@ describe("MCP servers from agent source", () => {
     });
   });
 
+  it("writes the MCP Apps runtime config when enabled", () => {
+    const rendered = buildOpenClawConfig(makeConfig({ mcpAppsEnabled: true }), "gateway-token") as {
+      mcp?: { apps?: { enabled?: boolean; sandboxPort?: number } };
+    };
+
+    expect(rendered.mcp?.apps).toEqual({ enabled: true, sandboxPort: 18790 });
+  });
+
   it("omits mcp when no mcp.json in agent source dir", () => {
     const dir = mkdtempSync(join(tmpdir(), "openclaw-k8s-mcp-"));
     tempDirs.push(dir);

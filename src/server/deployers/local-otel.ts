@@ -9,6 +9,7 @@ import {
   JAEGER_UI_PORT,
 } from "./otel.js";
 import type { DeployConfig, LogCallback } from "./types.js";
+import { mcpAppsPortPublishArgs } from "./mcp-apps.js";
 import { localGatewayUserArgs, localStateMaintenanceUserArgs, normalizeLocalFileOwner } from "./local-runtime.js";
 
 const execFileAsync = promisify(execFile);
@@ -123,6 +124,7 @@ export async function startOtelSidecar(
         "run", "-d", "--rm",
         "--name", otelName,
         "-p", `${port}:18789`,
+        ...mcpAppsPortPublishArgs(config),
         "-v", `${volumeName}:${OTEL_STATE_DIR}:ro`,
         ...localGatewayUserArgs(config.localFileOwner),
         otelImage,

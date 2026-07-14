@@ -104,6 +104,18 @@ export function loadAgentSourceMcpServers(agentSourceDir?: string): Record<strin
   }
 }
 
+export function loadAgentSourceMcpAppsEnabled(agentSourceDir?: string): boolean {
+  if (!agentSourceDir) return false;
+  const mcpPath = join(agentSourceDir, "mcp.json");
+  if (!existsSync(mcpPath)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(mcpPath, "utf8"));
+    return parsed.mcpAppsEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
 export function loadAgentSourceExecApprovals(agentSourceDir?: string): string | undefined {
   if (!agentSourceDir) return undefined;
   const approvalsPath = join(agentSourceDir, "exec-approvals.json");

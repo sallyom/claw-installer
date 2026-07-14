@@ -7,6 +7,7 @@ import { shouldUseChromiumSidecar, CHROMIUM_CDP_PORT } from "./chromium.js";
 import { buildOpenShellPluginConfig, buildSandboxConfig } from "./sandbox.js";
 import { buildSandboxToolPolicy } from "./tool-policy.js";
 import { loadAgentSourceBundle, loadAgentSourceMcpServers } from "./agent-source.js";
+import { MCP_APPS_SANDBOX_PORT } from "./mcp-apps.js";
 import type { AgentSourceBundle } from "./agent-source.js";
 import { normalizeManagedVaultProviders } from "./vault-helper.js";
 import { hasPodmanSecretTarget } from "../../shared/podman-secrets.js";
@@ -1007,8 +1008,13 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   }
 
   const mcpServers = loadAgentSourceMcpServers(config.agentSourceDir);
-  if (mcpServers) {
-    ocConfig.mcp = { servers: mcpServers };
+  if (mcpServers || config.mcpAppsEnabled) {
+    ocConfig.mcp = {
+      ...(mcpServers ? { servers: mcpServers } : {}),
+      ...(config.mcpAppsEnabled
+        ? { apps: { enabled: true, sandboxPort: MCP_APPS_SANDBOX_PORT } }
+        : {}),
+    };
   }
 
   attachCodexOauthConfig(ocConfig, config);

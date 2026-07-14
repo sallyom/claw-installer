@@ -123,6 +123,16 @@ The installer runs a podman (or docker) container with:
 
 The installer does not disable Control UI device auth by default. This keeps the upstream browser pairing check in place for local deploys.
 
+### MCP Apps
+
+MCP Apps are off by default. When the Agent Source `mcp.json` contains
+`"mcpAppsEnabled": true`, the installer writes `mcp.apps.enabled: true`,
+publishes the dedicated sandbox listener on port `18790`, and preserves the
+setting across local restarts and re-deploys.
+
+The flag applies to every enabled MCP server. Set it only when all configured
+MCP servers are trusted to supply interactive HTML and app-callable tools.
+
 ### Init script
 
 Before starting the gateway, the installer runs an init script inside the container that:

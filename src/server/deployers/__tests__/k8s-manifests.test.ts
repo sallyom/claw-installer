@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deploymentManifest, fileConfigMapManifest, fileTreeConfigMapManifest, secretManifest } from "../k8s-manifests.js";
+import { deploymentManifest, fileConfigMapManifest, fileTreeConfigMapManifest, secretManifest, serviceManifest } from "../k8s-manifests.js";
 import type { DeployConfig } from "../types.js";
 import type * as k8s from "@kubernetes/client-node";
 
@@ -42,6 +42,19 @@ describe("k8s state sync manifests", () => {
     const gatewayContainer = deployment.spec?.template.spec?.containers?.find((c) => c.name === "gateway");
 
     expect(gatewayContainer?.imagePullPolicy).toBe("IfNotPresent");
+  });
+
+  it("exposes the MCP Apps sandbox port when enabled", () => {
+    const enabled = makeConfig({ mcpAppsEnabled: true });
+    const servicePorts = serviceManifest("openclaw-alpha-openclaw", enabled).spec?.ports ?? [];
+    const gatewayPorts = gatewayContainer(deploymentManifest("openclaw-alpha-openclaw", enabled))?.ports ?? [];
+
+    expect(servicePorts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "mcp-apps", port: 18790 }),
+    ]));
+    expect(gatewayPorts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "mcp-apps", containerPort: 18790 }),
+    ]));
   });
 
   it("renders skill and cron ConfigMaps from host state entries", () => {

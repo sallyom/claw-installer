@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadAgentSourceCronJobs, loadAgentSourceMcpServers, loadAgentSourceExecApprovals, subagentIds, mainWorkspaceShellCondition } from "../agent-source.js";
+import { loadAgentSourceCronJobs, loadAgentSourceMcpAppsEnabled, loadAgentSourceMcpServers, loadAgentSourceExecApprovals, subagentIds, mainWorkspaceShellCondition } from "../agent-source.js";
 import type { AgentSourceBundle } from "../agent-source.js";
 
 const tempDirs: string[] = [];
@@ -142,6 +142,64 @@ describe("loadAgentSourceMcpServers", () => {
     expect(loadAgentSourceMcpServers(dir)).toEqual({
       test: { url: "https://example.com" },
     });
+  });
+
+  it("loads the bundled MCP Apps showcase", () => {
+    const demoDir = join(process.cwd(), "demos", "mcp-apps-example");
+    const servers = loadAgentSourceMcpServers(demoDir);
+
+    expect(loadAgentSourceMcpAppsEnabled(demoDir)).toBe(true);
+    expect(Object.keys(servers ?? {})).toEqual([
+      "system-monitor",
+      "budget-allocator",
+      "customer-segmentation",
+      "map",
+      "cohort-heatmap",
+      "sheet-music",
+      "shadertoy",
+    ]);
+    expect(servers?.["system-monitor"]).toMatchObject({
+      command: "npx",
+      args: expect.arrayContaining(["@modelcontextprotocol/server-system-monitor", "--stdio"]),
+    });
+    expect(servers?.["customer-segmentation"]).toMatchObject({
+      command: "npx",
+      args: expect.arrayContaining([
+        "@modelcontextprotocol/server-customer-segmentation",
+        "--stdio",
+      ]),
+    });
+    expect(servers?.["map"]).toMatchObject({
+      command: "npx",
+      args: expect.arrayContaining(["@modelcontextprotocol/server-map", "--stdio"]),
+    });
+    expect(servers?.["cohort-heatmap"]).toMatchObject({
+      command: "npx",
+      args: expect.arrayContaining([
+        "@modelcontextprotocol/server-cohort-heatmap",
+        "--stdio",
+      ]),
+    });
+    expect(servers?.["sheet-music"]).toMatchObject({
+      command: "npx",
+      args: expect.arrayContaining(["@modelcontextprotocol/server-sheet-music", "--stdio"]),
+    });
+    expect(servers?.["shadertoy"]).toMatchObject({
+      command: "npx",
+      args: expect.arrayContaining(["@modelcontextprotocol/server-shadertoy", "--stdio"]),
+    });
+  });
+
+  it("does not enable MCP Apps unless mcp.json explicitly opts in", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-agent-source-"));
+    tempDirs.push(dir);
+    writeFileSync(
+      join(dir, "mcp.json"),
+      JSON.stringify({ mcpServers: { test: { url: "https://example.com" } } }),
+      "utf8",
+    );
+
+    expect(loadAgentSourceMcpAppsEnabled(dir)).toBe(false);
   });
 
   it("loads mcpServers from mcp.json with flat format", () => {

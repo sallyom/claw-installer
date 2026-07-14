@@ -154,6 +154,16 @@ The [Deployment](examples/deployment.yaml) includes three containers:
 
 **gateway** - The OpenClaw gateway. Binds to loopback (since the oauth-proxy fronts it), reads config from the PVC, and connects to model providers over HTTPS. API-key style provider credentials are injected from the `openclaw-secrets` Secret with `optional: true` so only the keys you provide are required. OpenAI Codex OAuth is imported from the same Secret into each managed agent's `auth-profiles.json`.
 
+When the Agent Source `mcp.json` contains `"mcpAppsEnabled": true`, the
+installer also creates an `openclaw-mcp-apps` Route and a small sandbox-only
+proxy sidecar. The Route accepts only `/mcp-app-sandbox` and does not pass
+through the OAuth proxy or serve Gateway data. Its origin is written to
+`mcp.apps.sandboxOrigin`; the Gateway's sandbox listener remains isolated on
+loopback port `18790`.
+
+The setting enables Apps for every configured MCP server. Set it only when all
+of those servers are trusted.
+
 ## Access your instance
 
 After deployment, open the Route URL printed in the installer logs:

@@ -114,6 +114,7 @@ export interface DeployConfig {
   vertexGoogleModels?: string[];
   modelFallbacks?: string[];
   openaiCompatibleEndpointsEnabled?: boolean;
+  mcpAppsEnabled?: boolean;
   modelEndpoint?: string;
   modelEndpointApiKey?: string;
   modelEndpointModel?: string;
