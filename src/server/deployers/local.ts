@@ -446,6 +446,11 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
   if (config.agentSourceDir) {
     lines.push(`AGENT_SOURCE_DIR=${config.agentSourceDir}`);
   }
+  if (config.agentSourceGitUrl) {
+    lines.push(`AGENT_SOURCE_GIT_URL=${config.agentSourceGitUrl}`);
+    if (config.agentSourceGitRef) lines.push(`AGENT_SOURCE_GIT_REF=${config.agentSourceGitRef}`);
+    if (config.agentSourceGitPath) lines.push(`AGENT_SOURCE_GIT_PATH=${config.agentSourceGitPath}`);
+  }
   if (config.otelEnabled) {
     lines.push(`OTEL_ENABLED=true`);
     if (config.otelJaeger) {

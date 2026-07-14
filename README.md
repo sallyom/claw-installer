@@ -192,7 +192,14 @@ For upstream sandbox concepts and backend behavior, see the [OpenClaw sandboxing
 
 ## Demo Bundles
 
-`Agent Source Directory` can now point at a bundled multi-agent demo tree.
+Under **Add Agent Files**, Agent Source can use either a directory on the
+installer host or a public HTTPS Git repository. Git sources support an optional
+branch or tag and an optional repository-relative path, matching the `url`,
+`ref`, and `path` shape used by
+`claw-operator`. The installer checks out Git sources into its managed cache
+before deployment. Embedded Git credentials and non-HTTPS URLs are rejected.
+
+`Agent Source Directory` can point at a bundled multi-agent demo tree.
 
 Try:
 

@@ -306,7 +306,7 @@ describe("DeployForm agent name validation (issue #7)", () => {
     });
   });
 
-  it("shows Agent Options controls without raw SecretRef override fields", async () => {
+  it("shows agent file sources without cron, subagent, or raw SecretRef controls", async () => {
     global.fetch = mockHealthResponse([
       { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
     ]);
@@ -315,14 +315,30 @@ describe("DeployForm agent name validation (issue #7)", () => {
 
     await screen.findAllByRole("button", { name: /deploy openclaw/i });
 
-    expect(screen.getAllByText("Agent Options").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Add Agent Files").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Agent Source Directory").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Enable Cron Jobs").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Subagent Spawning").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Enable Cron Jobs")).toBeNull();
+    expect(screen.queryByText("Subagent Spawning")).toBeNull();
 
     expect(screen.queryByText("Advanced: SecretRefs")).toBeNull();
     expect(screen.queryByText("Anthropic SecretRef Source")).toBeNull();
     expect(screen.queryByText("OpenAI SecretRef Source")).toBeNull();
+  });
+
+  it("offers a Git repository Agent Source with ref and path fields", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+    await screen.findAllByRole("button", { name: /deploy openclaw/i });
+
+    fireEvent.change(screen.getByDisplayValue("Local directory"), { target: { value: "git" } });
+
+    expect(screen.getByText("Agent Source Git URL")).toBeTruthy();
+    expect(screen.getByText("Git Ref")).toBeTruthy();
+    expect(screen.getByText("Repository Path")).toBeTruthy();
+    expect(screen.queryByText("Agent Source Directory")).toBeNull();
   });
 
   it("shows editable Vault ids instead of raw SecretRef fields", async () => {

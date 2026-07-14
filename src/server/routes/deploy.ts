@@ -22,6 +22,7 @@ import { deploymentRateLimit } from "../rate-limit.js";
 import { isDeployModeAllowed } from "../installer-mode.js";
 import { hostedUserPrefix } from "../hosted-auth.js";
 import { loadAgentSourceMcpAppsEnabled } from "../deployers/agent-source.js";
+import { materializeAgentSourceGit, validateAgentSourceGitUrl } from "../deployers/agent-source-git.js";
 
 const router = Router();
 
@@ -354,6 +355,9 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.sshHost = trimOptional(config.sshHost);
   config.sshUser = trimOptional(config.sshUser);
   config.agentSourceDir = trimOptional(config.agentSourceDir);
+  config.agentSourceGitUrl = trimOptional(config.agentSourceGitUrl);
+  config.agentSourceGitRef = trimOptional(config.agentSourceGitRef);
+  config.agentSourceGitPath = trimOptional(config.agentSourceGitPath);
   config.containerRunArgs = trimOptional(config.containerRunArgs);
   config.localFileOwner = trimOptional(config.localFileOwner);
   config.sandboxOpenShellGatewayEndpoint = trimOptional(config.sandboxOpenShellGatewayEndpoint);
@@ -533,7 +537,23 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     return;
   }
 
-  if (config.agentSourceDir) {
+  if (config.agentSourceDir && config.agentSourceGitUrl) {
+    res.status(400).json({ error: "Choose either an Agent Source Directory or Git URL, not both" });
+    return;
+  }
+  if (config.agentSourceGitUrl) {
+    try {
+      config.agentSourceGitUrl = validateAgentSourceGitUrl(config.agentSourceGitUrl);
+      config.agentSourceDir = await materializeAgentSourceGit({
+        url: config.agentSourceGitUrl,
+        ref: config.agentSourceGitRef,
+        path: config.agentSourceGitPath,
+      });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+  } else if (config.agentSourceDir) {
     try {
       config.agentSourceDir = validateUserSuppliedPath(config.agentSourceDir, "agentSourceDir");
     } catch (err) {

@@ -155,6 +155,9 @@ export interface DeployConfig {
   image?: string;
   port?: number;
   agentSourceDir?: string; // Host directory with workspace-*, skills/, and cron/jobs.json to provision
+  agentSourceGitUrl?: string; // HTTPS repository containing the agent source tree
+  agentSourceGitRef?: string; // Optional branch or tag
+  agentSourceGitPath?: string; // Optional repository-relative directory containing the agent source tree
   // Kubernetes mode
   namespace?: string;
   withA2a?: boolean;
