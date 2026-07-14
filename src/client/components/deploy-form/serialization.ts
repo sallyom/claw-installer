@@ -127,7 +127,11 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     gcpServiceAccountPath: "",
     sshHost: "",
     sshUser: "",
+    agentSourceType: "directory",
     agentSourceDir: "",
+    agentSourceGitUrl: "",
+    agentSourceGitRef: "",
+    agentSourceGitPath: "",
     telegramEnabled: false,
     telegramBotToken: "",
     telegramAllowFrom: "",
@@ -364,6 +368,8 @@ export function applySavedVarsToConfig(
     || inferredEnvSecretRefFromPodmanMappings(savedPodmanSecretMappingsText, "MODEL_ENDPOINT_API_KEY");
   const explicitNamespace = getStringVar(vars, "K8S_NAMESPACE", "namespace");
   const savedEndpointModels = decodeEndpointModelsVar(vars);
+  const agentSourceDir = getStringVar(vars, "AGENT_SOURCE_DIR", "agentSourceDir");
+  const agentSourceGitUrl = getStringVar(vars, "AGENT_SOURCE_GIT_URL", "agentSourceGitUrl");
 
   return {
     namespaceManuallyEdited: Boolean(explicitNamespace),
@@ -582,7 +588,17 @@ export function applySavedVarsToConfig(
         getStringVar(vars, "GOOGLE_CLOUD_PROJECT", "googleCloudProject") || prev.googleCloudProject,
       googleCloudLocation:
         getStringVar(vars, "GOOGLE_CLOUD_LOCATION", "googleCloudLocation") || prev.googleCloudLocation,
-      agentSourceDir: getStringVar(vars, "AGENT_SOURCE_DIR", "agentSourceDir") || prev.agentSourceDir,
+      agentSourceType: agentSourceGitUrl ? "git" : agentSourceDir ? "directory" : prev.agentSourceType,
+      agentSourceDir: agentSourceGitUrl
+        ? ""
+        : agentSourceDir || prev.agentSourceDir,
+      agentSourceGitUrl: agentSourceGitUrl || (agentSourceDir ? "" : prev.agentSourceGitUrl),
+      agentSourceGitRef:
+        getStringVar(vars, "AGENT_SOURCE_GIT_REF", "agentSourceGitRef")
+        || (agentSourceDir ? "" : prev.agentSourceGitRef),
+      agentSourceGitPath:
+        getStringVar(vars, "AGENT_SOURCE_GIT_PATH", "agentSourceGitPath")
+        || (agentSourceDir ? "" : prev.agentSourceGitPath),
       telegramBotToken:
         getStringVar(vars, "TELEGRAM_BOT_TOKEN", "telegramBotToken") || prev.telegramBotToken,
       telegramAllowFrom:
@@ -846,7 +862,14 @@ export function buildDeployRequestBody(params: {
     a2aKeycloakNamespace: config.withA2a ? trimToUndefined(config.a2aKeycloakNamespace) : undefined,
     sshHost: trimToUndefined(config.sshHost),
     sshUser: trimToUndefined(config.sshUser),
-    agentSourceDir: trimToUndefined(config.agentSourceDir),
+    agentSourceDir:
+      config.agentSourceType === "directory" ? trimToUndefined(config.agentSourceDir) : undefined,
+    agentSourceGitUrl:
+      config.agentSourceType === "git" ? trimToUndefined(config.agentSourceGitUrl) : undefined,
+    agentSourceGitRef:
+      config.agentSourceType === "git" ? trimToUndefined(config.agentSourceGitRef) : undefined,
+    agentSourceGitPath:
+      config.agentSourceType === "git" ? trimToUndefined(config.agentSourceGitPath) : undefined,
     telegramEnabled: config.telegramEnabled || undefined,
     telegramBotToken:
       config.telegramEnabled && !telegramBotTokenRef ? trimToUndefined(config.telegramBotToken) : undefined,
@@ -951,7 +974,10 @@ export function buildEnvFileContent(params: {
     `OPENCLAW_PROVIDER_SECRET_NAME=${config.providerSecretName}`,
     `OPENCLAW_PLUGIN_INSTALL_SPECS_B64=${encodeBase64(JSON.stringify(pluginInstallSpecs))}`,
     `OPENCLAW_PORT=${config.port}`,
-    `AGENT_SOURCE_DIR=${config.agentSourceDir}`,
+    `AGENT_SOURCE_DIR=${config.agentSourceType === "directory" ? config.agentSourceDir : ""}`,
+    `AGENT_SOURCE_GIT_URL=${config.agentSourceType === "git" ? config.agentSourceGitUrl : ""}`,
+    `AGENT_SOURCE_GIT_REF=${config.agentSourceType === "git" ? config.agentSourceGitRef : ""}`,
+    `AGENT_SOURCE_GIT_PATH=${config.agentSourceType === "git" ? config.agentSourceGitPath : ""}`,
     "",
     `INFERENCE_PROVIDER=${inferenceProvider}`,
     `ANTHROPIC_API_KEY=${sel("anthropic") && !effectiveAnthropicApiKeyRef ? config.anthropicApiKey : ""}`,

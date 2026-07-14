@@ -469,6 +469,22 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
         .catch(() => {});
       return;
     }
+    if (field === "agentSourceGitUrl") {
+      const inferredAgentName = inferAgentNameFromPath(value.replace(/\.git\/?$/, ""));
+      setConfig((prev) => ({
+        ...prev,
+        agentSourceGitUrl: value,
+        agentName:
+          (!agentNameManuallyEdited || !prev.agentName) && inferredAgentName
+            ? inferredAgentName
+            : prev.agentName,
+        agentDisplayName:
+          (!displayNameManuallyEdited || !prev.agentDisplayName) && inferredAgentName
+            ? inferDisplayNameFromAgentName(inferredAgentName)
+            : prev.agentDisplayName,
+      }));
+      return;
+    }
     if (field === "agentName" && !displayNameManuallyEdited) {
       // Auto-derive display name from agent name
       setConfig((prev) => ({
@@ -1236,63 +1252,80 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
 
         <details style={{ marginTop: "1.5rem" }}>
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-            Agent Options
+            Add Agent Files
             <span style={{ color: "var(--text-secondary)", fontWeight: "normal" }}>
-              {" "}Optional: source directory, cron jobs, subagent spawning
+              {" "}Optional: use a local directory or Git repository
             </span>
           </summary>
 
           <div className="card" style={{ marginTop: "0.75rem" }}>
             <div className="form-group">
-              <label>Agent Source Directory</label>
-              <input
-                type="text"
-                placeholder="/path/to/agents-dir (optional)"
-                value={config.agentSourceDir}
-                onChange={(e) => update("agentSourceDir", e.target.value)}
-              />
-              <div className="hint">
-                Installer host directory with <code>workspace-*</code>, <code>skills/</code>, and optional <code>cron/jobs.json</code> to provision into the instance.
-                Defaults to <code>~/.openclaw/</code> if it exists.
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <input
-                  type="checkbox"
-                  checked={config.cronEnabled}
-                  onChange={(e) =>
-                    setConfig((prev) => ({ ...prev, cronEnabled: e.target.checked }))
-                  }
-                  style={{ width: "auto" }}
-                />
-                Enable Cron Jobs
-              </label>
-              <div className="hint">
-                Scheduled jobs are loaded from <code>cron/jobs.json</code> in the Agent Source Directory when present.
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label>Subagent Spawning</label>
+              <label>Agent Source</label>
               <select
-                value={config.subagentPolicy}
-                onChange={(e) =>
+                value={config.agentSourceType}
+                onChange={(e) => {
+                  const sourceType = e.target.value as DeployFormConfig["agentSourceType"];
                   setConfig((prev) => ({
                     ...prev,
-                    subagentPolicy: e.target.value as "none" | "self" | "unrestricted",
-                  }))
-                }
+                    agentSourceType: sourceType,
+                  }));
+                }}
               >
-                <option value="none">Disabled</option>
-                <option value="self">Same agent only (self-delegation)</option>
-                <option value="unrestricted">Unrestricted (any agent)</option>
+                <option value="directory">Local directory</option>
+                <option value="git">Git repository</option>
               </select>
-              <div className="hint">
-                Controls whether the agent can spawn subagents.
-              </div>
             </div>
+
+            {config.agentSourceType === "directory" ? (
+              <div className="form-group">
+                <label>Agent Source Directory</label>
+                <input
+                  type="text"
+                  placeholder="/path/to/agents-dir (optional)"
+                  value={config.agentSourceDir}
+                  onChange={(e) => update("agentSourceDir", e.target.value)}
+                />
+                <div className="hint">
+                  Installer host directory with <code>workspace-*</code> and <code>skills/</code> to provision into the instance.
+                  Defaults to <code>~/.openclaw/</code> if it exists.
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="form-group">
+                  <label>Agent Source Git URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://github.com/example/openclaw-agents.git"
+                    value={config.agentSourceGitUrl}
+                    onChange={(e) => update("agentSourceGitUrl", e.target.value)}
+                  />
+                  <div className="hint">
+                    Public HTTPS repository containing the Agent Source tree.
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Git Ref</label>
+                  <input
+                    type="text"
+                    placeholder="main (optional)"
+                    value={config.agentSourceGitRef}
+                    onChange={(e) => update("agentSourceGitRef", e.target.value)}
+                  />
+                  <div className="hint">Optional branch or tag. Defaults to the repository default branch.</div>
+                </div>
+                <div className="form-group">
+                  <label>Repository Path</label>
+                  <input
+                    type="text"
+                    placeholder="teams/platform (optional)"
+                    value={config.agentSourceGitPath}
+                    onChange={(e) => update("agentSourceGitPath", e.target.value)}
+                  />
+                  <div className="hint">Optional repository subdirectory containing the Agent Source tree.</div>
+                </div>
+              </>
+            )}
           </div>
         </details>
 

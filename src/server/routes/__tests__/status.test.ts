@@ -95,4 +95,20 @@ describe("parseSavedLocalInstanceConfig", () => {
     expect(parsed.codexModels).toEqual(["gpt-5.4-mini"]);
   });
 
+  it("restores Agent Source Git settings", () => {
+    const config = makeConfig({
+      agentSourceDir: "/tmp/managed-agent-source",
+      agentSourceGitUrl: "https://github.com/example/agents.git",
+      agentSourceGitRef: "main",
+      agentSourceGitPath: "teams/platform",
+    });
+
+    const savedVars = parseEnvFile(buildSavedInstanceEnvContent(config, "openclaw-demo"));
+    const parsed = parseSavedLocalInstanceConfig(savedVars);
+
+    expect(parsed.agentSourceGitUrl).toBe("https://github.com/example/agents.git");
+    expect(parsed.agentSourceGitRef).toBe("main");
+    expect(parsed.agentSourceGitPath).toBe("teams/platform");
+  });
+
 });

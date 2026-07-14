@@ -27,6 +27,29 @@ describe("Multi-model per provider", () => {
   });
 
   describe("buildDeployRequestBody", () => {
+    it("sends Git Agent Source settings instead of a local directory", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.agentSourceType = "git";
+      config.agentSourceDir = "/tmp/local-agents";
+      config.agentSourceGitUrl = "https://github.com/example/agents.git";
+      config.agentSourceGitRef = "main";
+      config.agentSourceGitPath = "teams/platform";
+
+      const body = buildDeployRequestBody({
+        mode: "local",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(body.agentSourceDir).toBeUndefined();
+      expect(body.agentSourceGitUrl).toBe("https://github.com/example/agents.git");
+      expect(body.agentSourceGitRef).toBe("main");
+      expect(body.agentSourceGitPath).toBe("teams/platform");
+    });
+
     it("includes anthropicModels when non-empty", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
@@ -297,6 +320,37 @@ describe("Multi-model per provider", () => {
   });
 
   describe("buildEnvFileContent", () => {
+    it("round-trips Git Agent Source settings", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.agentSourceType = "git";
+      config.agentSourceGitUrl = "https://github.com/example/agents.git";
+      config.agentSourceGitRef = "main";
+      config.agentSourceGitPath = "teams/platform";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      const vars = Object.fromEntries(
+        env
+          .split("\n")
+          .filter((line) => line && !line.startsWith("#") && line.includes("="))
+          .map((line) => {
+            const index = line.indexOf("=");
+            return [line.slice(0, index), line.slice(index + 1)];
+          }),
+      );
+
+      const { config: restored } = applySavedVarsToConfig(vars, createInitialDeployFormConfig());
+
+      expect(restored.agentSourceType).toBe("git");
+      expect(restored.agentSourceGitUrl).toBe("https://github.com/example/agents.git");
+      expect(restored.agentSourceGitRef).toBe("main");
+      expect(restored.agentSourceGitPath).toBe("teams/platform");
+    });
+
     it("encodes anthropicModels and openaiModels as base64", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";

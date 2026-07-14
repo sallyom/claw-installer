@@ -189,7 +189,11 @@ export interface DeployFormConfig {
   gcpServiceAccountPath: string;
   sshHost: string;
   sshUser: string;
+  agentSourceType: "directory" | "git";
   agentSourceDir: string;
+  agentSourceGitUrl: string;
+  agentSourceGitRef: string;
+  agentSourceGitPath: string;
   telegramEnabled: boolean;
   telegramBotToken: string;
   telegramAllowFrom: string;

@@ -119,7 +119,8 @@ The installer runs a podman (or docker) container with:
 - `--bind lan` — gateway listens on `0.0.0.0` (required for port mapping)
 - Labels: `openclaw.managed=true`, `openclaw.prefix=<prefix>`, `openclaw.agent=<name>`
 - Installer-managed local state volume `openclaw-<prefix>-data` at `/home/node/.openclaw`
-- Optional read-only agent source mount at `/tmp/agent-source` when `AGENT_SOURCE_DIR` or the form field is set
+- Optional read-only agent source mount at `/tmp/agent-source` when a local
+  directory or public HTTPS Git repository is selected under **Add Agent Files**
 
 The installer does not disable Control UI device auth by default. This keeps the upstream browser pairing check in place for local deploys.
 
