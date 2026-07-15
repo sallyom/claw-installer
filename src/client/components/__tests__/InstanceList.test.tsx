@@ -638,7 +638,7 @@ describe("InstanceList", () => {
     await user.click(screen.getByText("https://sam-openclaw.apps.example.com"));
     await waitFor(() => {
       expect(openSpy).toHaveBeenCalledWith(
-        "https://sam-openclaw.apps.example.com?session=agent%3Auser_lynx%3Amain#token=cluster-token",
+        "https://sam-openclaw.apps.example.com?session=agent%3Auser-lynx%3Amain#token=cluster-token",
         "_blank",
         "noopener",
       );

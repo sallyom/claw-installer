@@ -2,15 +2,23 @@
 #
 # Install example:
 #   oc create ns openshell-alice
-#   oc adm policy add-scc-to-user privileged -z default -n openshell-alice
+#   oc adm policy add-scc-to-user privileged -z openshell-alice-sandbox -n openshell-alice
 #   helm install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
 #     --version <version> \
 #     -n openshell-alice \
 #     -f openshell/configs/openshell-values-openshift.yaml
 
 server:
+  # PoC only: plaintext and unauthenticated inside the cluster. Do not expose
+  # this gateway outside a private evaluation environment.
   disableTls: true
+  auth:
+    allowUnauthenticatedUsers: true
+  sandboxImage: quay.io/sallyom/openclaw-openshell:latest
   sandboxImagePullPolicy: IfNotPresent
+
+supervisor:
+  sideloadMethod: init-container
 
 pkiInitJob:
   enabled: false

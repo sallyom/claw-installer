@@ -5,6 +5,7 @@ import type { ContainerRuntime } from "../services/container.js";
 import type { DeployConfig, LogCallback } from "./types.js";
 import {
   bindMountSpec,
+  localMaintenanceEntrypointArgs,
   localStateMaintenanceUserArgs,
   runCommand,
   runtimeOwnershipFixupCommand,
@@ -41,6 +42,7 @@ export async function installLocalPlugins(params: {
 
   const result = await runCommand(params.runtime, [
     "run", "--rm",
+    ...localMaintenanceEntrypointArgs(),
     ...localStateMaintenanceUserArgs(params.config.localFileOwner),
     ...params.stateMountArgs,
     ...plan.mountArgs,

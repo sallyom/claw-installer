@@ -50,8 +50,7 @@ The cluster admin does the cluster-scoped and privileged setup:
 - grant privileged SCC only in that user's OpenShell namespace
 - install one OpenShell Helm release per human user
 - provide the OpenShell gateway service URL to the OpenClaw installer/user
-- provide or approve the OpenClaw image that includes the OpenShell CLI at
-  `/opt/openshell/bin/openshell`
+- provide or approve the digest-pinned OpenClaw/sandbox image
 
 The OpenShell Helm chart does not install the Agent Sandbox CRDs. It does create
 cluster-scoped RBAC for node reads, so use a unique Helm release name per user to
@@ -86,16 +85,16 @@ http://openshell.openshell-alice.svc.cluster.local:8080
 The OpenClaw owner deploys or requests one normal OpenClaw namespace per user:
 
 - create or select `openclaw-<user>`
-- deploy OpenClaw with the approved CLI-bearing image
+- deploy OpenClaw with the approved digest-pinned UBI/S2I image
 - choose the OpenShell sandbox backend only after the cluster admin has provided
   the user's OpenShell gateway endpoint
 - set the OpenShell gateway endpoint in the installer
 - use the normal provider credential flow for that user's OpenClaw instance
 
-The installer installs the external `@openclaw/openshell-sandbox` plugin into
-the PVC-backed OpenClaw home before gateway startup. The OpenShell CLI is baked
-into the OpenClaw image; the installer no longer creates a separate OpenShell CLI
-init container or `openshell-cli` volume.
+The installer installs the external `@openclaw/openshell-sandbox@2026.7.1`
+plugin into the PVC-backed OpenClaw home before gateway startup. The same init
+container downloads the checksum-verified OpenShell CLI into an `openshell-cli`
+volume shared with the gateway.
 
 ## RBAC and IdP group model
 
@@ -139,10 +138,7 @@ and replace `USER` with the per-user id.
 ## Prerequisites
 
 - OpenShift cluster access
-- `oc`, `helm`, and `podman`
-- access to push an OpenClaw image to a registry reachable by the cluster
-- the `../openclaw`, `../claw-installer`, and `../OpenShell` repos checked out
-- an OpenClaw image that includes `/opt/openshell/bin/openshell`
+- `oc`, `helm`, `openssl`, and the `claw-installer` checkout
 
 ## 1. Install OpenShell cluster prerequisites
 
@@ -164,18 +160,37 @@ Example for Bob:
 
 ```shell
 oc create ns openshell-bob
-oc adm policy add-scc-to-user privileged -z default -n openshell-bob
+oc adm policy add-scc-to-user privileged -z openshell-bob-sandbox -n openshell-bob
+```
+
+Create the signing secret required when the OpenShift values disable the chart
+PKI job:
+
+```shell
+key_dir="$(mktemp -d)"
+openssl genpkey -algorithm Ed25519 -out "${key_dir}/signing.pem"
+openssl pkey -in "${key_dir}/signing.pem" -pubout -out "${key_dir}/public.pem"
+printf 'openshell-0\n' > "${key_dir}/kid"
+oc -n openshell-bob create secret generic openshell-bob-jwt-keys \
+  --from-file=signing.pem="${key_dir}/signing.pem" \
+  --from-file=public.pem="${key_dir}/public.pem" \
+  --from-file=kid="${key_dir}/kid"
+rm -rf "${key_dir}"
 ```
 
 Deploy OpenShell with a unique release name:
 
 ```shell
 helm install openshell-bob oci://ghcr.io/nvidia/openshell/helm-chart \
-  --version 0.0.44 \
+  --version 0.0.83 \
   -n openshell-bob \
-  -f openshell/configs/openshell-values-openshift.yaml \
-  --set server.sandboxImage=quay.io/sallyom/openclaw-openshell-sandbox:latest
+  -f openshell/configs/openshell-values-openshift.yaml
 ```
+
+> **PoC security warning:** the checked-in values disable gateway TLS and allow
+> unauthenticated clients. Keep this ClusterIP private and use the setup only
+> on an isolated evaluation cluster. The privileged SCC grant is scoped to the
+> per-user OpenShell sandbox service account.
 
 Verify:
 
@@ -190,31 +205,19 @@ Expected service DNS for Bob's OpenClaw install:
 http://openshell-bob.openshell-bob.svc.cluster.local:8080
 ```
 
-## 3. Build the OpenClaw image
+## 3. Select the OpenClaw image
 
-Build from checked-out `../openclaw`, then layer in the OpenShell CLI:
+Use the current multi-arch OpenClaw `2026.7.1` UBI image:
 
-```shell
-cd ../claw-installer
-./openshell/build-openclaw-source-image.sh quay.io/<org>/openclaw:openshell
-podman push quay.io/<org>/openclaw:openshell
+```text
+quay.io/sallyom/openclaw-openshell:latest
 ```
 
-For multi-arch farm builds, build the OpenClaw base first, capture its digest,
-then use that digest as the base for the CLI-bearing image:
+The `latest` tag supports `linux/amd64` and `linux/arm64`. It is an interim PoC
+default; pin its manifest digest when reproducibility matters.
 
-```shell
-podman farm build \
-  -f ../openclaw/Dockerfile \
-  --build-arg OPENCLAW_EXTENSIONS=diagnostics-otel,codex \
-  --build-arg OPENCLAW_IMAGE_APT_PACKAGES="openssh-client rsync" \
-  ../openclaw
-
-podman farm build \
-  -f openshell/Dockerfile \
-  --build-arg OPENCLAW_BASE_IMAGE=quay.io/<org>/openclaw@sha256:<base-digest> \
-  .
-```
+The installer injects the OpenShell CLI into the pod. Building
+`openshell/Dockerfile` is optional and is not required for this flow.
 
 ## 4. Create the user's OpenClaw namespace
 
@@ -232,7 +235,7 @@ OpenClaw to reach the user's OpenShell gateway service.
 Start the installer from `../claw-installer`:
 
 ```shell
-npm run dev
+./run.sh
 ```
 
 In the UI:
@@ -265,11 +268,10 @@ The resulting config must include:
       "openshell": {
         "enabled": true,
         "config": {
-          "command": "/opt/openshell/bin/openshell",
-          "gateway": "openshell",
-          "from": "quay.io/sallyom/openclaw-openshell-sandbox:latest",
-          "mode": "mirror",
+          "from": "quay.io/sallyom/openclaw-openshell:latest",
+          "mode": "remote",
           "gatewayEndpoint": "http://openshell-bob.openshell-bob.svc.cluster.local:8080",
+          "policy": "/home/node/.openclaw/openshell/policy.yaml",
           "timeoutSeconds": 180
         }
       }
@@ -278,12 +280,20 @@ The resulting config must include:
 }
 ```
 
-Before testing an agent turn, verify the baked CLI:
+Before testing an agent turn, verify the injected CLI:
 
 ```shell
 oc exec -n openclaw-bob deployment/openclaw -c gateway -- \
-  /opt/openshell/bin/openshell --version
+  /openshell-bin/openshell --version
 ```
+
+The OpenShell backend still uses SSH for command execution and file transfer,
+but it does not SSH into the gateway. The plugin calls the configured HTTP
+gateway endpoint for lifecycle operations and sandbox-specific SSH config.
+OpenClaw then uses that config with `openshell ssh-proxy` as the SSH
+`ProxyCommand`, tunneling through the gateway to the sandbox. No SSH key,
+known-hosts entry, or static SSH target is entered in the installer for this
+backend.
 
 ## 6. Verify the sandbox path
 

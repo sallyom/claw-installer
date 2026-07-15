@@ -92,6 +92,7 @@ export function containerToInstance(c: DiscoveredContainer): DeployResult {
 export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>): Partial<DeployResult["config"]> {
   return {
     image: savedVars.OPENCLAW_IMAGE || undefined,
+    useImageEntrypoint: savedVars.OPENCLAW_USE_IMAGE_ENTRYPOINT === "true" || undefined,
     port: savedVars.OPENCLAW_PORT ? parseInt(savedVars.OPENCLAW_PORT, 10) : undefined,
     containerRunArgs: savedVars.OPENCLAW_CONTAINER_RUN_ARGS || undefined,
     localFileOwner: savedVars.OPENCLAW_LOCAL_FILE_OWNER || undefined,

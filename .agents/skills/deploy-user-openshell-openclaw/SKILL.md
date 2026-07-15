@@ -1,7 +1,7 @@
 ---
 name: deploy-user-openshell-openclaw
 description: >-
-  Provision exactly one human user's OpenShift PoC environment from claw-installer without requiring the human to run the installer manually: one per-user OpenShell namespace with one OpenShell Helm release, one per-user OpenClaw namespace/OpenClaw deployment, OpenShell sandbox backend wiring, and required post-checks. Use when asked to deploy, create, test, or reproduce a one human / one OpenShell / one OpenClaw setup after cluster prerequisites are ready.
+  Provision exactly one human user's OpenShift PoC environment from claw-installer without requiring the human to hand-drive the installer UI: one per-user OpenShell namespace with one OpenShell Helm release, one per-user OpenClaw namespace/OpenClaw deployment, OpenShell sandbox backend wiring, and required post-checks. Use when asked to deploy, create, test, or reproduce a one human / one OpenShell / one OpenClaw setup after cluster prerequisites are ready.
 ---
 
 # Deploy One User OpenShell/OpenClaw PoC
@@ -59,16 +59,18 @@ user: derive from request; must be RFC1123-safe lowercase alphanumeric plus hyph
 openshell namespace: openshell-<user>
 openshell Helm release: openshell-<user>
 openclaw namespace: openclaw-<user>
-OpenShell version: discover latest release before install; pinned fallback 0.0.44
+OpenShell version: discover latest release before install; pinned fallback 0.0.83
 OpenShell values: openshell/configs/openshell-values-openshift.yaml
 OpenClaw image: quay.io/sallyom/openclaw-openshell:latest
-OpenShell sandbox image: quay.io/sallyom/openclaw-openshell-sandbox:latest
+OpenShell sandbox image: quay.io/sallyom/openclaw-openshell:latest
+OpenClaw image platform: linux/amd64 and linux/arm64
 OpenShell endpoint: http://openshell-<user>.openshell-<user>.svc.cluster.local:8080
 sandbox backend: openshell
 sandbox mode: all
 sandbox scope: session
 workspace access: rw
-OpenShell plugin mode: mirror
+OpenShell plugin mode: remote
+use image entrypoint: false
 ```
 
 Use a unique OpenShell Helm release name per user. The chart creates cluster-scoped node-reader RBAC; reusing release name `openshell` across namespaces causes Helm ownership conflicts.
@@ -82,9 +84,9 @@ Preferred check with `gh`:
 ```shell
 latest_tag="$(gh release view --repo NVIDIA/OpenShell --json tagName --jq .tagName)"
 openshell_version="${latest_tag#v}"
-current_cli_version="$(sed -n 's/^ARG OPENSHELL_CLI_VERSION=//p' openshell/Dockerfile)"
+current_cli_version="$(sed -n 's/^const OPENSHELL_CLI_VERSION = "\([^"]*\)";/\1/p' src/server/deployers/k8s-manifests.ts)"
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart --version "$openshell_version" >/dev/null
-printf 'latest OpenShell release: %s\nlocal Dockerfile CLI: %s\n' "$openshell_version" "$current_cli_version"
+printf 'latest OpenShell release: %s\ninjected CLI pin: %s\n' "$openshell_version" "$current_cli_version"
 ```
 
 Fallback without `gh`:
@@ -92,12 +94,12 @@ Fallback without `gh`:
 ```shell
 latest_tag="$(node -e 'fetch("https://api.github.com/repos/NVIDIA/OpenShell/releases/latest").then(r=>r.json()).then(j=>console.log(j.tag_name))')"
 openshell_version="${latest_tag#v}"
-current_cli_version="$(sed -n 's/^ARG OPENSHELL_CLI_VERSION=//p' openshell/Dockerfile)"
+current_cli_version="$(sed -n 's/^const OPENSHELL_CLI_VERSION = "\([^"]*\)";/\1/p' src/server/deployers/k8s-manifests.ts)"
 helm show chart oci://ghcr.io/nvidia/openshell/helm-chart --version "$openshell_version" >/dev/null
-printf 'latest OpenShell release: %s\nlocal Dockerfile CLI: %s\n' "$openshell_version" "$current_cli_version"
+printf 'latest OpenShell release: %s\ninjected CLI pin: %s\n' "$openshell_version" "$current_cli_version"
 ```
 
-If `openshell_version` differs from `current_cli_version`, report version drift and ask whether to update `openshell/Dockerfile` before building. Keep the Helm chart version, gateway/supervisor images, and OpenShell CLI version aligned unless the user explicitly asks to test a mixed-version combination.
+If `openshell_version` differs from `current_cli_version`, report version drift and ask whether to update the injected CLI pin before deploying. Keep the Helm chart version, gateway/supervisor images, and OpenShell CLI version aligned unless the user explicitly asks to test a mixed-version combination.
 
 ## Preflight
 
@@ -132,17 +134,31 @@ Create the OpenShell namespace and grant privileged SCC only there. These comman
 
 ```shell
 oc create ns openshell-<user>
-oc adm policy add-scc-to-user privileged -z default -n openshell-<user>
+oc adm policy add-scc-to-user privileged -z openshell-<user>-sandbox -n openshell-<user>
+```
+
+Create the JWT signing secret required when the OpenShift values disable the
+chart PKI job:
+
+```shell
+key_dir="$(mktemp -d)"
+openssl genpkey -algorithm Ed25519 -out "${key_dir}/signing.pem"
+openssl pkey -in "${key_dir}/signing.pem" -pubout -out "${key_dir}/public.pem"
+printf 'openshell-0\n' > "${key_dir}/kid"
+oc -n openshell-<user> create secret generic openshell-<user>-jwt-keys \
+  --from-file=signing.pem="${key_dir}/signing.pem" \
+  --from-file=public.pem="${key_dir}/public.pem" \
+  --from-file=kid="${key_dir}/kid"
+rm -rf "${key_dir}"
 ```
 
 Install OpenShell:
 
 ```shell
 helm install openshell-<user> oci://ghcr.io/nvidia/openshell/helm-chart \
-  --version "${openshell_version:-0.0.44}" \
+  --version "${openshell_version:-0.0.83}" \
   -n openshell-<user> \
-  -f openshell/configs/openshell-values-openshift.yaml \
-  --set server.sandboxImage=quay.io/sallyom/openclaw-openshell-sandbox:latest
+  -f openshell/configs/openshell-values-openshift.yaml
 ```
 
 Wait and verify:
@@ -161,31 +177,34 @@ http://openshell-<user>.openshell-<user>.svc.cluster.local:8080
 
 ## Step 2: Prepare OpenClaw Inputs
 
-Use an OpenClaw image that includes `/opt/openshell/bin/openshell`. If the user has just built an image by digest, prefer that digest over `latest`.
+Use the multi-arch UBI 9 image from the defaults. The deployer injects the
+OpenShell CLI and external plugin at pod startup; the image supplies OpenClaw,
+a compatible Node/SQLite runtime, SSH/rsync tools, and the sandbox account.
 
-If building from local `../openclaw`, use:
+To rebuild the default image from the pinned OpenClaw release, use:
 
 ```shell
-OPENSHELL_CLI_VERSION="${openshell_version:-0.0.44}" \
-  ./openshell/build-openclaw-source-image.sh quay.io/<org>/openclaw:openshell
+./openshell/build-openclaw-source-image.sh quay.io/<org>/openclaw:openshell
 podman push quay.io/<org>/openclaw:openshell
 ```
 
-For `podman farm build`, build the OpenClaw base first, capture its digest, then layer the OpenShell CLI image on that digest:
+`OPENSHELL_CLI_VERSION` is not a Dockerfile build argument; the CLI remains an
+init-container concern. For a multi-arch `podman farm build`, build the
+standalone Dockerfile directly:
 
 ```shell
 podman farm build \
-  -f ../openclaw/Dockerfile \
-  --build-arg OPENCLAW_EXTENSIONS=diagnostics-otel,codex \
-  --build-arg OPENCLAW_IMAGE_APT_PACKAGES="openssh-client rsync" \
-  ../openclaw
-
-podman farm build \
   -f openshell/Dockerfile \
-  --build-arg OPENCLAW_BASE_IMAGE=quay.io/<org>/openclaw@sha256:<base-digest> \
-  --build-arg OPENSHELL_CLI_VERSION="${openshell_version:-0.0.44}" \
+  --build-arg OPENCLAW_REF=v2026.7.1 \
   .
 ```
+
+Do not pass `OPENCLAW_EXTENSIONS` to this Dockerfile. It performs the full
+OpenClaw build, which includes bundled plugins such as `codex` and
+`diagnostics-otel`. OpenShell is an external plugin (`bundledDist: false`), so
+the image deliberately excludes its source and the deployer installs the
+published `@openclaw/openshell-sandbox@2026.7.1` package into persistent
+OpenClaw state.
 
 ## Step 3: Deploy OpenClaw (No Cluster Admin Required After OpenShell Exists)
 
@@ -196,21 +215,29 @@ Required OpenClaw deploy values:
 ```text
 mode: kubernetes/OpenShift
 namespace: openclaw-<user>
-image: CLI-bearing OpenClaw image, default quay.io/sallyom/openclaw-openshell:latest
+image: quay.io/sallyom/openclaw-openshell:latest
 sandbox enabled: true
 sandbox backend: openshell
 OpenShell gateway endpoint: http://openshell-<user>.openshell-<user>.svc.cluster.local:8080
-OpenShell sandbox image/from: quay.io/sallyom/openclaw-openshell-sandbox:latest
-OpenShell mode: mirror
+OpenShell sandbox image/from: quay.io/sallyom/openclaw-openshell:latest
+OpenShell mode: remote
+use image entrypoint: false
 ```
 
-Do not require the human to run `./run.sh` or hand-drive the UI. Prefer an agent-run deploy through the installer API:
+Do not require the human to hand-drive the UI. Prefer an agent-run deploy
+through the installer API, but follow the repository's user-managed installer
+lifecycle rule:
 
-1. If the installer server is not already running, start it from `../claw-installer` in a background terminal:
+1. Reuse the installer if it is already running. If it is not running, ask the
+   human to start it from `../claw-installer` with a persistent state directory
+   and leave it running. Do not start or stop the installer automatically:
 
 ```shell
-npm run dev
+OPENCLAW_INSTALLER_STATE_DIR="$HOME/.local/share/openclaw-installer" ./run.sh
 ```
+
+Use the same `OPENCLAW_INSTALLER_STATE_DIR` for later launches so saved
+instances and deployment inputs remain discoverable.
 
 2. POST a normal `DeployConfig` to `http://127.0.0.1:3000/api/deploy`. Use provider credentials or SecretRefs according to the user's chosen model provider. Do not invent credentials, paste secrets into logs, or hard-code credentials into files.
 
@@ -229,8 +256,9 @@ Minimal OpenShell fields for the POST body:
   "sandboxWorkspaceAccess": "rw",
   "sandboxBackend": "openshell",
   "sandboxOpenShellGatewayEndpoint": "http://openshell-<user>.openshell-<user>.svc.cluster.local:8080",
-  "sandboxOpenShellMode": "mirror",
-  "sandboxOpenShellFrom": "quay.io/sallyom/openclaw-openshell-sandbox:latest"
+  "sandboxOpenShellMode": "remote",
+  "sandboxOpenShellFrom": "quay.io/sallyom/openclaw-openshell:latest",
+  "useImageEntrypoint": false
 }
 ```
 
@@ -246,20 +274,41 @@ oc get deployment,svc,pod,pvc -n openclaw-<user>
 oc logs -n openclaw-<user> deployment/openclaw -c gateway --tail=120
 ```
 
-Verify the baked OpenShell CLI inside the gateway:
+Verify the injected OpenShell CLI inside the gateway:
 
 ```shell
 oc exec -n openclaw-<user> deployment/openclaw -c gateway -- \
-  /opt/openshell/bin/openshell --version
+  /openshell-bin/openshell --version
 ```
 
-Verify the old CLI init-container path is gone:
+Verify the CLI was injected by the consolidated plugin init container:
 
 ```shell
 oc get pod -n openclaw-<user> -l app=openclaw -o jsonpath='{.items[0].spec.initContainers[*].name}'
 ```
 
-Expected init containers include `init-config` and `install-openclaw-plugins`, not `install-openshell-cli`.
+Expected init containers include `init-config` and `install-openclaw-plugins`;
+the latter downloads the CLI and ensures the plugin is available, installing
+the published package when it is not bundled in the image.
+
+Verify that OpenClaw loaded the OpenShell plugin rather than merely discovering
+its name:
+
+```shell
+oc exec -n openclaw-<user> deployment/openclaw -c gateway -- \
+  node /app/openclaw.mjs plugins list --json
+```
+
+The JSON entry with `id` `openshell` must report `status` `loaded`. A disabled
+or error entry does not pass this check.
+
+Record the immutable image ID used by the running gateway, especially while
+the PoC default uses the mutable `:latest` tag:
+
+```shell
+oc get pod -n openclaw-<user> -l app=openclaw \
+  -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="gateway")].imageID}{"\n"}'
+```
 
 Trigger one OpenClaw agent turn that uses `exec`, then watch OpenShell sandbox pods:
 
@@ -286,6 +335,7 @@ Created/used:
 - OpenShell endpoint:
 - OpenClaw namespace:
 - OpenClaw image:
+- OpenClaw image digest:
 
 Post-checks:
 - cluster prerequisites already present:

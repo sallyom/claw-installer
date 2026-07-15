@@ -29,8 +29,11 @@ export const OPENCLAW_HOME_VOLUME_MOUNT = "/home/node";
 export const OPENCLAW_RUNTIME_HOME = OPENCLAW_HOME_VOLUME_MOUNT;
 export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
 export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
-const OPENSHELL_CLI_PATH = "/opt/openshell/bin/openshell";
-const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox";
+const OPENSHELL_CLI_VERSION = "0.0.83";
+const OPENSHELL_CLI_MOUNT_DIR = "/openshell-bin";
+const OPENSHELL_CLI_PATH = `${OPENSHELL_CLI_MOUNT_DIR}/openshell`;
+const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox@2026.7.1";
+const OPENSHELL_RUNTIME_PATH = `${OPENSHELL_CLI_MOUNT_DIR}:/app/node_modules/.bin:/opt/app-root/src/node_modules/.bin/:/opt/app-root/src/.npm-global/bin/:/opt/app-root/src/bin:/opt/app-root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
 const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 const ONEPASSWORD_CLI_IMAGE = "docker.io/1password/op:2";
@@ -81,23 +84,6 @@ function usesDirectAnthropicVertex(config: DeployConfig): boolean {
   }
   return config.inferenceProvider === "vertex-anthropic"
     || Boolean(config.vertexEnabled && config.vertexProvider === "anthropic");
-}
-
-function openShellGatewayRegistrationScript(): string {
-  return `
-if [ -z "\${OPENSHELL_GATEWAY_ENDPOINT:-}" ]; then
-  echo "OpenShell gateway endpoint is required when the OpenShell sandbox backend is enabled" >&2
-  exit 1
-fi
-if [ ! -x ${OPENSHELL_CLI_PATH} ]; then
-  echo "OpenShell CLI not found at ${OPENSHELL_CLI_PATH}; use the OpenShell PoC OpenClaw image" >&2
-  exit 1
-fi
-mkdir -p ${OPENCLAW_RUNTIME_HOME}/.config
-${OPENSHELL_CLI_PATH} gateway remove openshell >/dev/null 2>&1 || true
-${OPENSHELL_CLI_PATH} gateway add "\${OPENSHELL_GATEWAY_ENDPOINT}" --local --name openshell
-${OPENSHELL_CLI_PATH} -g openshell status
-`.trim();
 }
 
 function managedAuthProfilesSqliteImportScript(agentIds: string[], sourcePath: string): string {
@@ -152,14 +138,13 @@ function managedAuthProfilesSqliteImportScript(agentIds: string[], sourcePath: s
   ].join("\n");
 }
 
-function gatewayStartupScript(useOpenShell: boolean, managedAgentIds: string[]): string {
+function gatewayStartupScript(managedAgentIds: string[]): string {
   return [
     "umask 007",
     managedAuthProfilesSqliteImportScript(
       managedAgentIds,
       `/openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY}`,
     ),
-    ...(useOpenShell ? [openShellGatewayRegistrationScript()] : []),
     "exec node openclaw.mjs gateway run --bind lan --port 18789",
   ].filter((line) => line.length > 0).join("\n");
 }
@@ -177,14 +162,22 @@ function pluginInstallEnv(): k8s.V1EnvVar[] {
   ];
 }
 
-function pluginInstallVolumeMounts(): k8s.V1VolumeMount[] {
+function pluginInstallVolumeMounts(useOpenShell = false): k8s.V1VolumeMount[] {
   return [
     { name: "openclaw-home", mountPath: OPENCLAW_HOME_VOLUME_MOUNT },
     { name: "tmp-volume", mountPath: "/tmp" },
+    ...(useOpenShell
+      ? [{ name: "openshell-cli", mountPath: OPENSHELL_CLI_MOUNT_DIR }]
+      : []),
   ];
 }
 
-function pluginInstallInitContainer(name: string, image: string, script: string): k8s.V1Container {
+function pluginInstallInitContainer(
+  name: string,
+  image: string,
+  script: string,
+  useOpenShell = false,
+): k8s.V1Container {
   return {
     name,
     image,
@@ -195,7 +188,7 @@ function pluginInstallInitContainer(name: string, image: string, script: string)
       requests: { memory: "512Mi", cpu: "100m" },
       limits: { memory: "1Gi", cpu: "500m" },
     },
-    volumeMounts: pluginInstallVolumeMounts(),
+    volumeMounts: pluginInstallVolumeMounts(useOpenShell),
     securityContext: {
       allowPrivilegeEscalation: false,
       capabilities: { drop: ["ALL"] },
@@ -203,11 +196,37 @@ function pluginInstallInitContainer(name: string, image: string, script: string)
   };
 }
 
+function openShellCliInstallScript(): string {
+  return [
+    `mkdir -p ${OPENSHELL_CLI_MOUNT_DIR}`,
+    'case "$(uname -m)" in',
+    '  x86_64) target="x86_64-unknown-linux-musl"; checksum="1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821" ;;',
+    '  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8" ;;',
+    '  *) echo "unsupported OpenShell CLI architecture: $(uname -m)" >&2; exit 1 ;;',
+    "esac",
+    `archive="openshell-\${target}.tar.gz"`,
+    `curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_CLI_VERSION}/\${archive}" -o "/tmp/\${archive}"`,
+    `echo "\${checksum}  /tmp/\${archive}" | sha256sum -c -`,
+    `tar -xzf "/tmp/\${archive}" -C ${OPENSHELL_CLI_MOUNT_DIR}`,
+    `chmod 0755 ${OPENSHELL_CLI_PATH}`,
+    `${OPENSHELL_CLI_PATH} --version`,
+  ].join("\n");
+}
+
 function configuredPluginsInstallScript(specs: string[]): string {
   return [
     "set -eu",
     `mkdir -p ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config`,
-    ...specs.map(pluginInstallCommand),
+    ...(specs.includes(OPENSHELL_PLUGIN_SPEC) ? [openShellCliInstallScript()] : []),
+    ...specs.flatMap((spec) => spec === OPENSHELL_PLUGIN_SPEC
+      ? [
+          "if node openclaw.mjs plugins list | grep -q openshell; then",
+          '  echo "OpenShell plugin is bundled in the image; skipping package installation."',
+          "else",
+          pluginInstallCommand(spec),
+          "fi",
+        ]
+      : [pluginInstallCommand(spec)]),
     ...(specs.includes(OPENSHELL_PLUGIN_SPEC)
       ? ["node openclaw.mjs plugins list | grep -q openshell"]
       : []),
@@ -219,10 +238,12 @@ function configuredPluginsInstallScript(specs: string[]): string {
 }
 
 function configuredPluginsInitContainer(image: string, specs: string[]): k8s.V1Container {
+  const useOpenShell = specs.includes(OPENSHELL_PLUGIN_SPEC);
   return pluginInstallInitContainer(
     "install-openclaw-plugins",
     image,
     configuredPluginsInstallScript(specs),
+    useOpenShell,
   );
 }
 
@@ -664,6 +685,7 @@ export function deploymentManifest(
     { name: "NODE_ENV", value: "production" },
     { name: "OPENCLAW_CONFIG_DIR", value: OPENCLAW_RUNTIME_DIR },
     { name: "OPENCLAW_STATE_DIR", value: OPENCLAW_RUNTIME_DIR },
+    { name: "OPENCLAW_WORKSPACE_DIR", value: `${OPENCLAW_RUNTIME_DIR}/workspace` },
     { name: "NPM_CONFIG_CACHE", value: `${OPENCLAW_RUNTIME_HOME}/.npm` },
     { name: "npm_config_cache", value: `${OPENCLAW_RUNTIME_HOME}/.npm` },
     { name: "XDG_CACHE_HOME", value: `${OPENCLAW_RUNTIME_HOME}/.cache` },
@@ -735,7 +757,7 @@ export function deploymentManifest(
   }
 
   if (useOpenShell) {
-    envVars.push({ name: "OPENSHELL_GATEWAY_ENDPOINT", value: config.sandboxOpenShellGatewayEndpoint?.trim() || "" });
+    envVars.push({ name: "PATH", value: OPENSHELL_RUNTIME_PATH });
   }
 
   if (config.vertexEnabled && useProxy) {
@@ -840,7 +862,9 @@ export function deploymentManifest(
               name: "gateway",
               image,
               imagePullPolicy: "IfNotPresent",
-              command: ["sh", "-c", gatewayStartupScript(useOpenShell, managedAgentIds)],
+              ...(!config.useImageEntrypoint
+                ? { command: ["sh", "-c", gatewayStartupScript(managedAgentIds)] }
+                : {}),
               ports: [
                 { name: "gateway", containerPort: 18789, protocol: "TCP" },
                 ...(config.mcpAppsEnabled
@@ -883,6 +907,9 @@ export function deploymentManifest(
               volumeMounts: [
                 { name: "openclaw-home", mountPath: OPENCLAW_HOME_VOLUME_MOUNT },
                 { name: "tmp-volume", mountPath: "/tmp" },
+                ...(useOpenShell
+                  ? [{ name: "openshell-cli", mountPath: OPENSHELL_CLI_MOUNT_DIR, readOnly: true }]
+                  : []),
                 ...(authProfilesSecretJson
                   ? [{ name: "openclaw-secrets", mountPath: "/openclaw-secrets", readOnly: true }]
                   : []),
@@ -1054,6 +1081,9 @@ export function deploymentManifest(
               },
             },
             { name: "tmp-volume", emptyDir: {} },
+            ...(useOpenShell
+              ? [{ name: "openshell-cli", emptyDir: {} }]
+              : []),
             ...(config.gcpServiceAccountJson
               ? [{ name: "gcp-sa", secret: { secretName: "gcp-sa" } }]
               : []),

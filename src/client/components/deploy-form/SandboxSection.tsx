@@ -73,7 +73,7 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                   <label>OpenShell Gateway Endpoint</label>
                   <input
                     type="text"
-                    placeholder="http://openshell.openshell-alice.svc.cluster.local:8080"
+                    placeholder="http://openshell-alice.openshell-alice.svc.cluster.local:8080"
                     value={config.sandboxOpenShellGatewayEndpoint}
                     onChange={(e) => update("sandboxOpenShellGatewayEndpoint", e.target.value)}
                   />
@@ -87,11 +87,11 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                     value={config.sandboxOpenShellMode}
                     onChange={(e) => update("sandboxOpenShellMode", e.target.value)}
                   >
-                    <option value="mirror">mirror</option>
                     <option value="remote">remote</option>
+                    <option value="mirror">mirror</option>
                   </select>
                   <div className="hint">
-                    Start with mirror so the OpenClaw PVC remains the canonical workspace.
+                    Remote matches the OpenShell lab: the sandbox owns workspace state after its initial seed.
                   </div>
                 </div>
               </div>
@@ -100,12 +100,12 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                 <label>OpenShell Sandbox Source</label>
                 <input
                   type="text"
-                  placeholder="quay.io/sallyom/openclaw-openshell-sandbox:latest"
+                  placeholder="quay.io/sallyom/openclaw-openshell:latest"
                   value={config.sandboxOpenShellFrom}
                   onChange={(e) => update("sandboxOpenShellFrom", e.target.value)}
                 />
                 <div className="hint">
-                  Bare names resolve to OpenShell community sandbox images. Use a full image reference for a custom slim sandbox image.
+                  The default is the multi-arch OpenClaw 2026.7.1 UBI build validated with this installer. Bare names resolve through the OpenShell sandbox registry.
                 </div>
               </div>
             </>

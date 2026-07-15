@@ -1146,6 +1146,24 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
           </div>
         </div>
 
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <input
+              type="checkbox"
+              checked={config.useImageEntrypoint}
+              onChange={(e) =>
+                setConfig((prev) => ({ ...prev, useImageEntrypoint: e.target.checked }))
+              }
+              style={{ width: "auto" }}
+            />
+            Use image entrypoint
+          </label>
+          <div className="hint">
+            Let the image start OpenClaw itself. Enable this for images with a required startup script;
+            leave it off for the installer-managed upstream-compatible command.
+          </div>
+        </div>
+
         {isClusterMode && (
           <div className="form-group">
             <label>Project / Namespace</label>

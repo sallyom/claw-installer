@@ -5,6 +5,7 @@ import {
   buildLocalManagedAuthProfilesImportScript,
   buildOpenClawConfig,
   buildRunArgs,
+  localImageUserProbeArgs,
   __testing as localTesting,
   parseContainerRunArgs,
   redactCommandArgs,
@@ -12,7 +13,7 @@ import {
   runtimeOwnershipFixupCommand,
   shouldAlwaysPull,
 } from "../local.js";
-import { localStateMaintenanceUserArgs } from "../local-runtime.js";
+import { localMaintenanceEntrypointArgs, localStateMaintenanceUserArgs } from "../local-runtime.js";
 import { __testing as localPluginsTesting } from "../local-plugins.js";
 
 describe("shouldAlwaysPull", () => {
@@ -316,6 +317,55 @@ describe("local Vault SecretRef wiring", () => {
 
     const imageIndex = args.indexOf("ghcr.io/openclaw/openclaw:latest");
     expect(args.slice(imageIndex - 2, imageIndex)).toEqual(["--user", "501:20"]);
+  });
+
+  it("preserves the image entrypoint only when explicitly requested", () => {
+    const config = {
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      image: "quay.io/redhat-et/openclaw:csb-latest",
+    } as const;
+    const managedArgs = buildRunArgs(config, "podman", "openclaw-demo", 18789);
+    const imageManagedArgs = buildRunArgs(
+      { ...config, useImageEntrypoint: true },
+      "podman",
+      "openclaw-demo",
+      18789,
+      undefined,
+      undefined,
+      "gateway-token",
+    );
+
+    expect(managedArgs.slice(-4)).toEqual([
+      "quay.io/redhat-et/openclaw:csb-latest",
+      "sh",
+      "-c",
+      "umask 007 && exec node openclaw.mjs gateway --bind lan --port 18789",
+    ]);
+    expect(managedArgs).toEqual(expect.arrayContaining(["--entrypoint", ""]));
+    expect(imageManagedArgs).not.toEqual(expect.arrayContaining(["--entrypoint", ""]));
+    expect(imageManagedArgs.at(-1)).toBe("quay.io/redhat-et/openclaw:csb-latest");
+    expect(imageManagedArgs).toContain("OPENCLAW_PUBLIC_URL=http://localhost:18789");
+    expect(imageManagedArgs).toContain("OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw/workspace");
+    expect(imageManagedArgs).toContain("OPENCLAW_GATEWAY_TOKEN=gateway-token");
+  });
+
+  it("bypasses custom image entrypoints for local maintenance containers", () => {
+    expect(localMaintenanceEntrypointArgs()).toEqual(["--entrypoint", ""]);
+  });
+
+  it("probes the selected image user without invoking its entrypoint", () => {
+    expect(localImageUserProbeArgs("quay.io/redhat-et/openclaw:csb-latest")).toEqual([
+      "run",
+      "--rm",
+      "--entrypoint",
+      "",
+      "quay.io/redhat-et/openclaw:csb-latest",
+      "sh",
+      "-c",
+      "printf '%s:%s' \"$(id -u)\" \"$(id -g)\"",
+    ]);
   });
 
   it("mounts the local data volume as the writable OpenClaw home", () => {

@@ -50,6 +50,30 @@ describe("Multi-model per provider", () => {
       expect(body.agentSourceGitPath).toBe("teams/platform");
     });
 
+    it("sends image entrypoint mode only when enabled", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+
+      const defaultBody = buildDeployRequestBody({
+        mode: "kubernetes",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      config.useImageEntrypoint = true;
+      const imageEntrypointBody = buildDeployRequestBody({
+        mode: "kubernetes",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(defaultBody.useImageEntrypoint).toBeUndefined();
+      expect(imageEntrypointBody.useImageEntrypoint).toBe(true);
+    });
+
     it("includes anthropicModels when non-empty", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
@@ -320,6 +344,31 @@ describe("Multi-model per provider", () => {
   });
 
   describe("buildEnvFileContent", () => {
+    it("round-trips image entrypoint mode", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.useImageEntrypoint = true;
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      const vars = Object.fromEntries(
+        env
+          .split("\n")
+          .filter((line) => line && !line.startsWith("#") && line.includes("="))
+          .map((line) => {
+            const index = line.indexOf("=");
+            return [line.slice(0, index), line.slice(index + 1)];
+          }),
+      );
+
+      const { config: restored } = applySavedVarsToConfig(vars, createInitialDeployFormConfig());
+
+      expect(restored.useImageEntrypoint).toBe(true);
+    });
+
     it("round-trips Git Agent Source settings", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";

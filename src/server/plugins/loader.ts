@@ -1,14 +1,17 @@
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { DeployerRegistry, InstallerPlugin } from "../deployers/registry.js";
+import { installerDataDir } from "../paths.js";
 
 const PLUGIN_PREFIX = "openclaw-installer-";
-const CONFIG_PATH = join(homedir(), ".openclaw", "installer", "plugins.json");
 const BUILT_RUNTIME_SEGMENT = `${sep}dist${sep}`;
+
+function pluginConfigPath(): string {
+  return join(installerDataDir(), "plugins.json");
+}
 
 export interface PluginConfig {
   plugins?: string[];
@@ -20,10 +23,11 @@ function isBuiltRuntime(): boolean {
 }
 
 async function readPluginConfig(): Promise<PluginConfig> {
-  if (!existsSync(CONFIG_PATH)) return {};
+  const configPath = pluginConfigPath();
+  if (!existsSync(configPath)) return {};
 
   try {
-    const content = await readFile(CONFIG_PATH, "utf8");
+    const content = await readFile(configPath, "utf8");
     return JSON.parse(content) as PluginConfig;
   } catch {
     return {};
@@ -31,11 +35,12 @@ async function readPluginConfig(): Promise<PluginConfig> {
 }
 
 async function writePluginConfig(config: PluginConfig): Promise<void> {
-  const dir = dirname(CONFIG_PATH);
+  const configPath = pluginConfigPath();
+  const dir = dirname(configPath);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
 export async function getDisabledModes(): Promise<string[]> {

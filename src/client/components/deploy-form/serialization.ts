@@ -17,8 +17,7 @@ import type {
   SecretRefValue,
 } from "./types.js";
 
-// TODO(openshell): pin this by digest once the Fedora sandbox image contract stabilizes.
-const DEFAULT_OPENSHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell-sandbox:latest";
+const DEFAULT_OPENSHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell:latest";
 
 export function createInitialDeployFormConfig(): DeployFormConfig {
   return {
@@ -26,6 +25,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     agentName: "",
     agentDisplayName: "",
     image: "",
+    useImageEntrypoint: false,
     containerRunArgs: "",
     localFileOwner: "",
     podmanSecretMappingsText: DEFAULT_PROVIDER_PODMAN_SECRET_MAPPINGS_TEXT,
@@ -71,8 +71,8 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     sandboxMode: "all",
     sandboxScope: "session",
     sandboxWorkspaceAccess: "rw",
-    sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
-    sandboxOpenShellMode: "mirror",
+    sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+    sandboxOpenShellMode: "remote",
     sandboxOpenShellFrom: DEFAULT_OPENSHELL_SANDBOX_FROM,
     sandboxToolPolicyEnabled: false,
     sandboxToolAllowFiles: true,
@@ -379,6 +379,16 @@ export function applySavedVarsToConfig(
       agentName: getStringVar(vars, "OPENCLAW_AGENT_NAME", "agentName") || prev.agentName,
       agentDisplayName: getStringVar(vars, "OPENCLAW_DISPLAY_NAME", "agentDisplayName") || prev.agentDisplayName,
       image: getStringVar(vars, "OPENCLAW_IMAGE", "image") || prev.image,
+      useImageEntrypoint:
+        vars.OPENCLAW_USE_IMAGE_ENTRYPOINT === "true"
+          || vars.useImageEntrypoint === true
+          || vars.useImageEntrypoint === "true"
+          ? true
+          : vars.OPENCLAW_USE_IMAGE_ENTRYPOINT === "false"
+            || vars.useImageEntrypoint === false
+            || vars.useImageEntrypoint === "false"
+            ? false
+            : prev.useImageEntrypoint,
       containerRunArgs: getStringVar(vars, "OPENCLAW_CONTAINER_RUN_ARGS", "containerRunArgs") || prev.containerRunArgs,
       localFileOwner: getStringVar(vars, "OPENCLAW_LOCAL_FILE_OWNER", "localFileOwner") || prev.localFileOwner,
       podmanSecretMappingsText: savedPodmanSecretMappingsText || prev.podmanSecretMappingsText,
@@ -727,6 +737,7 @@ export function buildDeployRequestBody(params: {
     agentName: config.agentName,
     agentDisplayName: config.agentDisplayName || config.agentName,
     image: trimToUndefined(config.image),
+    useImageEntrypoint: config.useImageEntrypoint || undefined,
     containerRunArgs: mode === "local" ? trimToUndefined(config.containerRunArgs) : undefined,
     localFileOwner: mode === "local" ? trimToUndefined(config.localFileOwner) : undefined,
     podmanSecretMappings: mode === "local" && podmanSecretMappings.length > 0 ? podmanSecretMappings : undefined,
@@ -955,6 +966,7 @@ export function buildEnvFileContent(params: {
     `OPENCLAW_AGENT_NAME=${config.agentName}`,
     `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName}`,
     `OPENCLAW_IMAGE=${config.image}`,
+    `OPENCLAW_USE_IMAGE_ENTRYPOINT=${config.useImageEntrypoint}`,
     `OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`,
     `OPENCLAW_LOCAL_FILE_OWNER=${config.localFileOwner}`,
     `PODMAN_SECRET_MAPPINGS_B64=${encodeBase64(JSON.stringify(parsePodmanSecretMappingsText(config.podmanSecretMappingsText).mappings))}`,

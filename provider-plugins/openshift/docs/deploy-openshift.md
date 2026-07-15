@@ -43,11 +43,24 @@ For sandbox setup on cluster deployments, see [SANDBOX.md](../../../docs/SANDBOX
 | **Owner prefix** | *(optional)* | Defaults to OS username; used in generated namespace names |
 | **Display name** | `My Agent` | Shown in the UI |
 | **Image** | `ghcr.io/openclaw/openclaw:latest` | Container image |
+| **Use image entrypoint** | unchecked | Enable only when the selected image requires its own startup script |
 | **Enable sandbox backend** | checked | Choose SSH or OpenShell depending on what the platform provides |
 | **Sandbox Backend** | `OpenShell` or `SSH` | OpenShell needs a provisioned OpenShell gateway; SSH needs a remote sandbox host |
-| **OpenShell Gateway Endpoint** | `http://openshell.openshell-alice.svc.cluster.local:8080` | Required when OpenShell is selected |
+| **OpenShell Gateway Endpoint** | `http://openshell-alice.openshell-alice.svc.cluster.local:8080` | Required when OpenShell is selected |
 | **SSH Target** | `sandbox@gateway-host:22` | Required when SSH is selected |
 | **Provider credentials** | *(provider-specific)* | API key, Vertex credentials, or Codex CLI OAuth; same provider flow as generic Kubernetes deploys |
+
+Leave **Use image entrypoint** unchecked for the normal upstream-compatible
+installer command. Enable it for policy images such as
+`quay.io/redhat-et/openclaw:csb-latest` whose entrypoint must configure and
+start the gateway. In that mode the installer still provisions the PVC,
+configuration, credentials, Service, Route, and OAuth proxy, but it does not
+replace the gateway container's startup command. The OpenShift Route URL is
+provided to the image as `OPENCLAW_PUBLIC_URL`.
+
+The image remains responsible for its own plugin policy and runtime tooling.
+For example, the CSB image intentionally disables external plugins, so use it
+for the locked-down non-plugin deployment profile it defines.
 
 ## What Gets Created
 

@@ -20,6 +20,7 @@
 #   ./run.sh --plugins @acme/openclaw-installer-aws,@acme/openclaw-installer-gke
 #   OPENCLAW_INSTALLER_PLUGINS=@acme/openclaw-installer-aws ./run.sh
 #   ANTHROPIC_API_KEY=sk-... ./run.sh             # Pass API key
+#   OPENCLAW_INSTALLER_STATE_DIR=/path ./run.sh    # Relocate installer-managed host state
 #   OPENAI_API_KEY=sk-... ./run.sh                # Pass OpenAI key
 # ============================================================================
 
@@ -33,6 +34,7 @@ RUNTIME=""
 PLUGIN_LIST="${OPENCLAW_INSTALLER_PLUGINS:-}"
 RUN_MODE="${OPENCLAW_INSTALLER_RUN_MODE:-desktop}"
 DEPLOY_MODES="${OPENCLAW_INSTALLER_DEPLOY_MODES:-}"
+INSTALLER_STATE_DIR="${OPENCLAW_INSTALLER_STATE_DIR:-$HOME/.openclaw}"
 
 append_plugins() {
   local raw="$1"
@@ -90,6 +92,16 @@ info()    { echo -e "${BLUE}$1${NC}"; }
 success() { echo -e "${GREEN}$1${NC}"; }
 error()   { echo -e "${RED}$1${NC}"; exit 1; }
 
+case "$INSTALLER_STATE_DIR" in
+  "~") INSTALLER_STATE_DIR="$HOME" ;;
+  "~/"*) INSTALLER_STATE_DIR="$HOME/${INSTALLER_STATE_DIR#\~/}" ;;
+esac
+case "$INSTALLER_STATE_DIR" in
+  /*) ;;
+  *) error "OPENCLAW_INSTALLER_STATE_DIR must be an absolute path." ;;
+esac
+export OPENCLAW_INSTALLER_STATE_DIR="$INSTALLER_STATE_DIR"
+
 write_plugin_config() {
   local installer_dir="$1"
   mkdir -p "$installer_dir"
@@ -142,6 +154,7 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 info "Using container runtime: $RUNTIME"
+info "Installer state directory: $INSTALLER_STATE_DIR"
 if [ -n "$PLUGIN_LIST" ]; then
   info "Requested plugin packages: $PLUGIN_LIST"
 fi
@@ -175,7 +188,7 @@ run_native_app() {
     error "Node.js not found. Install it first: brew install node"
   fi
 
-  APP_DIR="$HOME/.openclaw/installer/.app"
+  APP_DIR="$INSTALLER_STATE_DIR/installer/.app"
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
   if [ -f "$SCRIPT_DIR/package.json" ] && [ -d "$SCRIPT_DIR/node_modules" ]; then
@@ -208,8 +221,8 @@ run_native_app() {
     fi
   fi
 
-  mkdir -p "$HOME/.openclaw/installer"
-  write_plugin_config "$HOME/.openclaw/installer"
+  mkdir -p "$INSTALLER_STATE_DIR/installer"
+  write_plugin_config "$INSTALLER_STATE_DIR/installer"
 
   info "Starting installer (Ctrl+C to stop)..."
   info "Open http://localhost:${PORT} in your browser."
@@ -302,8 +315,8 @@ case "$OS" in
       fi
     fi
 
-    mkdir -p "$HOME/.openclaw/installer"
-    write_plugin_config "$HOME/.openclaw/installer"
+    mkdir -p "$INSTALLER_STATE_DIR/installer"
+    write_plugin_config "$INSTALLER_STATE_DIR/installer"
 
     # Stop existing container
     podman stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -315,8 +328,9 @@ case "$OS" in
       --userns=keep-id:uid=1000,gid=0 \
       -p "${PORT}:3000" \
       -v "$PODMAN_SOCK:/run/podman/podman.sock" \
-      -v "$HOME/.openclaw:/host-openclaw:ro,Z" \
-      -v "$HOME/.openclaw/installer:/home/node/.openclaw/installer:Z" \
+      -v "$INSTALLER_STATE_DIR:/host-openclaw:ro,Z" \
+      -v "$INSTALLER_STATE_DIR/installer:/home/node/.openclaw/installer:Z" \
+      -e OPENCLAW_INSTALLER_STATE_DIR=/home/node/.openclaw \
       -e AGENT_SOURCE_DIR=/host-openclaw \
       "${ENV_FLAGS[@]}" \
       "${GCP_MOUNT_FLAGS[@]}" \

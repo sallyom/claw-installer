@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { DeployResult } from "../deployers/types.js";
 import {
   installerBindHost,
@@ -8,7 +10,7 @@ import {
   sanitizeSavedConfigVars,
   validateUserSuppliedPath,
 } from "../security.js";
-import { validateInstallerPathSegment } from "../paths.js";
+import { installerDataDir, installerStateDir, validateInstallerPathSegment } from "../paths.js";
 
 describe("security helpers", () => {
   it("redacts sensitive values from saved config payloads", () => {
@@ -63,6 +65,22 @@ describe("security helpers", () => {
     );
     expect(() => validateInstallerPathSegment("openclaw/sally", "instance")).toThrow(
       /contains invalid characters/,
+    );
+  });
+
+  it("uses a configurable installer state root", () => {
+    const env = { OPENCLAW_INSTALLER_STATE_DIR: "/tmp/openclaw-installer-state" };
+    expect(installerStateDir(env)).toBe("/tmp/openclaw-installer-state");
+  });
+
+  it("keeps the legacy installer state root by default", () => {
+    expect(installerStateDir({})).toBe(join(homedir(), ".openclaw"));
+    expect(installerDataDir()).toBe(`${installerStateDir()}/installer`);
+  });
+
+  it("rejects a relative installer state root", () => {
+    expect(() => installerStateDir({ OPENCLAW_INSTALLER_STATE_DIR: "relative/state" })).toThrow(
+      /must be an absolute path/,
     );
   });
 

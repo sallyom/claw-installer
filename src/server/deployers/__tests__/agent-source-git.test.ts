@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ describe("Agent Source Git", () => {
 
   afterEach(async () => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
@@ -58,5 +59,16 @@ describe("Agent Source Git", () => {
       cacheRoot,
     })).rejects.toThrow(/must stay within the repository/);
     expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("stores the default cache under the configured installer state root", async () => {
+    vi.stubEnv("OPENCLAW_INSTALLER_STATE_DIR", cacheRoot);
+
+    const sourceDir = await materializeAgentSourceGit({
+      url: "https://github.com/example/agents.git",
+    });
+
+    const expectedCacheRoot = await realpath(join(cacheRoot, "installer", "agent-sources"));
+    expect(sourceDir.startsWith(expectedCacheRoot)).toBe(true);
   });
 });

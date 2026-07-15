@@ -78,7 +78,18 @@ OPENCLAW_INSTALLER_PORT=8080 ./run.sh
 ./run.sh --plugins @acme/openclaw-installer-aws,@acme/openclaw-installer-gke
 ```
 
-`run.sh` uses `OPENCLAW_INSTALLER_PORT` and `OPENCLAW_INSTALLER_IMAGE`; it also accepts the older generic `PORT` fallback.
+`run.sh` uses `OPENCLAW_INSTALLER_PORT`, `OPENCLAW_INSTALLER_IMAGE`, and
+`OPENCLAW_INSTALLER_STATE_DIR`; it also accepts the older generic `PORT`
+fallback. The state directory defaults to `~/.openclaw` and contains installer
+metadata, agent workspaces, shared skills, and cron configuration. To use a
+different host directory:
+
+```bash
+OPENCLAW_INSTALLER_STATE_DIR="$HOME/.local/share/openclaw-installer" ./run.sh
+```
+
+Set this on the installer process, not in the deployment form's additional
+container arguments.
 
 ## Deploy Targets
 
@@ -97,7 +108,7 @@ They extend the installer with additional deployment targets such as OpenShift o
 This repo supports two plugin paths:
 
 1. **In-repo installer provider plugins** in `provider-plugins/`
-2. **External plugins** installed as npm packages and listed in `~/.openclaw/installer/plugins.json`
+2. **External plugins** installed as npm packages and listed in `<installer-state-dir>/installer/plugins.json`
 
 In-repo installer provider plugins are loaded automatically at startup -- no extra install steps needed.
 
@@ -125,7 +136,7 @@ Examples:
 - `openclaw-installer-aws`
 - `@acme/openclaw-installer-gke`
 
-You can activate external installer provider plugins by writing `~/.openclaw/installer/plugins.json` directly, or by using `run.sh`:
+You can activate external installer provider plugins by writing `<installer-state-dir>/installer/plugins.json` directly, or by using `run.sh`:
 
 ```bash
 ./run.sh --plugin @acme/openclaw-installer-aws
@@ -133,7 +144,7 @@ You can activate external installer provider plugins by writing `~/.openclaw/ins
 OPENCLAW_INSTALLER_PLUGINS=@acme/openclaw-installer-aws ./run.sh
 ```
 
-`run.sh` writes the requested package list to `~/.openclaw/installer/plugins.json`, which is then consumed by the server plugin loader on startup.
+`run.sh` writes the requested package list to `<installer-state-dir>/installer/plugins.json`, which is then consumed by the server plugin loader on startup.
 
 These packages must implement the installer plugin `register()` contract and register deployers with the installer. Pointing this at a random OpenClaw plugin or ClawHub package will not work unless that package was specifically built as an installer provider plugin for `openclaw-installer`.
 
@@ -159,7 +170,7 @@ Use one plugin spec per line:
 /app/extensions/custom-plugin
 ```
 
-Supported specs follow the OpenClaw plugin installer: ClawHub specs, npm packages, git specs, and local paths that exist inside the OpenClaw container. For local Podman/Docker deploys, existing host paths are mounted automatically. When the OpenShell sandbox backend is enabled, the installer automatically adds `@openclaw/openshell-sandbox`; you do not need to list it yourself.
+Supported specs follow the OpenClaw plugin installer: ClawHub specs, npm packages, git specs, and local paths that exist inside the OpenClaw container. For local Podman/Docker deploys, existing host paths are mounted automatically. When the OpenShell sandbox backend is enabled, the installer automatically adds `@openclaw/openshell-sandbox@2026.7.1`; you do not need to list it yourself.
 
 This is separate from installer provider plugins. Installer provider plugins add deploy targets to this app; OpenClaw runtime plugins add capabilities to the deployed OpenClaw instance.
 
