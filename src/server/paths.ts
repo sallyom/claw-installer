@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 
 const INSTALLER_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
@@ -11,8 +11,25 @@ export function validateInstallerPathSegment(value: string, label: string): stri
   return trimmed;
 }
 
+export function installerStateDir(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.OPENCLAW_INSTALLER_STATE_DIR?.trim();
+  if (!configured) {
+    return join(homedir(), ".openclaw");
+  }
+
+  const expanded = configured === "~"
+    ? homedir()
+    : configured.startsWith("~/")
+      ? join(homedir(), configured.slice(2))
+      : configured;
+  if (!isAbsolute(expanded)) {
+    throw new Error("OPENCLAW_INSTALLER_STATE_DIR must be an absolute path");
+  }
+  return normalize(expanded);
+}
+
 export function openclawHomeDir(): string {
-  return join(homedir(), ".openclaw");
+  return installerStateDir();
 }
 
 export function installerDataDir(): string {

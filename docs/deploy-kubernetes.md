@@ -16,6 +16,15 @@ chmod +x run.sh
 ./run.sh
 ```
 
+To keep installer metadata and host-side agent files outside the default
+`~/.openclaw` tree, start the installer with an approved absolute path:
+
+```bash
+OPENCLAW_INSTALLER_STATE_DIR="$HOME/.local/share/openclaw-installer" ./run.sh
+```
+
+Set this on `run.sh`, not in deployment container environment fields.
+
 Or from source:
 
 ```bash
@@ -90,6 +99,19 @@ OpenShell sandboxing requires an existing OpenShell gateway endpoint, usually pr
 See [SANDBOX.md](SANDBOX.md) for the recommended form values, secret handling, and troubleshooting.
 
 For upstream sandbox behavior, see the [OpenClaw sandboxing docs](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md).
+
+## Custom image entrypoints
+
+The installer normally replaces the image command with its upstream-compatible
+OpenClaw gateway command. Enable **Use image entrypoint** when a custom image
+must run its own startup script instead. The installer then omits the gateway
+container command while continuing to mount the generated state and pass the
+standard OpenClaw home, config, workspace, and credential environment.
+
+This is opt-in so existing upstream deployments retain their current startup
+behavior. The selected image is responsible for starting a gateway on port
+`18789`, honoring the provided configuration, and supplying any plugin tooling
+its policy permits.
 
 ## Notes
 

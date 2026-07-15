@@ -143,6 +143,10 @@ export function localStateMaintenanceUserArgs(value?: string): string[] {
   return ["--user", "0"];
 }
 
+export function localMaintenanceEntrypointArgs(): string[] {
+  return ["--entrypoint", ""];
+}
+
 export function runtimeOwnershipFixupCommand(localFileOwner?: string): string {
   const owner = normalizeLocalFileOwner(localFileOwner) || "node:node";
   // Fix for #71: strip world bits after chown so other users/processes on the

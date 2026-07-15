@@ -30,7 +30,7 @@ The sandbox runtime handles:
 Important behavior:
 
 - with SSH, the remote sandbox is remote-canonical after the initial seed
-- with OpenShell mirror mode, the OpenClaw PVC remains the canonical workspace and changes are mirrored into the sandbox
+- with OpenShell remote mode, the sandbox owns workspace state after the initial seed
 - OpenClaw copies or mirrors the workspace to the sandbox on first use
 - sandboxed changes happen inside the sandbox runtime and are synchronized according to the selected backend and workspace mode
 - if you change host files and want an existing SSH sandbox to see them again, recreate the sandbox runtime from inside OpenClaw
@@ -53,6 +53,16 @@ Start with `mode=all` and `scope=session` unless you have a reason to optimize f
 
 OpenShell is available for Kubernetes and OpenShift deploy targets.
 
+The default OpenClaw/OpenShell image is the multi-arch UBI 9 build of OpenClaw
+`v2026.7.1`, `quay.io/sallyom/openclaw-openshell:latest`. Pin its manifest
+digest when reproducibility matters.
+
+A cluster admin must install the Agent Sandbox prerequisites and the OpenShell
+gateway before the OpenClaw owner uses this backend. See the runnable
+[OpenShift + OpenShell demo](../openshell/demo.md#1-install-openshell-cluster-prerequisites)
+for the CRD/controller, SCC, signing secret, Helm install, and verification
+steps.
+
 Use these deploy form values:
 
 - `Enable sandbox backend`: checked
@@ -60,11 +70,11 @@ Use these deploy form values:
 - `Sandbox Mode`: `non-main` when a trusted manager agent should run on the gateway and worker sessions should be sandboxed, or `all` when every agent session should be sandboxed
 - `Sandbox Scope`: `agent` for one sandbox per agent, or `session` for one sandbox per session
 - `Workspace Access`: `rw`
-- `OpenShell Gateway Endpoint`: cluster-internal URL for the provisioned OpenShell gateway, for example `http://openshell.openshell-alice.svc.cluster.local:8080`
-- `OpenShell Workspace Mode`: `mirror`
+- `OpenShell Gateway Endpoint`: cluster-internal URL for the provisioned OpenShell gateway, for example `http://openshell-alice.openshell-alice.svc.cluster.local:8080`
+- `OpenShell Workspace Mode`: `remote`
 - `OpenShell Sandbox Source`: a full sandbox image reference, or leave the default when the approved image is already configured
 
-When OpenShell is enabled, the installer automatically installs the `@openclaw/openshell-sandbox` OpenClaw runtime plugin before gateway startup and writes a managed OpenShell policy file at `/home/node/.openclaw/openshell/policy.yaml`.
+When OpenShell is enabled, the installer automatically installs `@openclaw/openshell-sandbox@2026.7.1` before gateway startup and writes a managed OpenShell policy file at `/home/node/.openclaw/openshell/policy.yaml`.
 
 ## SSH Credentials
 
@@ -98,9 +108,18 @@ Kubernetes deployments:
 Kubernetes and OpenShift deployments:
 
 - the OpenShell gateway endpoint is written into the generated OpenClaw plugin config
-- the installer installs the OpenShell runtime plugin automatically
+- the installer downloads the checksum-verified OpenShell CLI into a shared `emptyDir`
+- the installer installs the pinned OpenShell runtime plugin automatically
 - the init container writes a managed OpenShell policy file into the OpenClaw PVC
-- the policy keeps `/sandbox`, `/tmp`, and `/dev/null` writable, and allows read-only access to standard runtime paths plus `/home/sandbox` for shell startup files
+- the gateway adds `/openshell-bin` to `PATH`, allowing both the plugin and its generated SSH `ProxyCommand` to invoke the CLI
+- the policy matches the lab's filesystem and network allowlist baseline
+
+The plugin calls the configured gateway endpoint for sandbox lifecycle and to
+request sandbox-specific SSH config. OpenClaw then uses `ssh` with that config;
+its `ProxyCommand` runs `openshell ssh-proxy` to reach the sandbox through the
+gateway. It does not SSH into the gateway, and the OpenShell backend does not
+use the installer fields for a static SSH target, key, certificate, or
+known-hosts file.
 
 ## SSH Remote Host Requirements
 
@@ -121,7 +140,7 @@ Common checks:
 - the remote user can create directories under `Remote Workspace Root`
 - the OpenClaw image actually contains the `ssh` client
 - for OpenShell, the gateway endpoint is reachable from the OpenClaw pod
-- for OpenShell, the OpenClaw image contains the OpenShell CLI at `/opt/openshell/bin/openshell`
+- for OpenShell, `/openshell-bin/openshell --version` succeeds in the gateway pod
 - for OpenShell, the `@openclaw/openshell-sandbox` plugin install init container completed successfully
 
 Typical failure patterns:
@@ -129,7 +148,7 @@ Typical failure patterns:
 - host verification failures: add the server entry to `Known Hosts`
 - auth failures: verify the key path, cert, and remote user
 - host file changes not appearing in an SSH sandbox: recreate the sandbox runtime after the first seed
-- OpenShell `.bash_profile` permission warnings: ensure the generated policy includes read-only `/home/sandbox`, then recreate the affected sandbox so the new policy applies
+- OpenShell CLI failures: inspect the `install-openclaw-plugins` init container for download or checksum errors
 
 ## Related docs
 

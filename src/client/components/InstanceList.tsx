@@ -68,7 +68,15 @@ function defaultSessionKey(inst: Instance): string {
   if (!agentName) {
     return "main";
   }
-  return `agent:${prefix}_${agentName}:main`;
+  if (inst.mode === "local") {
+    return `agent:${prefix}_${agentName}:main`;
+  }
+  const agentId = `${prefix}-${agentName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "");
+  return `agent:${agentId || "openclaw-agent"}:main`;
 }
 
 function StatusBadge({ inst, isActing }: { inst: Instance; isActing: boolean }) {

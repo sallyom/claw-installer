@@ -396,15 +396,25 @@ export class OpenShiftDeployer implements Deployer {
     const deployPatch = [
       // Add serviceAccountName
       { op: "add", path: "/spec/template/spec/serviceAccountName", value: "openclaw-oauth-proxy" },
-      // Change gateway bind to loopback (OAuth proxy fronts it)
-      {
-        op: "replace",
-        path: "/spec/template/spec/containers/0/command",
-        value: [
-          "sh", "-c",
-          "umask 007 && exec node dist/index.js gateway run --bind loopback --port 18789",
-        ],
-      },
+      // Preserve required image startup scripts when requested. Otherwise keep
+      // the installer-managed loopback command used by existing deployments.
+      ...(!config.useImageEntrypoint
+        ? [{
+            op: "replace",
+            path: "/spec/template/spec/containers/0/command",
+            value: [
+              "sh", "-c",
+              "umask 007 && exec node dist/index.js gateway run --bind loopback --port 18789",
+            ],
+          }]
+        : []),
+      ...(config.useImageEntrypoint && routeUrl
+        ? [{
+            op: "add",
+            path: "/spec/template/spec/containers/0/env/-",
+            value: { name: "OPENCLAW_PUBLIC_URL", value: routeUrl },
+          }]
+        : []),
       // Add oauth-proxy container at the beginning
       { op: "add", path: "/spec/template/spec/containers/0", value: oauthContainer },
       ...(config.mcpAppsEnabled

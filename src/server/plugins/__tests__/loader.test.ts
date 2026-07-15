@@ -29,6 +29,7 @@ const mockedReadFile = vi.mocked(readFile);
 describe("loadPlugins", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
@@ -47,6 +48,22 @@ describe("loadPlugins", () => {
 
     await expect(loadPlugins(registry)).resolves.not.toThrow();
     expect(registry.list()).toHaveLength(0);
+  });
+
+  it("reads plugin configuration from the configured installer state root", async () => {
+    vi.stubEnv("OPENCLAW_INSTALLER_STATE_DIR", "/tmp/custom-installer-state");
+    mockedExistsSync.mockImplementation((p: unknown) => (
+      String(p) === "/tmp/custom-installer-state/installer/plugins.json"
+    ));
+    mockedReadFile.mockResolvedValue(JSON.stringify({ disabled: ["local"] }));
+
+    const { getDisabledModes } = await import("../loader.js");
+
+    await expect(getDisabledModes()).resolves.toEqual(["local"]);
+    expect(mockedReadFile).toHaveBeenCalledWith(
+      "/tmp/custom-installer-state/installer/plugins.json",
+      "utf8",
+    );
   });
 
   it("discovers and loads a valid provider plugin with register()", async () => {

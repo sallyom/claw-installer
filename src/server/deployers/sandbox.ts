@@ -5,10 +5,8 @@ function nonEmpty(value?: string): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-const OPEN_SHELL_CLI_MOUNT_PATH = "/opt/openshell/bin/openshell";
 export const OPEN_SHELL_POLICY_PATH = "/home/node/.openclaw/openshell/policy.yaml";
-// TODO(openshell): pin this by digest once the Fedora sandbox image contract stabilizes.
-const DEFAULT_OPEN_SHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell-sandbox:latest";
+const DEFAULT_OPEN_SHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell:latest";
 
 export const OPEN_SHELL_POLICY_YAML = `version: 1
 filesystem_policy:
@@ -21,16 +19,64 @@ filesystem_policy:
     - /app
     - /etc
     - /var/log
-    - /home/sandbox
   read_write:
     - /sandbox
     - /tmp
     - /dev/null
+    - /opt/openclaw
 landlock:
   compatibility: best_effort
 process:
   run_as_user: sandbox
   run_as_group: sandbox
+network_policies:
+  openai_api:
+    endpoints:
+      - host: api.openai.com
+        port: 443
+        protocol: rest
+        access: full
+        enforcement: enforce
+    binaries:
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+      - { path: "/app/**" }
+  github_api_read_only:
+    endpoints:
+      - host: api.github.com
+        port: 443
+        protocol: rest
+        access: read-only
+        enforcement: enforce
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/local/bin/curl }
+      - { path: /usr/bin/gh }
+      - { path: /usr/local/bin/gh }
+  github_content_reachability:
+    endpoints:
+      - host: github.com
+        port: 443
+      - host: raw.githubusercontent.com
+        port: 443
+      - host: objects.githubusercontent.com
+        port: 443
+      - host: release-assets.githubusercontent.com
+        port: 443
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/local/bin/curl }
+      - { path: /usr/bin/git }
+      - { path: /usr/local/bin/git }
+  npm_registry_reachability:
+    endpoints:
+      - host: registry.npmjs.org
+        port: 443
+    binaries:
+      - { path: /usr/bin/node }
+      - { path: /usr/local/bin/node }
+      - { path: /usr/bin/npm }
+      - { path: /usr/local/bin/npm }
 `;
 
 export function buildOpenShellPluginConfig(config: DeployConfig): Record<string, unknown> | undefined {
@@ -38,10 +84,8 @@ export function buildOpenShellPluginConfig(config: DeployConfig): Record<string,
     return undefined;
   }
   return {
-    command: OPEN_SHELL_CLI_MOUNT_PATH,
-    gateway: "openshell",
     from: nonEmpty(config.sandboxOpenShellFrom) || DEFAULT_OPEN_SHELL_SANDBOX_FROM,
-    mode: config.sandboxOpenShellMode || "mirror",
+    mode: config.sandboxOpenShellMode || "remote",
     gatewayEndpoint: nonEmpty(config.sandboxOpenShellGatewayEndpoint),
     policy: OPEN_SHELL_POLICY_PATH,
     timeoutSeconds: 180,

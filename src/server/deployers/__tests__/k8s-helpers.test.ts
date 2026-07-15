@@ -212,6 +212,24 @@ describe("model config generation", () => {
     }))).toBe("quay.io/sallyom/openclaw-openshell:latest");
   });
 
+  it("uses the OpenShift lab defaults for OpenShell plugin config", () => {
+    const rendered = buildOpenClawConfig(makeConfig({
+      sandboxEnabled: true,
+      sandboxBackend: "openshell",
+      sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+    }), "gateway-token") as {
+      plugins?: { entries?: Record<string, { config?: Record<string, unknown> }> };
+    };
+
+    expect(rendered.plugins?.entries?.openshell?.config).toEqual({
+      from: "quay.io/sallyom/openclaw-openshell:latest",
+      mode: "remote",
+      gatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+      policy: "/home/node/.openclaw/openshell/policy.yaml",
+      timeoutSeconds: 180,
+    });
+  });
+
   it("renders OpenShell sandbox plugin config for cluster deployments", () => {
     const config = makeConfig({
       sandboxEnabled: true,
@@ -219,7 +237,7 @@ describe("model config generation", () => {
       sandboxMode: "all",
       sandboxScope: "session",
       sandboxWorkspaceAccess: "rw",
-      sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+      sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
       sandboxOpenShellMode: "mirror",
       sandboxOpenShellFrom: "quay.io/sallyom/openclaw-openshell-sandbox:slim",
     });
@@ -246,11 +264,9 @@ describe("model config generation", () => {
     expect(rendered.plugins?.entries?.openshell).toEqual({
       enabled: true,
       config: {
-        command: "/opt/openshell/bin/openshell",
-        gateway: "openshell",
         from: "quay.io/sallyom/openclaw-openshell-sandbox:slim",
         mode: "mirror",
-        gatewayEndpoint: "http://openshell.openshell-alice.svc.cluster.local:8080",
+        gatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
         policy: "/home/node/.openclaw/openshell/policy.yaml",
         timeoutSeconds: 180,
       },

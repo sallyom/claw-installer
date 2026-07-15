@@ -14,11 +14,10 @@
       "openshell": {
         "enabled": true,
         "config": {
-          "command": "/opt/openshell/bin/openshell",
-          "gateway": "openshell",
-          "from": "quay.io/sallyom/openclaw-openshell-sandbox:latest",
-          "mode": "mirror",
-          "gatewayEndpoint": "http://openshell.openshell-alice.svc.cluster.local:8080",
+          "from": "quay.io/sallyom/openclaw-openshell:latest",
+          "mode": "remote",
+          "gatewayEndpoint": "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+          "policy": "/home/node/.openclaw/openshell/policy.yaml",
           "timeoutSeconds": 180
         }
       }

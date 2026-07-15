@@ -44,6 +44,20 @@ describe("k8s state sync manifests", () => {
     expect(gatewayContainer?.imagePullPolicy).toBe("IfNotPresent");
   });
 
+  it("preserves the image entrypoint only when explicitly requested", () => {
+    const managed = gatewayContainer(deploymentManifest("openclaw-alpha-openclaw", config));
+    const imageManaged = gatewayContainer(deploymentManifest(
+      "openclaw-alpha-openclaw",
+      makeConfig({ useImageEntrypoint: true }),
+    ));
+
+    expect(managed?.command).toEqual(expect.arrayContaining(["sh", "-c"]));
+    expect(imageManaged?.command).toBeUndefined();
+    expect(imageManaged?.env).toEqual(expect.arrayContaining([
+      { name: "OPENCLAW_WORKSPACE_DIR", value: "/home/node/.openclaw/workspace" },
+    ]));
+  });
+
   it("exposes the MCP Apps sandbox port when enabled", () => {
     const enabled = makeConfig({ mcpAppsEnabled: true });
     const servicePorts = serviceManifest("openclaw-alpha-openclaw", enabled).spec?.ports ?? [];
@@ -123,7 +137,7 @@ describe("k8s state sync manifests", () => {
     expect(env.XDG_CONFIG_HOME).toBe("/home/node/.config");
   });
 
-  it("installs the external OpenShell plugin and registers the baked OpenShell CLI when enabled", () => {
+  it("uses a bundled OpenShell plugin or installs it, and injects the OpenShell CLI", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
@@ -140,7 +154,12 @@ describe("k8s state sync manifests", () => {
 
     expect(pluginInit?.image).toBe("quay.io/sallyom/openclaw-openshell:latest");
     expect(gatewayContainer?.image).toBe("quay.io/sallyom/openclaw-openshell:latest");
-    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/openshell-sandbox' --force");
+    expect(pluginInit?.command?.[2]).toContain("NVIDIA/OpenShell/releases/download/v0.0.83");
+    expect(pluginInit?.command?.[2]).toContain("1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821");
+    expect(pluginInit?.command?.[2]).toContain("17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8");
+    expect(pluginInit?.command?.[2]).toContain("if node openclaw.mjs plugins list | grep -q openshell; then");
+    expect(pluginInit?.command?.[2]).toContain("OpenShell plugin is bundled in the image; skipping package installation.");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/openshell-sandbox@2026.7.1' --force");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list | grep -q openshell");
     expect(initContainers.find((container) => container.name === "install-openshell-plugin")).toBeUndefined();
     expect(initContainers.find((container) => container.name === "install-openshell-cli")).toBeUndefined();
@@ -156,25 +175,25 @@ describe("k8s state sync manifests", () => {
       expect.arrayContaining([
         { name: "openclaw-home", mountPath: "/home/node" },
         { name: "tmp-volume", mountPath: "/tmp" },
+        { name: "openshell-cli", mountPath: "/openshell-bin" },
       ]),
     );
-    expect(gatewayContainer?.command?.[2]).toContain("/opt/openshell/bin/openshell gateway remove openshell");
-    expect(gatewayContainer?.command?.[2]).toContain("/opt/openshell/bin/openshell gateway add \"${OPENSHELL_GATEWAY_ENDPOINT}\" --local --name openshell");
-    expect(gatewayContainer?.command?.[2]).toContain("/opt/openshell/bin/openshell -g openshell status");
+    expect(gatewayContainer?.command?.[2]).not.toContain("gateway add");
     expect(deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2]).toContain("cat > /home/node/.openclaw/openshell/policy.yaml");
-    expect(deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2]).toContain("- /home/sandbox");
+    expect(deployment.spec?.template.spec?.initContainers?.[0]?.command?.[2]).toContain("- /opt/openclaw");
     expect(gatewayContainer?.env).toEqual(
       expect.arrayContaining([
         {
-          name: "OPENSHELL_GATEWAY_ENDPOINT",
-          value: "http://openshell.openshell-alpha.svc.cluster.local:8080",
+          name: "PATH",
+          value: expect.stringContaining("/openshell-bin:"),
         },
       ]),
     );
-    expect(gatewayContainer?.volumeMounts).not.toEqual(
-      expect.arrayContaining([{ name: "openshell-cli", mountPath: "/opt/openshell", readOnly: true }]),
+    expect(gatewayContainer?.env?.find((entry) => entry.name === "OPENSHELL_GATEWAY_ENDPOINT")).toBeUndefined();
+    expect(gatewayContainer?.volumeMounts).toEqual(
+      expect.arrayContaining([{ name: "openshell-cli", mountPath: "/openshell-bin", readOnly: true }]),
     );
-    expect(volumes).not.toEqual(expect.arrayContaining([{ name: "openshell-cli", emptyDir: {} }]));
+    expect(volumes).toEqual(expect.arrayContaining([{ name: "openshell-cli", emptyDir: {} }]));
   });
 
   it("installs configured OpenClaw plugins before gateway startup", () => {

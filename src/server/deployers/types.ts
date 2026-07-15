@@ -153,6 +153,7 @@ export interface DeployConfig {
   localFileOwner?: string;
   podmanSecretMappings?: PodmanSecretMapping[];
   image?: string;
+  useImageEntrypoint?: boolean;
   port?: number;
   agentSourceDir?: string; // Host directory with workspace-*, skills/, and cron/jobs.json to provision
   agentSourceGitUrl?: string; // HTTPS repository containing the agent source tree

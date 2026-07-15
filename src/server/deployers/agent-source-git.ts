@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rename, rm, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import { promisify } from "node:util";
+import { installerDataDir } from "../paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -62,7 +62,7 @@ export async function materializeAgentSourceGit(options: AgentSourceGitOptions):
     throw new Error("Agent Source Git ref contains invalid characters");
   }
   const repositoryPath = validateRepositoryPath(options.path);
-  const cacheRoot = options.cacheRoot || join(homedir(), ".openclaw", "installer", "agent-sources");
+  const cacheRoot = options.cacheRoot || join(installerDataDir(), "agent-sources");
   const cacheKey = createHash("sha256").update(`${url}\0${ref || ""}`).digest("hex").slice(0, 16);
   const checkoutDir = join(cacheRoot, cacheKey);
 

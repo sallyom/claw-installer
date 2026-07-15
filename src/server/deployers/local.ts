@@ -87,6 +87,7 @@ import { MCP_APPS_SANDBOX_PORT, mcpAppsPortPublishArgs } from "./mcp-apps.js";
 import {
   bindMountSpec,
   localGatewayUserArgs,
+  localMaintenanceEntrypointArgs,
   localStateMaintenanceUserArgs,
   parseContainerRunArgs,
   runCommand,
@@ -108,6 +109,43 @@ function localLitellmHostPort(config: DeployConfig, gatewayPort: number): number
 
 export function resolveLocalRuntimeModelEndpoint(endpoint: string, runtime?: ContainerRuntime | string): string {
   return resolveEndpointForContainer(endpoint, runtime);
+}
+
+export function localImageUserProbeArgs(image: string): string[] {
+  return [
+    "run",
+    "--rm",
+    ...localMaintenanceEntrypointArgs(),
+    image,
+    "sh",
+    "-c",
+    `printf '%s:%s' "$(id -u)" "$(id -g)"`,
+  ];
+}
+
+async function resolveLocalImageFileOwner(
+  runtime: ContainerRuntime,
+  image: string,
+  configuredOwner: string | undefined,
+  log: LogCallback,
+): Promise<string | undefined> {
+  if (configuredOwner) {
+    return configuredOwner;
+  }
+
+  try {
+    const { stdout } = await execFileAsync(runtime, localImageUserProbeArgs(image));
+    const owner = stdout.trim();
+    if (!/^[0-9]+:[0-9]+$/.test(owner)) {
+      throw new Error(`unexpected image user: ${owner || "empty output"}`);
+    }
+    log(`Using image runtime user for local state: ${owner}`);
+    return owner;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    log(`WARNING: Could not detect image runtime user; using image defaults (${detail})`);
+    return undefined;
+  }
 }
 const GCP_SA_CONTAINER_PATH = "/home/node/.openclaw/gcp/sa.json";
 const LITELLM_CONFIG_PATH = "/home/node/.openclaw/litellm/config.yaml";
@@ -289,6 +327,9 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     `OPENCLAW_AGENT_NAME=${config.agentName}`,
     `OPENCLAW_DISPLAY_NAME=${config.agentDisplayName || config.agentName}`,
     `OPENCLAW_IMAGE=${resolveImage(config)}`,
+    ...(config.useImageEntrypoint
+      ? ["OPENCLAW_USE_IMAGE_ENTRYPOINT=true"]
+      : []),
     `OPENCLAW_PORT=${config.port ?? DEFAULT_PORT}`,
     ...(config.containerRunArgs
       ? [`OPENCLAW_CONTAINER_RUN_ARGS=${config.containerRunArgs}`]
@@ -628,6 +669,7 @@ async function importLocalManagedAuthProfiles(params: {
       params.log("Importing managed auth profiles into local OpenClaw state via Podman secret");
       const result = await runCommand(params.runtime, [
         "run", "--rm",
+        ...localMaintenanceEntrypointArgs(),
         ...localStateMaintenanceUserArgs(params.config.localFileOwner),
         ...localStateMountArgs(params.config),
         "--secret", `${secretName},type=mount`,
@@ -652,6 +694,7 @@ async function importLocalManagedAuthProfiles(params: {
     params.log("Importing managed auth profiles into local OpenClaw state");
     const result = await runCommand(params.runtime, [
       "run", "--rm",
+      ...localMaintenanceEntrypointArgs(),
       "--user", "0",
       ...localStateMountArgs(params.config),
       "-v", bindMountSpec(authProfileImportDir, "/tmp/openclaw-auth-import", "ro"),
@@ -1308,6 +1351,7 @@ export function buildRunArgs(
   port: number,
   litellmMasterKey?: string,
   otelEnvVars?: Record<string, string>,
+  gatewayToken?: string,
 ): string[] {
   const { effectiveConfig } = prepareLocalSandboxSshConfig(config);
   const image = resolveImage(effectiveConfig);
@@ -1354,11 +1398,19 @@ export function buildRunArgs(
     NODE_ENV: "production",
     OPENCLAW_CONFIG_DIR: OPENCLAW_LOCAL_STATE_DIR,
     OPENCLAW_STATE_DIR: OPENCLAW_LOCAL_STATE_DIR,
+    OPENCLAW_WORKSPACE_DIR: `${OPENCLAW_LOCAL_STATE_DIR}/workspace`,
     NPM_CONFIG_CACHE: OPENCLAW_LOCAL_NPM_CACHE_DIR,
     npm_config_cache: OPENCLAW_LOCAL_NPM_CACHE_DIR,
     XDG_CACHE_HOME: OPENCLAW_LOCAL_CACHE_DIR,
     XDG_CONFIG_HOME: OPENCLAW_LOCAL_CONFIG_HOME,
   };
+
+  if (effectiveConfig.useImageEntrypoint) {
+    env.OPENCLAW_PUBLIC_URL = `http://localhost:${port}`;
+    if (gatewayToken) {
+      env.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
+    }
+  }
 
   // Pass API keys to the gateway so it can route to OpenAI/Anthropic natively.
   // LiteLLM only handles Vertex models — secondary providers go direct.
@@ -1491,11 +1543,16 @@ export function buildRunArgs(
     runArgs.push(...buildPodmanSecretRunArgs(effectiveConfig.podmanSecretMappings));
   }
   runArgs.push(...parseContainerRunArgs(effectiveConfig.containerRunArgs));
+  if (!effectiveConfig.useImageEntrypoint) {
+    runArgs.push(...localMaintenanceEntrypointArgs());
+  }
   runArgs.push(...localGatewayUserArgs(effectiveConfig.localFileOwner));
   runArgs.push(image);
 
-  // Bind to lan (0.0.0.0) so port mapping works from host into pod/container
-  runArgs.push("sh", "-c", "umask 007 && exec node openclaw.mjs gateway --bind lan --port 18789");
+  if (!effectiveConfig.useImageEntrypoint) {
+    // Bind to lan (0.0.0.0) so port mapping works from host into pod/container
+    runArgs.push("sh", "-c", "umask 007 && exec node openclaw.mjs gateway --bind lan --port 18789");
+  }
 
   return runArgs;
 }
@@ -1544,7 +1601,17 @@ export class LocalDeployer implements Deployer {
       runtime,
       log,
     );
-    const runtimeConfig: DeployConfig = { ...activeConfig, containerRuntime: runtime };
+    const localFileOwner = await resolveLocalImageFileOwner(
+      runtime,
+      image,
+      activeConfig.localFileOwner,
+      log,
+    );
+    const runtimeConfig: DeployConfig = {
+      ...activeConfig,
+      containerRuntime: runtime,
+      localFileOwner,
+    };
 
     const agentId = `${config.prefix || "openclaw"}_${config.agentName}`;
     const workspaceDir = `/home/node/.openclaw/workspace-${agentId}`;
@@ -1720,6 +1787,7 @@ Use this table to track verified peer OpenClaw instances.
 
     const initArgs = [
       "run", "--rm",
+      ...localMaintenanceEntrypointArgs(),
       ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
       ...localStateMountArgs(config),
       "-v", bindMountSpec(initPayloadDir, "/tmp/openclaw-init", "ro"),
@@ -1771,6 +1839,7 @@ Use this table to track verified peer OpenClaw instances.
       const saScript = `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner)}`;
       const saResult = await runCommand(runtime, [
         "run", "--rm",
+        ...localMaintenanceEntrypointArgs(),
         ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
         ...localStateMountArgs(config),
         image, "sh", "-c", saScript,
@@ -1804,6 +1873,7 @@ Use this table to track verified peer OpenClaw instances.
 
       const litellmInitResult = await runCommand(runtime, [
         "run", "--rm",
+        ...localMaintenanceEntrypointArgs(),
         ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
         ...localStateMountArgs(config),
         image, "sh", "-c", litellmScript,
@@ -2039,7 +2109,7 @@ Use this table to track verified peer OpenClaw instances.
       }
     }
 
-    const runArgs = buildRunArgs(runtimeConfig, runtime, name, port, litellmMasterKey, otelEnv);
+    const runArgs = buildRunArgs(runtimeConfig, runtime, name, port, litellmMasterKey, otelEnv, gatewayToken);
 
     log(`Starting OpenClaw container: ${name}`);
     const run = await runCommand(runtime, runArgs, log);
@@ -2107,13 +2177,23 @@ Use this table to track verified peer OpenClaw instances.
       runtime,
       log,
     );
-    const runtimeConfig: DeployConfig = { ...effectiveConfig, containerRuntime: runtime };
+    const image = resolveImage(effectiveConfig);
+    await ensureLocalRuntimeImage(runtime, image, log);
+    const localFileOwner = await resolveLocalImageFileOwner(
+      runtime,
+      image,
+      effectiveConfig.localFileOwner,
+      log,
+    );
+    const runtimeConfig: DeployConfig = {
+      ...effectiveConfig,
+      containerRuntime: runtime,
+      localFileOwner,
+    };
     const name = result.containerId ?? containerName(runtimeConfig);
     const port = runtimeConfig.port ?? DEFAULT_PORT;
-    const image = resolveImage(runtimeConfig);
     const vol = result.volumeName ?? volumeName(runtimeConfig);
     const isContainerized = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
-    await ensureLocalRuntimeImage(runtime, image, log);
 
     // Copy updated agent files from host into volume before starting
       const agentId = `${runtimeConfig.prefix || "openclaw"}_${runtimeConfig.agentName}`;
@@ -2135,7 +2215,8 @@ Use this table to track verified peer OpenClaw instances.
     const ocConfigB64 = Buffer.from(ocConfig).toString("base64");
     const bootstrapResult = await runCommand(runtime, [
       "run", "--rm",
-      ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
+      ...localMaintenanceEntrypointArgs(),
+      ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
       ...localStateMountArgs(effectiveConfig),
       image,
       "sh",
@@ -2148,7 +2229,7 @@ Use this table to track verified peer OpenClaw instances.
         mcpServersRuntimeConfigUpdateScript(loadAgentSourceMcpServers(effectiveConfig.agentSourceDir)),
         ...workspaceSetupCommands,
         "mkdir -p /home/node/.openclaw/skills",
-        runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
+        runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner),
       ].join(" && "),
     ], log);
     if (bootstrapResult.code !== 0) {
@@ -2170,12 +2251,13 @@ Use this table to track verified peer OpenClaw instances.
       const b64 = Buffer.from(effectiveConfig.gcpServiceAccountJson).toString("base64");
       const gcpResult = await runCommand(runtime, [
         "run", "--rm",
-        ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
+        ...localMaintenanceEntrypointArgs(),
+        ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
         ...localStateMountArgs(effectiveConfig),
         image,
         "sh",
         "-c",
-        `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner)}`,
+        `mkdir -p /home/node/.openclaw/gcp && echo '${b64}' | base64 -d > ${GCP_SA_CONTAINER_PATH} && chmod 600 ${GCP_SA_CONTAINER_PATH} && ${runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner)}`,
       ], log);
       if (gcpResult.code !== 0) {
         log("WARNING: Failed to restore GCP service account key to runtime state");
@@ -2202,12 +2284,13 @@ Use this table to track verified peer OpenClaw instances.
         `if [ -d /tmp/agent-source/skills ]; then mkdir -p /home/node/.openclaw/skills && cp -r /tmp/agent-source/skills/* /home/node/.openclaw/skills/ 2>/dev/null || true; fi`,
         `if [ -f /tmp/agent-source/cron/jobs.json ]; then mkdir -p /home/node/.openclaw/cron && cp /tmp/agent-source/cron/jobs.json /home/node/.openclaw/cron/jobs.json 2>/dev/null || true; fi`,
         `if [ -f /tmp/agent-source/exec-approvals.json ]; then cp /tmp/agent-source/exec-approvals.json /home/node/.openclaw/exec-approvals.json 2>/dev/null || true; fi`,
-        runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
+        runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner),
       ].join("\n");
 
       const copyResult = await runCommand(runtime, [
         "run", "--rm",
-        ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
+        ...localMaintenanceEntrypointArgs(),
+        ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
         ...localStateMountArgs(effectiveConfig),
         "-v", bindMountSpec(agentSourceDir, "/tmp/agent-source", "ro"),
         image, "sh", "-c", copyScript,
@@ -2237,12 +2320,13 @@ Use this table to track verified peer OpenClaw instances.
             `chmod 600 '${SANDBOX_SSH_KNOWN_HOSTS_CONTAINER_PATH}'`,
           ]
         : []),
-      runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner),
+      runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner),
     ].join("\n");
 
     const sshMaterialResult = await runCommand(runtime, [
       "run", "--rm",
-      ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
+      ...localMaintenanceEntrypointArgs(),
+      ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
       ...localStateMountArgs(effectiveConfig),
       image, "sh", "-c", sshMaterialScript,
     ], log);
@@ -2267,7 +2351,8 @@ Use this table to track verified peer OpenClaw instances.
       try {
         const { stdout } = await execFileAsync(runtime, [
           "run", "--rm",
-          ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
+          ...localMaintenanceEntrypointArgs(),
+          ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
           ...localStateMountArgs(effectiveConfig),
           image, "cat", LITELLM_KEY_PATH,
         ]);
@@ -2281,10 +2366,11 @@ Use this table to track verified peer OpenClaw instances.
         const keyB64 = Buffer.from(litellmMasterKey).toString("base64");
         const litellmRewriteResult = await runCommand(runtime, [
           "run", "--rm",
-          ...localStateMaintenanceUserArgs(effectiveConfig.localFileOwner),
+          ...localMaintenanceEntrypointArgs(),
+          ...localStateMaintenanceUserArgs(runtimeConfig.localFileOwner),
           ...localStateMountArgs(effectiveConfig),
           image, "sh", "-c",
-          `mkdir -p /home/node/.openclaw/litellm && echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH} && echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH} && chmod 600 ${LITELLM_KEY_PATH} && ${runtimeOwnershipFixupCommand(effectiveConfig.localFileOwner)}`,
+          `mkdir -p /home/node/.openclaw/litellm && echo '${litellmB64}' | base64 -d > ${LITELLM_CONFIG_PATH} && echo '${keyB64}' | base64 -d > ${LITELLM_KEY_PATH} && chmod 600 ${LITELLM_KEY_PATH} && ${runtimeOwnershipFixupCommand(runtimeConfig.localFileOwner)}`,
         ], log);
         if (litellmRewriteResult.code !== 0) {
           throw new Error("Failed to restore LiteLLM runtime state");
@@ -2316,7 +2402,7 @@ Use this table to track verified peer OpenClaw instances.
           "--pod", pod,
           ...localStateMountArgs(effectiveConfig),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
-          ...localGatewayUserArgs(effectiveConfig.localFileOwner),
+          ...localGatewayUserArgs(runtimeConfig.localFileOwner),
           litellmImage,
           "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
         ], log);
@@ -2330,7 +2416,7 @@ Use this table to track verified peer OpenClaw instances.
           "-p", `${localLitellmHostPort(effectiveConfig, port)}:${LITELLM_PORT}`,
           ...localStateMountArgs(effectiveConfig),
           "-e", `GOOGLE_APPLICATION_CREDENTIALS=${GCP_SA_CONTAINER_PATH}`,
-          ...localGatewayUserArgs(effectiveConfig.localFileOwner),
+          ...localGatewayUserArgs(runtimeConfig.localFileOwner),
           litellmImage,
           "--config", LITELLM_CONFIG_PATH, "--port", String(LITELLM_PORT),
         ], log);
@@ -2427,7 +2513,15 @@ Use this table to track verified peer OpenClaw instances.
     }
 
     log(`Starting OpenClaw container: ${name}`);
-    const runArgs = buildRunArgs(runtimeConfig, runtime, name, port, litellmMasterKey, otelEnv);
+    const runArgs = buildRunArgs(
+      runtimeConfig,
+      runtime,
+      name,
+      port,
+      litellmMasterKey,
+      otelEnv,
+      bootstrapGatewayToken,
+    );
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to start container");
@@ -2580,6 +2674,7 @@ Use this table to track verified peer OpenClaw instances.
 
     const copyResult = await runCommand(runtime, [
       "run", "--rm",
+      ...localMaintenanceEntrypointArgs(),
       ...localStateMaintenanceUserArgs(result.config.localFileOwner),
       ...localStateMountArgs(result.config),
       "-v", bindMountSpec(agentSourceDir, "/tmp/agent-source", "ro"),
@@ -2605,6 +2700,7 @@ Use this table to track verified peer OpenClaw instances.
       try {
         const { stdout } = await execFileAsync(runtime, [
           "run", "--rm",
+          ...localMaintenanceEntrypointArgs(),
           ...localStateMaintenanceUserArgs(result.config.localFileOwner),
           ...localStateMountArgs(result.config),
           image, "cat", LITELLM_KEY_PATH,
@@ -2616,7 +2712,16 @@ Use this table to track verified peer OpenClaw instances.
     }
 
     const port = result.config.port ?? DEFAULT_PORT;
-    const runArgs = buildRunArgs(result.config, runtime, name, port, litellmMasterKey);
+    const gatewayToken = await this.readSavedToken(name) || undefined;
+    const runArgs = buildRunArgs(
+      result.config,
+      runtime,
+      name,
+      port,
+      litellmMasterKey,
+      undefined,
+      gatewayToken,
+    );
     const run = await runCommand(runtime, runArgs, log);
     if (run.code !== 0) {
       throw new Error("Failed to restart container");

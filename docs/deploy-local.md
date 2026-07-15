@@ -24,6 +24,17 @@ The installer uses the native OpenClaw home layout:
 - `~/.openclaw/skills` for shared skills
 - `~/.openclaw/installer` for installer state
 
+To relocate the entire installer-managed host tree, set the state directory on
+the installer process:
+
+```bash
+OPENCLAW_INSTALLER_STATE_DIR="$HOME/.local/share/openclaw-installer" ./run.sh
+```
+
+The custom root replaces `~/.openclaw` for all three locations above. Do not
+put this setting in Additional Container Run Args; that field only changes the
+deployed OpenClaw container.
+
 ### From source
 
 ```bash
@@ -50,6 +61,13 @@ Open `http://localhost:3000`, pick **"This Machine"**, fill in the form, and hit
 7. Go to the **Instances** tab to manage your deployment — copy the gateway token, view the run command, open the UI, stop/start the container, or delete the data volume
 
 The installer pulls the image, provisions your agent with a default identity and security guidelines, starts the container, and streams logs in real time. Your OpenClaw instance will be running at `http://localhost:18789`.
+
+For a custom image with a required startup script, enable **Use image
+entrypoint**. The generated `podman run` or `docker run` command then ends at
+the image reference instead of appending the installer-managed OpenClaw
+command. Leave it disabled for the default upstream-compatible behavior. The
+installer passes `OPENCLAW_PUBLIC_URL` and the writable OpenClaw state paths to
+entrypoint-managed images.
 
 ## First Browser Connect
 

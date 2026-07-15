@@ -88,6 +88,7 @@ export interface DeployFormConfig {
   agentName: string;
   agentDisplayName: string;
   image: string;
+  useImageEntrypoint: boolean;
   containerRunArgs: string;
   localFileOwner: string;
   podmanSecretMappingsText: string;
