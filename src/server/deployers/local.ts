@@ -44,6 +44,7 @@ import {
   buildVaultSecretProviderConfig,
   buildConfiguredAgentModelCatalog,
   CUSTOM_ENDPOINT_PROVIDER,
+  DEFAULT_OPENSHELL_IMAGE,
   KEYLESS_ENDPOINT_PLACEHOLDER,
   GOOGLE_BASE_URL,
   GOOGLE_PROVIDER,
@@ -77,12 +78,12 @@ import {
   GOOGLE_VERTEX_DEFAULT_MODEL,
   GOOGLE_VERTEX_PROVIDER,
 } from "./openclaw-compat.js";
-import { buildSandboxConfig } from "./sandbox.js";
+import { buildOpenShellPluginConfig, buildSandboxConfig, usesOpenShellSandbox } from "./sandbox.js";
 import { buildSandboxToolPolicy } from "./tool-policy.js";
 import { loadAgentSourceBundle, loadAgentSourceMcpServers, mainWorkspaceShellCondition } from "./agent-source.js";
 import { buildPodmanSecretRunArgs, hasPodmanSecretTarget } from "../../shared/podman-secrets.js";
 import { buildAgentJson, buildDefaultAgentsMd } from "./local-agent-files.js";
-import { installLocalPlugins } from "./local-plugins.js";
+import { installLocalPlugins, OPEN_SHELL_LOCAL_CLI_PATH } from "./local-plugins.js";
 import { MCP_APPS_SANDBOX_PORT, mcpAppsPortPublishArgs } from "./mcp-apps.js";
 import {
   bindMountSpec,
@@ -537,6 +538,15 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
     lines.push(`SANDBOX_TOOL_ALLOW_AUTOMATION=${config.sandboxToolAllowAutomation === true}`);
     lines.push(`SANDBOX_TOOL_ALLOW_MESSAGING=${config.sandboxToolAllowMessaging === true}`);
     lines.push(`SANDBOX_TOOL_ALLOW_WEB_FETCH=${config.sandboxToolAllowWebFetch === true}`);
+    if (config.sandboxBackend === "openshell") {
+      if (config.sandboxOpenShellGatewayEndpoint) {
+        lines.push(`SANDBOX_OPENSHELL_GATEWAY_ENDPOINT=${config.sandboxOpenShellGatewayEndpoint}`);
+      }
+      lines.push(`SANDBOX_OPENSHELL_MODE=${config.sandboxOpenShellMode || "remote"}`);
+      if (config.sandboxOpenShellFrom) {
+        lines.push(`SANDBOX_OPENSHELL_FROM=${config.sandboxOpenShellFrom}`);
+      }
+    }
     if (config.sandboxSshTarget) {
       lines.push(`SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`);
     }
@@ -569,6 +579,9 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
 
 function resolveImage(config: DeployConfig): string {
   if (config.image) return config.image;
+  // OpenShell needs ssh/rsync in the OpenClaw container. Vertex still runs
+  // through its LiteLLM sidecar, matching the Kubernetes image precedence.
+  if (usesOpenShellSandbox(config)) return DEFAULT_OPENSHELL_IMAGE;
   return config.vertexEnabled ? DEFAULT_VERTEX_IMAGE : DEFAULT_IMAGE;
 }
 
@@ -1120,6 +1133,9 @@ function requiredBundledPluginAllowlist(config: DeployConfig): string[] {
   if (config.telegramBotToken || config.telegramBotTokenRef) {
     allow.add("telegram");
   }
+  if (usesOpenShellSandbox(config)) {
+    allow.add("openshell");
+  }
   return Array.from(allow);
 }
 
@@ -1131,6 +1147,15 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   const useOtel = shouldUseOtel(config);
   const useCodexOauth = shouldUseCodexOauth(config);
   const pluginAllowlist = requiredBundledPluginAllowlist(config);
+  const openShellPluginConfig = buildOpenShellPluginConfig({
+    ...config,
+    sandboxOpenShellGatewayEndpoint: config.sandboxOpenShellGatewayEndpoint
+      ? resolveEndpointForContainer(config.sandboxOpenShellGatewayEndpoint, config.containerRuntime)
+      : undefined,
+  });
+  if (openShellPluginConfig) {
+    openShellPluginConfig.command = OPEN_SHELL_LOCAL_CLI_PATH;
+  }
   const sourceBundle = loadAgentSourceBundle(config);
   const ocConfig: Record<string, unknown> = {
     plugins: {
@@ -1140,6 +1165,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
         ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
         ...(config.onePasswordSecretsEnabled ? { [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
+        ...(openShellPluginConfig ? { openshell: { enabled: true, config: openShellPluginConfig } } : {}),
       },
     },
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces
@@ -1404,6 +1430,9 @@ export function buildRunArgs(
     XDG_CACHE_HOME: OPENCLAW_LOCAL_CACHE_DIR,
     XDG_CONFIG_HOME: OPENCLAW_LOCAL_CONFIG_HOME,
   };
+  if (usesOpenShellSandbox(effectiveConfig)) {
+    env.OPENSHELL_GATEWAY = "openshell";
+  }
 
   if (effectiveConfig.useImageEntrypoint) {
     env.OPENCLAW_PUBLIC_URL = `http://localhost:${port}`;
@@ -1568,6 +1597,9 @@ export class LocalDeployer implements Deployer {
       throw new Error(
         "No container runtime found. Install podman or docker first.",
       );
+    }
+    if (usesOpenShellSandbox(config) && runtime !== "podman") {
+      throw new Error("Local OpenShell sandbox deployments require Podman");
     }
     log(`Using container runtime: ${runtime}`);
 

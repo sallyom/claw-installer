@@ -195,7 +195,7 @@ For OpenAI Codex, run Codex CLI login on the installer host first, then select *
 The installer supports OpenClaw sandboxing with:
 
 - `ssh` for local, Kubernetes, and OpenShift deployments
-- `openshell` for Kubernetes and OpenShift deployments when a platform admin has provisioned an OpenShell gateway
+- `openshell` for local Podman deployments and for Kubernetes/OpenShift deployments with a provisioned OpenShell gateway
 
 For the installer-specific setup, credential handling, and troubleshooting, see [SANDBOX.md](docs/SANDBOX.md).
 

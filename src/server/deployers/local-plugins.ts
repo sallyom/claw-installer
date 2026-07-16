@@ -4,6 +4,13 @@ import { resolve } from "node:path";
 import type { ContainerRuntime } from "../services/container.js";
 import type { DeployConfig, LogCallback } from "./types.js";
 import {
+  buildOpenShellCliInstallScript,
+  OPEN_SHELL_PLUGIN_SPEC,
+  OPEN_SHELL_POLICY_PATH,
+  OPEN_SHELL_POLICY_YAML,
+  usesOpenShellSandbox,
+} from "./sandbox.js";
+import {
   bindMountSpec,
   localMaintenanceEntrypointArgs,
   localStateMaintenanceUserArgs,
@@ -14,6 +21,11 @@ import {
 const OPENCLAW_LOCAL_HOME = "/home/node";
 const OPENCLAW_LOCAL_STATE_DIR = `${OPENCLAW_LOCAL_HOME}/.openclaw`;
 const OPENCLAW_LOCAL_TMP_DIR = `${OPENCLAW_LOCAL_STATE_DIR}/tmp`;
+const OPEN_SHELL_LOCAL_CLI_DIR = `${OPENCLAW_LOCAL_STATE_DIR}/bin`;
+export const OPEN_SHELL_LOCAL_CLI_PATH = `${OPEN_SHELL_LOCAL_CLI_DIR}/openshell`;
+const OPEN_SHELL_LOCAL_TLS_VOLUME = "openshell-client-tls";
+const OPEN_SHELL_LOCAL_TLS_MOUNT_DIR = "/run/openshell-client-tls";
+const OPEN_SHELL_LOCAL_TLS_DIR = `${OPENCLAW_LOCAL_HOME}/.config/openshell/gateways/openshell/mtls`;
 const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 
 export async function installLocalPlugins(params: {
@@ -33,12 +45,7 @@ export async function installLocalPlugins(params: {
   }
   params.log(`Installing OpenClaw plugins: ${configuredPluginInstallSpecs(params.config).join(", ")}`);
 
-  const installScript = [
-    "set -eu",
-    `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR} ${OPENCLAW_LOCAL_TMP_DIR} ${OPENCLAW_LOCAL_HOME}/.npm ${OPENCLAW_LOCAL_HOME}/.cache ${OPENCLAW_LOCAL_HOME}/.config`,
-    ...plan.specs.map(nonFatalPluginInstallCommand),
-    runtimeOwnershipFixupCommand(params.config.localFileOwner),
-  ].join("\n");
+  const installScript = buildLocalPluginInstallScript(plan.specs, params.config.localFileOwner);
 
   const result = await runCommand(params.runtime, [
     "run", "--rm",
@@ -76,12 +83,45 @@ function nonFatalPluginInstallCommand(spec: string): string {
   ].join("\n");
 }
 
+function buildLocalPluginInstallScript(specs: string[], localFileOwner?: string): string {
+  const useOpenShell = specs.includes(OPEN_SHELL_PLUGIN_SPEC);
+  const policy = Buffer.from(OPEN_SHELL_POLICY_YAML).toString("base64");
+  return [
+    "set -eu",
+    `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR} ${OPENCLAW_LOCAL_TMP_DIR} ${OPENCLAW_LOCAL_HOME}/.npm ${OPENCLAW_LOCAL_HOME}/.cache ${OPENCLAW_LOCAL_HOME}/.config`,
+    ...(useOpenShell
+      ? [
+          buildOpenShellCliInstallScript(OPEN_SHELL_LOCAL_CLI_DIR),
+          `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR}/openshell`,
+          `echo '${policy}' | base64 -d > ${OPEN_SHELL_POLICY_PATH}`,
+          `test -r ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/ca.crt -a -r ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.crt -a -r ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.key || { echo "OpenShell client TLS volume is missing or incomplete; follow docs/deploy-local.md#sandbox-backends" >&2; exit 1; }`,
+          `mkdir -p ${OPEN_SHELL_LOCAL_TLS_DIR}`,
+          `install -m 0644 ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/ca.crt ${OPEN_SHELL_LOCAL_TLS_DIR}/ca.crt`,
+          `install -m 0644 ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.crt ${OPEN_SHELL_LOCAL_TLS_DIR}/tls.crt`,
+          `install -m 0600 ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.key ${OPEN_SHELL_LOCAL_TLS_DIR}/tls.key`,
+        ]
+      : []),
+    ...specs.flatMap((spec) => spec === OPEN_SHELL_PLUGIN_SPEC
+      ? [
+          "if node openclaw.mjs plugins list | grep -q openshell; then",
+          '  echo "OpenShell plugin is bundled in the image; skipping package installation."',
+          "else",
+          nonFatalPluginInstallCommand(spec),
+          "fi",
+        ]
+      : [nonFatalPluginInstallCommand(spec)]),
+    ...(useOpenShell ? ["node openclaw.mjs plugins list | grep -q openshell"] : []),
+    runtimeOwnershipFixupCommand(localFileOwner),
+  ].join("\n");
+}
+
 function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   const seen = new Set<string>();
   const specs: string[] = [];
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
     ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
+    ...(usesOpenShellSandbox(config) ? [OPEN_SHELL_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();
     if (!trimmed || seen.has(trimmed)) {
@@ -111,6 +151,9 @@ function localPluginInstallPlan(config: DeployConfig): {
   const specs: string[] = [];
   const mountArgs: string[] = [];
   const mountedHostPaths: string[] = [];
+  if (usesOpenShellSandbox(config)) {
+    mountArgs.push("-v", `${OPEN_SHELL_LOCAL_TLS_VOLUME}:${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}:ro`);
+  }
   configuredPluginInstallSpecs(config).forEach((spec, index) => {
     const hostPath = hostPluginSourcePath(spec);
     if (hostPath && existsSync(hostPath)) {
@@ -126,5 +169,6 @@ function localPluginInstallPlan(config: DeployConfig): {
 }
 
 export const __testing = {
+  buildLocalPluginInstallScript,
   localPluginInstallPlan,
 };

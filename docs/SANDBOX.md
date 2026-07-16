@@ -3,7 +3,7 @@
 This installer supports two OpenClaw sandbox backends:
 
 - `ssh` for local, Kubernetes, and OpenShift deployments
-- `openshell` for Kubernetes and OpenShift deployments when a platform admin has provisioned an OpenShell gateway
+- `openshell` for local Podman deployments and for Kubernetes/OpenShift deployments with a provisioned OpenShell gateway
 
 For upstream sandbox concepts and backend behavior, start with the OpenClaw docs:
 
@@ -13,9 +13,9 @@ For upstream sandbox concepts and backend behavior, start with the OpenClaw docs
 
 Use `ssh` when you want a simple remote Linux sandbox host that works from local containers and clusters.
 
-Use `openshell` when the platform provides a shared OpenShell gateway and sandbox image for per-user or per-team cluster deployments.
+Use `openshell` with a Podman-hosted gateway for local development, or with a shared platform gateway and sandbox image for cluster deployments.
 
-Both backends avoid giving the OpenClaw gateway container its own nested container runtime. OpenShell setup is platform-owned because the gateway and sandbox runtime need cluster-side installation and policy.
+Both backends avoid giving the OpenClaw gateway container its own nested container runtime. The local OpenShell gateway container owns Podman access through the mounted API socket; a cluster OpenShell gateway and runtime remain platform-owned.
 
 ## What it does
 
@@ -51,15 +51,24 @@ Start with `mode=all` and `scope=session` unless you have a reason to optimize f
 
 ## Recommended OpenShell Setup
 
-OpenShell is available for Kubernetes and OpenShift deploy targets.
+OpenShell is available for local, Kubernetes, and OpenShift deploy targets.
 
 The default OpenClaw/OpenShell image is the multi-arch UBI 9 build of OpenClaw
 `v2026.7.1`, `quay.io/sallyom/openclaw-openshell:latest`. Pin its manifest
 digest when reproducibility matters.
 
-A cluster admin must install the Agent Sandbox prerequisites and the OpenShell
-gateway before the OpenClaw owner uses this backend. See the runnable
-[OpenShift + OpenShell demo](../openshell/demo.md#1-install-openshell-cluster-prerequisites)
+For local Podman on macOS, follow the [local OpenShell gateway setup](deploy-local.md#sandbox-backends).
+It initializes persistent sandbox-JWT keys, configures the callback endpoint,
+and starts the published gateway image with the Podman socket mounted. Use
+`https://localhost:18080` as the installer endpoint; the installer rewrites that
+loopback host to `host.containers.internal` inside the OpenClaw container.
+For the equivalent setup without the deployer UI, including lazy sandbox
+creation, scope reuse, persistence, pruning, and cleanup, see
+[Run OpenClaw with local OpenShell sandboxes](openshell-local.md).
+
+For Kubernetes/OpenShift, a cluster admin must install the Agent Sandbox
+prerequisites and the OpenShell gateway first. See the runnable [OpenShift +
+OpenShell demo](../openshell/demo.md#1-install-openshell-cluster-prerequisites)
 for the CRD/controller, SCC, signing secret, Helm install, and verification
 steps.
 
@@ -70,11 +79,11 @@ Use these deploy form values:
 - `Sandbox Mode`: `non-main` when a trusted manager agent should run on the gateway and worker sessions should be sandboxed, or `all` when every agent session should be sandboxed
 - `Sandbox Scope`: `agent` for one sandbox per agent, or `session` for one sandbox per session
 - `Workspace Access`: `rw`
-- `OpenShell Gateway Endpoint`: cluster-internal URL for the provisioned OpenShell gateway, for example `http://openshell-alice.openshell-alice.svc.cluster.local:8080`
+- `OpenShell Gateway Endpoint`: `https://localhost:18080` for local Podman, or the provisioned cluster-internal URL such as `http://openshell-alice.openshell-alice.svc.cluster.local:8080`
 - `OpenShell Workspace Mode`: `remote`
 - `OpenShell Sandbox Source`: a full sandbox image reference, or leave the default when the approved image is already configured
 
-When OpenShell is enabled, the installer automatically installs `@openclaw/openshell-sandbox@2026.7.1` before gateway startup and writes a managed OpenShell policy file at `/home/node/.openclaw/openshell/policy.yaml`.
+When OpenShell is enabled, the installer automatically installs `@openclaw/openshell-sandbox@2026.7.1` before gateway startup and writes a managed OpenShell policy file at `/home/node/.openclaw/openshell/policy.yaml`. Local deployments also copy the client-only mTLS bundle from the `openshell-client-tls` volume and persist the checksum-verified OpenShell CLI at `/home/node/.openclaw/bin/openshell`; cluster deployments mount the CLI at `/openshell-bin/openshell`.
 
 ## SSH Credentials
 
@@ -104,6 +113,18 @@ Kubernetes deployments:
 - OpenClaw maps those env vars into sandbox SSH config
 
 ## How this installer configures OpenShell
+
+Local deployments:
+
+- the OpenShell gateway container owns the mounted Podman socket and creates sibling sandbox containers
+- the installer rewrites loopback gateway endpoints for container networking
+- the installer installs the pinned runtime plugin and OpenShell CLI into the OpenClaw volume
+- the OpenClaw container uses the OpenShell-capable image by default so `ssh` and `rsync` are available
+- the installer writes the managed OpenShell policy into the OpenClaw volume
+
+The Podman socket is a privileged local control surface. OpenClaw does not
+receive it, and the OpenShell gateway port should not be exposed to an
+untrusted network.
 
 Kubernetes and OpenShift deployments:
 
@@ -139,8 +160,10 @@ Common checks:
 - `Known Hosts` matches the target when strict checking is enabled
 - the remote user can create directories under `Remote Workspace Root`
 - the OpenClaw image actually contains the `ssh` client
-- for OpenShell, the gateway endpoint is reachable from the OpenClaw pod
-- for OpenShell, `/openshell-bin/openshell --version` succeeds in the gateway pod
+- for local OpenShell, `podman logs openshell-gateway` reports `Connected to Podman` and `gateway-minted sandbox JWT enabled`
+- for local OpenShell, `/home/node/.openclaw/bin/openshell --version` succeeds in the OpenClaw container
+- for cluster OpenShell, the gateway endpoint is reachable from the OpenClaw pod
+- for cluster OpenShell, `/openshell-bin/openshell --version` succeeds in the gateway pod
 - for OpenShell, the `@openclaw/openshell-sandbox` plugin install init container completed successfully
 
 Typical failure patterns:
@@ -152,5 +175,6 @@ Typical failure patterns:
 
 ## Related docs
 
+- [Manual local OpenShell guide](openshell-local.md)
 - [Local deployment guide](deploy-local.md)
 - [Kubernetes deployment guide](deploy-kubernetes.md)

@@ -22,17 +22,20 @@ import {
   OPENCLAW_SERVICE_ACCOUNT_NAME,
 } from "./vault-helper.js";
 import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
-import { OPEN_SHELL_POLICY_PATH, OPEN_SHELL_POLICY_YAML } from "./sandbox.js";
+import {
+  buildOpenShellCliInstallScript,
+  OPEN_SHELL_PLUGIN_SPEC,
+  OPEN_SHELL_POLICY_PATH,
+  OPEN_SHELL_POLICY_YAML,
+  usesOpenShellSandbox,
+} from "./sandbox.js";
 import { MCP_APPS_SANDBOX_PORT } from "./mcp-apps.js";
 
 export const OPENCLAW_HOME_VOLUME_MOUNT = "/home/node";
 export const OPENCLAW_RUNTIME_HOME = OPENCLAW_HOME_VOLUME_MOUNT;
 export const OPENCLAW_RUNTIME_DIR = `${OPENCLAW_RUNTIME_HOME}/.openclaw`;
 export const OPENCLAW_RUNTIME_TMP_DIR = `${OPENCLAW_RUNTIME_DIR}/tmp`;
-const OPENSHELL_CLI_VERSION = "0.0.83";
 const OPENSHELL_CLI_MOUNT_DIR = "/openshell-bin";
-const OPENSHELL_CLI_PATH = `${OPENSHELL_CLI_MOUNT_DIR}/openshell`;
-const OPENSHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox@2026.7.1";
 const OPENSHELL_RUNTIME_PATH = `${OPENSHELL_CLI_MOUNT_DIR}:/app/node_modules/.bin:/opt/app-root/src/node_modules/.bin/:/opt/app-root/src/.npm-global/bin/:/opt/app-root/src/bin:/opt/app-root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
 const ANTHROPIC_VERTEX_PLUGIN_SPEC = "@openclaw/anthropic-vertex-provider";
 const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
@@ -48,7 +51,7 @@ function configuredPluginInstallSpecs(config: DeployConfig): string[] {
     ...(config.pluginInstallSpecs ?? []),
     ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
     ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
-    ...(usesOpenShellSandbox(config) ? [OPENSHELL_PLUGIN_SPEC] : []),
+    ...(usesOpenShellSandbox(config) ? [OPEN_SHELL_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();
     if (!trimmed || seen.has(trimmed)) {
@@ -72,10 +75,6 @@ function pluginInstallCommand(spec: string): string {
     "  true",
     "}",
   ].join("\n");
-}
-
-function usesOpenShellSandbox(config: DeployConfig): boolean {
-  return Boolean(config.sandboxEnabled && config.sandboxBackend === "openshell");
 }
 
 function usesDirectAnthropicVertex(config: DeployConfig): boolean {
@@ -196,29 +195,14 @@ function pluginInstallInitContainer(
   };
 }
 
-function openShellCliInstallScript(): string {
-  return [
-    `mkdir -p ${OPENSHELL_CLI_MOUNT_DIR}`,
-    'case "$(uname -m)" in',
-    '  x86_64) target="x86_64-unknown-linux-musl"; checksum="1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821" ;;',
-    '  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8" ;;',
-    '  *) echo "unsupported OpenShell CLI architecture: $(uname -m)" >&2; exit 1 ;;',
-    "esac",
-    `archive="openshell-\${target}.tar.gz"`,
-    `curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_CLI_VERSION}/\${archive}" -o "/tmp/\${archive}"`,
-    `echo "\${checksum}  /tmp/\${archive}" | sha256sum -c -`,
-    `tar -xzf "/tmp/\${archive}" -C ${OPENSHELL_CLI_MOUNT_DIR}`,
-    `chmod 0755 ${OPENSHELL_CLI_PATH}`,
-    `${OPENSHELL_CLI_PATH} --version`,
-  ].join("\n");
-}
-
 function configuredPluginsInstallScript(specs: string[]): string {
   return [
     "set -eu",
     `mkdir -p ${OPENCLAW_RUNTIME_DIR} ${OPENCLAW_RUNTIME_TMP_DIR} ${OPENCLAW_RUNTIME_HOME}/.npm ${OPENCLAW_RUNTIME_HOME}/.cache ${OPENCLAW_RUNTIME_HOME}/.config`,
-    ...(specs.includes(OPENSHELL_PLUGIN_SPEC) ? [openShellCliInstallScript()] : []),
-    ...specs.flatMap((spec) => spec === OPENSHELL_PLUGIN_SPEC
+    ...(specs.includes(OPEN_SHELL_PLUGIN_SPEC)
+      ? [buildOpenShellCliInstallScript(OPENSHELL_CLI_MOUNT_DIR)]
+      : []),
+    ...specs.flatMap((spec) => spec === OPEN_SHELL_PLUGIN_SPEC
       ? [
           "if node openclaw.mjs plugins list | grep -q openshell; then",
           '  echo "OpenShell plugin is bundled in the image; skipping package installation."',
@@ -227,7 +211,7 @@ function configuredPluginsInstallScript(specs: string[]): string {
           "fi",
         ]
       : [pluginInstallCommand(spec)]),
-    ...(specs.includes(OPENSHELL_PLUGIN_SPEC)
+    ...(specs.includes(OPEN_SHELL_PLUGIN_SPEC)
       ? ["node openclaw.mjs plugins list | grep -q openshell"]
       : []),
     ...(specs.includes(ANTHROPIC_VERTEX_PLUGIN_SPEC)
@@ -238,7 +222,7 @@ function configuredPluginsInstallScript(specs: string[]): string {
 }
 
 function configuredPluginsInitContainer(image: string, specs: string[]): k8s.V1Container {
-  const useOpenShell = specs.includes(OPENSHELL_PLUGIN_SPEC);
+  const useOpenShell = specs.includes(OPEN_SHELL_PLUGIN_SPEC);
   return pluginInstallInitContainer(
     "install-openclaw-plugins",
     image,

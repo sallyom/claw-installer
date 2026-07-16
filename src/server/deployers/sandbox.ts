@@ -6,7 +6,9 @@ function nonEmpty(value?: string): string | undefined {
 }
 
 export const OPEN_SHELL_POLICY_PATH = "/home/node/.openclaw/openshell/policy.yaml";
-const DEFAULT_OPEN_SHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell:latest";
+export const DEFAULT_OPEN_SHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell:latest";
+export const OPEN_SHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox@2026.7.1";
+export const OPEN_SHELL_CLI_VERSION = "0.0.83";
 
 export const OPEN_SHELL_POLICY_YAML = `version: 1
 filesystem_policy:
@@ -78,6 +80,28 @@ network_policies:
       - { path: /usr/bin/npm }
       - { path: /usr/local/bin/npm }
 `;
+
+export function usesOpenShellSandbox(config: DeployConfig): boolean {
+  return Boolean(config.sandboxEnabled && config.sandboxBackend === "openshell");
+}
+
+export function buildOpenShellCliInstallScript(installDir: string): string {
+  const cliPath = `${installDir}/openshell`;
+  return [
+    `mkdir -p ${installDir}`,
+    'case "$(uname -m)" in',
+    '  x86_64) target="x86_64-unknown-linux-musl"; checksum="1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821" ;;',
+    '  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8" ;;',
+    '  *) echo "unsupported OpenShell CLI architecture: $(uname -m)" >&2; exit 1 ;;',
+    "esac",
+    'archive="openshell-${target}.tar.gz"',
+    `curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/v${OPEN_SHELL_CLI_VERSION}/\${archive}" -o "/tmp/\${archive}"`,
+    'echo "${checksum}  /tmp/${archive}" | sha256sum -c -',
+    `tar -xzf "/tmp/\${archive}" -C ${installDir}`,
+    `chmod 0755 ${cliPath}`,
+    `${cliPath} --version`,
+  ].join("\n");
+}
 
 export function buildOpenShellPluginConfig(config: DeployConfig): Record<string, unknown> | undefined {
   if (!config.sandboxEnabled || config.sandboxBackend !== "openshell") {
