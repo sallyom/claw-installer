@@ -118,6 +118,25 @@ describe("DeployForm deployer visibility (issue #10)", () => {
     expect(screen.getByText("OpenShift")).toBeTruthy();
   });
 
+  it("offers OpenShell for local Podman deployments", async () => {
+    global.fetch = mockHealthResponse([
+      { mode: "local", title: "This Machine", description: "Run locally", available: true, priority: 0, builtIn: true },
+    ]);
+
+    render(<DeployForm onDeployStarted={() => {}} />);
+
+    await screen.findByText("This Machine");
+    fireEvent.click(screen.getByLabelText("Enable sandbox backend"));
+
+    const backend = screen.getAllByRole("combobox").find((element) =>
+      Array.from((element as HTMLSelectElement).options).some((option) => option.value === "openshell"),
+    ) as HTMLSelectElement | undefined;
+    expect(backend).toBeTruthy();
+    expect(Array.from(backend!.options).map((option) => option.value)).toContain("openshell");
+    fireEvent.change(backend!, { target: { value: "openshell" } });
+    expect(screen.getByPlaceholderText("https://localhost:18080")).toBeTruthy();
+  });
+
   it("only shows cluster deployers returned by hosted mode health", async () => {
     global.fetch = mockHostedFetch(
       [

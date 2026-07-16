@@ -23,9 +23,11 @@ user-facing app. Its sandboxed tools call the OpenShell plugin, which creates or
 reuses OpenShell sandboxes for risky runtime work.
 
 The installer deploys OpenClaw against an existing OpenShell gateway; it does
-not install that gateway. A cluster admin follows [demo.md](demo.md) to install
-the Agent Sandbox prerequisites, create the per-user OpenShell namespace and
-signing secret, grant the scoped SCC, and install the gateway Helm release.
+not install that gateway. Local Podman users follow the
+[local gateway setup](../docs/deploy-local.md#sandbox-backends). A cluster admin
+follows [demo.md](demo.md) to install the Agent Sandbox prerequisites, create
+the per-user OpenShell namespace and signing secret, grant the scoped SCC, and
+install the gateway Helm release.
 
 ## What is included
 
@@ -252,6 +254,9 @@ their OpenClaw namespace can reach that gateway service.
 
 ## Current installer integration status
 
-`claw-installer` now exposes OpenShell as a Kubernetes/OpenShift sandbox backend
-option. Use it after a cluster admin has provisioned the user's OpenShell
-gateway namespace.
+`claw-installer` exposes OpenShell for local Podman and Kubernetes/OpenShift
+deployments. Local deployments run the published OpenShell gateway image with
+the Podman API socket mounted and point OpenClaw at `https://localhost:18080`;
+cluster deployments use the platform-provisioned gateway namespace described
+above. See [the local deployment guide](../docs/deploy-local.md#sandbox-backends)
+for the Podman command.

@@ -503,9 +503,9 @@ router.post("/", deploymentRateLimit, async (req, res) => {
     });
     return;
   }
-  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && config.mode !== "kubernetes" && config.mode !== "openshift") {
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && config.mode !== "local" && config.mode !== "kubernetes" && config.mode !== "openshift") {
     res.status(400).json({
-      error: "OpenShell sandbox is only supported for Kubernetes and OpenShift deployments",
+      error: "OpenShell sandbox is only supported for local, Kubernetes, and OpenShift deployments",
     });
     return;
   }

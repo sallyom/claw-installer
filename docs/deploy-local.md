@@ -119,9 +119,95 @@ Installer-managed local instances save `OPENCLAW_CONTAINER` in their instance `.
 
 If the host does not have the upstream OpenClaw CLI installed, use `podman exec` or `docker exec` against the running container instead. See [openclaw-cli-local.md](openclaw-cli-local.md) for both workflows.
 
-## SSH Sandbox
+## Sandbox Backends
 
 If you enable **SSH sandbox backend** in the form, the installer writes OpenClaw sandbox config into `openclaw.json` and provisions the SSH material needed by the local container.
+
+For a manual OpenClaw setup without the deployer UI, including when Podman
+creates, reuses, and removes OpenShell sandbox containers, see
+[Run OpenClaw with local OpenShell sandboxes](openshell-local.md).
+
+Local Podman deployments can also use the **OpenShell** backend. The gateway
+needs persistent sandbox-JWT keys and an explicit callback URL before it can
+provision sibling sandbox containers. Initialize them once:
+
+```bash
+podman volume create openshell-state
+podman run --rm --user 0 \
+  -v openshell-state:/var/openshell \
+  ghcr.io/nvidia/openshell/gateway:latest \
+  generate-certs --output-dir /var/openshell/pki \
+  --server-san host.containers.internal \
+  --server-san localhost
+
+podman volume create openshell-client-tls
+podman run --rm --user 0 \
+  -v openshell-state:/source:ro \
+  -v openshell-client-tls:/dest \
+  --entrypoint /bin/sh \
+  quay.io/sallyom/openclaw-openshell:latest \
+  -c 'install -m 0644 /source/pki/ca.crt /dest/ca.crt && install -m 0644 /source/pki/client/tls.crt /dest/tls.crt && install -m 0600 /source/pki/client/tls.key /dest/tls.key'
+
+mkdir -p "$HOME/.config/openshell"
+cat > "$HOME/.config/openshell/gateway.toml" <<'EOF'
+[openshell]
+version = 1
+
+[openshell.drivers.podman]
+grpc_endpoint = "https://host.containers.internal:18080"
+EOF
+
+OPENSHELL_STATE_MOUNT="$(podman volume inspect openshell-state --format '{{.Mountpoint}}')"
+OPENSHELL_PODMAN_SOCKET="$(podman info --format '{{.Host.RemoteSocket.Path}}')"
+OPENSHELL_PODMAN_SOCKET="${OPENSHELL_PODMAN_SOCKET#unix://}"
+podman run -d --name openshell-gateway \
+  --restart=unless-stopped \
+  --user 0 \
+  --security-opt label=disable \
+  -p 127.0.0.1:18080:8080 \
+  -v "openshell-state:${OPENSHELL_STATE_MOUNT}" \
+  -v "$HOME/.config/openshell/gateway.toml:/etc/openshell/gateway.toml:ro" \
+  -v "${OPENSHELL_PODMAN_SOCKET}:/var/run/podman.sock" \
+  -e OPENSHELL_GATEWAY_CONFIG=/etc/openshell/gateway.toml \
+  -e OPENSHELL_DRIVERS=podman \
+  -e OPENSHELL_PODMAN_SOCKET=/var/run/podman.sock \
+  -e "OPENSHELL_DB_URL=sqlite:${OPENSHELL_STATE_MOUNT}/openshell.db" \
+  -e "OPENSHELL_LOCAL_TLS_DIR=${OPENSHELL_STATE_MOUNT}/pki" \
+  -e "OPENSHELL_TLS_CERT=${OPENSHELL_STATE_MOUNT}/pki/server/tls.crt" \
+  -e "OPENSHELL_TLS_KEY=${OPENSHELL_STATE_MOUNT}/pki/server/tls.key" \
+  -e "OPENSHELL_TLS_CLIENT_CA=${OPENSHELL_STATE_MOUNT}/pki/ca.crt" \
+  -e OPENSHELL_ENABLE_MTLS_AUTH=true \
+  ghcr.io/nvidia/openshell/gateway:latest
+```
+
+The gateway accepts local client traffic at port 18080 and creates sibling
+sandbox containers through the mounted Podman API socket. This is Podman-
+outside-of-Podman; OpenClaw itself never receives the socket. Then use these
+installer values:
+
+- `Sandbox Backend`: `OpenShell`
+- `OpenShell Gateway Endpoint`: `https://localhost:18080`
+- `OpenShell Workspace Mode`: `remote`
+
+The installer rewrites the loopback endpoint to
+`host.containers.internal` for the OpenClaw container. It also selects the
+OpenShell-capable OpenClaw image by default, installs the pinned
+`@openclaw/openshell-sandbox` plugin, and installs the checksum-verified Linux
+OpenShell CLI into the persistent OpenClaw volume.
+
+The gateway requires mTLS for user/CLI calls, while sandbox processes use
+gateway-minted JWTs. The separate `openshell-client-tls` volume contains only
+the client bundle; the installer copies it into the OpenClaw volume and never
+exposes the gateway's signing key. The state volume is mounted at Podman's own
+absolute mountpoint because the containerized driver passes the TLS paths back
+to the Podman host when it creates sandbox containers. The socket path comes
+from the active Podman connection, so the command targets the same rootful or
+rootless store as the installer. The gateway runs as container root to access
+that socket, and `label=disable` permits the socket mount on SELinux-enabled
+Podman VMs. Mounting the API socket gives the gateway control of containers in
+that Podman machine. Keep the gateway local and do not expose port 18080 to an
+untrusted network. Do not rerun `generate-certs` for an existing installation
+unless you intend to rotate its TLS and sandbox-JWT keys.
 
 See [SANDBOX.md](SANDBOX.md) for the recommended form values, credential handling, and troubleshooting.
 

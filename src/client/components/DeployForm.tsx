@@ -861,8 +861,8 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
   if (config.sandboxEnabled && config.sandboxBackend === "ssh" && !config.sandboxSshIdentityPath.trim()) {
     validationErrors.push("SSH Private Key is required when the SSH sandbox backend is enabled.");
   }
-  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !isClusterMode) {
-    validationErrors.push("OpenShell sandbox backend is only available for Kubernetes and OpenShift deployments.");
+  if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !isClusterMode && mode !== "local") {
+    validationErrors.push("OpenShell sandbox backend is only available for local, Kubernetes, and OpenShift deployments.");
   }
   if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint.trim()) {
     validationErrors.push("OpenShell Gateway Endpoint is required when the OpenShell sandbox backend is enabled.");
@@ -1622,6 +1622,7 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
         <SandboxSection
           config={config}
           isClusterMode={isClusterMode}
+          isLocalMode={mode === "local"}
           update={update}
           setConfig={setConfig}
         />

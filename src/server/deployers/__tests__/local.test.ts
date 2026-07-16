@@ -490,6 +490,65 @@ describe("local 1Password SecretRef wiring", () => {
   });
 });
 
+describe("local OpenShell sandbox wiring", () => {
+  const config = {
+    mode: "local" as const,
+    agentName: "demo",
+    agentDisplayName: "Demo",
+    containerRuntime: "podman" as const,
+    sandboxEnabled: true,
+    sandboxBackend: "openshell" as const,
+    sandboxOpenShellGatewayEndpoint: "https://localhost:18080",
+    sandboxOpenShellMode: "remote" as const,
+  };
+
+  it("renders the plugin config with a Podman-reachable gateway endpoint", () => {
+    const rendered = JSON.parse(buildOpenClawConfig(config, "gateway-token"));
+
+    expect(rendered.agents.defaults.sandbox).toMatchObject({
+      backend: "openshell",
+      mode: "all",
+    });
+    expect(rendered.plugins.allow).toContain("openshell");
+    expect(rendered.plugins.entries.openshell).toEqual({
+      enabled: true,
+      config: {
+        command: "/home/node/.openclaw/bin/openshell",
+        from: "quay.io/sallyom/openclaw-openshell:latest",
+        gatewayEndpoint: "https://host.containers.internal:18080",
+        mode: "remote",
+        policy: "/home/node/.openclaw/openshell/policy.yaml",
+        timeoutSeconds: 180,
+      },
+    });
+  });
+
+  it("uses the OpenShell-capable image by default", () => {
+    const args = buildRunArgs(config, "podman", "openclaw-demo", 18789);
+
+    expect(args).toContain("quay.io/sallyom/openclaw-openshell:latest");
+    expect(args).toContain("OPENSHELL_GATEWAY=openshell");
+  });
+
+  it("installs the pinned plugin, CLI, and managed policy", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan(config);
+    const script = localPluginsTesting.buildLocalPluginInstallScript(plan.specs);
+
+    expect(plan.specs).toEqual(["@openclaw/openshell-sandbox@2026.7.1"]);
+    expect(script).toContain("NVIDIA/OpenShell/releases/download/v0.0.83");
+    expect(script).toContain("1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821");
+    expect(script).toContain("17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8");
+    expect(script).toContain("base64 -d > /home/node/.openclaw/openshell/policy.yaml");
+    expect(script).toContain("/run/openshell-client-tls/ca.crt");
+    expect(script).toContain("/home/node/.config/openshell/gateways/openshell/mtls/tls.key");
+    expect(script).toContain("node openclaw.mjs plugins list | grep -q openshell");
+    expect(plan.mountArgs).toEqual([
+      "-v",
+      "openshell-client-tls:/run/openshell-client-tls:ro",
+    ]);
+  });
+});
+
 describe("parseContainerRunArgs", () => {
   it("parses quoted runtime args into argv tokens", () => {
     expect(

@@ -5,12 +5,14 @@ import type { DeployFormConfig } from "./types.js";
 interface SandboxSectionProps {
   config: DeployFormConfig;
   isClusterMode: boolean;
+  isLocalMode: boolean;
   update: (field: string, value: string) => void;
   setConfig: Dispatch<SetStateAction<DeployFormConfig>>;
 }
 
-export function SandboxSection({ config, isClusterMode, update, setConfig }: SandboxSectionProps) {
-  const backend = isClusterMode ? config.sandboxBackend : "ssh";
+export function SandboxSection({ config, isClusterMode, isLocalMode, update, setConfig }: SandboxSectionProps) {
+  const supportsOpenShell = isClusterMode || isLocalMode;
+  const backend = supportsOpenShell ? config.sandboxBackend : "ssh";
 
   return (
     <>
@@ -28,14 +30,14 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
           Enable sandbox backend
         </label>
         <div className="hint">
-          Use SSH for local deployments, or OpenShell for Kubernetes and OpenShift deployments.
+          Use SSH for an existing remote host, or OpenShell for managed sandboxes.
         </div>
       </div>
 
       {config.sandboxEnabled && (
         <>
           <div className="form-row">
-            {isClusterMode && (
+            {supportsOpenShell && (
               <div className="form-group">
                 <label>Sandbox Backend</label>
                 <select
@@ -46,7 +48,9 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                   <option value="ssh">SSH</option>
                 </select>
                 <div className="hint">
-                  Choose OpenShell only when a cluster admin has provisioned an OpenShell gateway for this user or namespace.
+                  {isLocalMode
+                    ? "For local deploys, start an OpenShell gateway with the Podman driver first."
+                    : "Choose OpenShell only when a cluster admin has provisioned an OpenShell gateway for this user or namespace."}
                 </div>
               </div>
             )}
@@ -73,12 +77,16 @@ export function SandboxSection({ config, isClusterMode, update, setConfig }: San
                   <label>OpenShell Gateway Endpoint</label>
                   <input
                     type="text"
-                    placeholder="http://openshell-alice.openshell-alice.svc.cluster.local:8080"
+                    placeholder={isLocalMode
+                      ? "https://localhost:18080"
+                      : "http://openshell-alice.openshell-alice.svc.cluster.local:8080"}
                     value={config.sandboxOpenShellGatewayEndpoint}
                     onChange={(e) => update("sandboxOpenShellGatewayEndpoint", e.target.value)}
                   />
                   <div className="hint">
-                    Cluster-internal URL for the user's admin-provisioned OpenShell gateway service.
+                    {isLocalMode
+                      ? "Host URL for the local OpenShell gateway. Localhost is rewritten for the OpenClaw container."
+                      : "Cluster-internal URL for the user's admin-provisioned OpenShell gateway service."}
                   </div>
                 </div>
                 <div className="form-group">
