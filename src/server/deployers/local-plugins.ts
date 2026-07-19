@@ -5,10 +5,12 @@ import type { ContainerRuntime } from "../services/container.js";
 import type { DeployConfig, LogCallback } from "./types.js";
 import {
   buildOpenShellCliInstallScript,
+  OPEN_SHELL_POLICY_YAML,
   OPEN_SHELL_PLUGIN_SPEC,
   OPEN_SHELL_POLICY_PATH,
-  OPEN_SHELL_POLICY_YAML,
+  buildOpenShellPolicyYaml,
   usesOpenShellSandbox,
+  usesOpenShellWorker,
 } from "./sandbox.js";
 import {
   bindMountSpec,
@@ -26,6 +28,7 @@ export const OPEN_SHELL_LOCAL_CLI_PATH = `${OPEN_SHELL_LOCAL_CLI_DIR}/openshell`
 const OPEN_SHELL_LOCAL_TLS_VOLUME = "openshell-client-tls";
 const OPEN_SHELL_LOCAL_TLS_MOUNT_DIR = "/run/openshell-client-tls";
 const OPEN_SHELL_LOCAL_TLS_DIR = `${OPENCLAW_LOCAL_HOME}/.config/openshell/gateways/openshell/mtls`;
+const OPEN_SHELL_LOCAL_WIP_CLI_MOUNT_DIR = "/run/openshell-wip-cli";
 const ONEPASSWORD_PLUGIN_SPEC = "git:github.com/sallyom/claw-1password";
 
 export async function installLocalPlugins(params: {
@@ -45,7 +48,12 @@ export async function installLocalPlugins(params: {
   }
   params.log(`Installing OpenClaw plugins: ${configuredPluginInstallSpecs(params.config).join(", ")}`);
 
-  const installScript = buildLocalPluginInstallScript(plan.specs, params.config.localFileOwner);
+  const installScript = buildLocalPluginInstallScript(
+    plan.specs,
+    params.config.localFileOwner,
+    plan.openshellCliMountPath,
+    buildOpenShellPolicyYaml(params.config),
+  );
 
   const result = await runCommand(params.runtime, [
     "run", "--rm",
@@ -83,15 +91,26 @@ function nonFatalPluginInstallCommand(spec: string): string {
   ].join("\n");
 }
 
-function buildLocalPluginInstallScript(specs: string[], localFileOwner?: string): string {
+function buildLocalPluginInstallScript(
+  specs: string[],
+  localFileOwner?: string,
+  openshellCliMountPath?: string,
+  openshellPolicyYaml = OPEN_SHELL_POLICY_YAML,
+): string {
   const useOpenShell = specs.includes(OPEN_SHELL_PLUGIN_SPEC);
-  const policy = Buffer.from(OPEN_SHELL_POLICY_YAML).toString("base64");
+  const policy = Buffer.from(openshellPolicyYaml).toString("base64");
   return [
     "set -eu",
     `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR} ${OPENCLAW_LOCAL_TMP_DIR} ${OPENCLAW_LOCAL_HOME}/.npm ${OPENCLAW_LOCAL_HOME}/.cache ${OPENCLAW_LOCAL_HOME}/.config`,
     ...(useOpenShell
       ? [
-          buildOpenShellCliInstallScript(OPEN_SHELL_LOCAL_CLI_DIR),
+          ...(openshellCliMountPath
+            ? [
+                `test -x ${openshellCliMountPath} || { echo "OpenShell WIP CLI is missing or not executable" >&2; exit 1; }`,
+                `install -m 0755 ${openshellCliMountPath} ${OPEN_SHELL_LOCAL_CLI_PATH}`,
+                `${OPEN_SHELL_LOCAL_CLI_PATH} --version`,
+              ]
+            : [buildOpenShellCliInstallScript(OPEN_SHELL_LOCAL_CLI_DIR)]),
           `mkdir -p ${OPENCLAW_LOCAL_STATE_DIR}/openshell`,
           `echo '${policy}' | base64 -d > ${OPEN_SHELL_POLICY_PATH}`,
           `test -r ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/ca.crt -a -r ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.crt -a -r ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.key || { echo "OpenShell client TLS volume is missing or incomplete; follow docs/deploy-local.md#sandbox-backends" >&2; exit 1; }`,
@@ -147,12 +166,27 @@ function localPluginInstallPlan(config: DeployConfig): {
   specs: string[];
   mountArgs: string[];
   mountedHostPaths: string[];
+  openshellCliMountPath?: string;
 } {
   const specs: string[] = [];
   const mountArgs: string[] = [];
   const mountedHostPaths: string[] = [];
   if (usesOpenShellSandbox(config)) {
     mountArgs.push("-v", `${OPEN_SHELL_LOCAL_TLS_VOLUME}:${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}:ro`);
+  }
+  let openshellCliMountPath: string | undefined;
+  if (usesOpenShellWorker(config)) {
+    const configuredPath = config.sandboxOpenShellCliHostPath?.trim();
+    if (!configuredPath) {
+      throw new Error("OpenShell WorkerProvider WIP requires a local OpenShell CLI path");
+    }
+    const hostPath = resolve(configuredPath);
+    if (!existsSync(hostPath)) {
+      throw new Error(`OpenShell WorkerProvider WIP CLI does not exist: ${hostPath}`);
+    }
+    openshellCliMountPath = `${OPEN_SHELL_LOCAL_WIP_CLI_MOUNT_DIR}/openshell`;
+    mountArgs.push("-v", bindMountSpec(hostPath, openshellCliMountPath, "ro"));
+    mountedHostPaths.push(hostPath);
   }
   configuredPluginInstallSpecs(config).forEach((spec, index) => {
     const hostPath = hostPluginSourcePath(spec);
@@ -165,7 +199,7 @@ function localPluginInstallPlan(config: DeployConfig): {
     }
     specs.push(spec);
   });
-  return { specs, mountArgs, mountedHostPaths };
+  return { specs, mountArgs, mountedHostPaths, openshellCliMountPath };
 }
 
 export const __testing = {

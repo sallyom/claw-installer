@@ -546,6 +546,17 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
       if (config.sandboxOpenShellFrom) {
         lines.push(`SANDBOX_OPENSHELL_FROM=${config.sandboxOpenShellFrom}`);
       }
+      if (config.sandboxOpenShellWorkerEnabled) {
+        lines.push("SANDBOX_OPENSHELL_WORKER_ENABLED=true");
+        lines.push(`SANDBOX_OPENSHELL_CLI_HOST_PATH=${config.sandboxOpenShellCliHostPath || ""}`);
+        if (config.sandboxOpenShellInferenceLocalEnabled) {
+          lines.push("SANDBOX_OPENSHELL_INFERENCE_LOCAL_ENABLED=true");
+          lines.push(`SANDBOX_OPENSHELL_INFERENCE_PROVIDER=${config.sandboxOpenShellInferenceProvider || ""}`);
+          lines.push(`SANDBOX_OPENSHELL_INFERENCE_OPENCLAW_PROVIDER=${config.sandboxOpenShellInferenceOpenClawProvider || ""}`);
+          lines.push(`SANDBOX_OPENSHELL_INFERENCE_MODEL=${config.sandboxOpenShellInferenceModel || ""}`);
+          lines.push(`SANDBOX_OPENSHELL_INFERENCE_API=${config.sandboxOpenShellInferenceApi || ""}`);
+        }
+      }
     }
     if (config.sandboxSshTarget) {
       lines.push(`SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`);
@@ -1156,6 +1167,25 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
   if (openShellPluginConfig) {
     openShellPluginConfig.command = OPEN_SHELL_LOCAL_CLI_PATH;
   }
+  const openShellWorkerInference = config.sandboxOpenShellInferenceLocalEnabled
+    ? {
+        mode: "local",
+        provider: config.sandboxOpenShellInferenceProvider,
+        openclawProvider: config.sandboxOpenShellInferenceOpenClawProvider,
+        model: config.sandboxOpenShellInferenceModel,
+        api: config.sandboxOpenShellInferenceApi,
+      }
+    : undefined;
+  const openShellWorkerProfile = config.sandboxOpenShellWorkerEnabled && openShellPluginConfig
+    ? {
+        provider: "openshell",
+        install: "bundle",
+        settings: {
+          ...openShellPluginConfig,
+          ...(openShellWorkerInference ? { inference: openShellWorkerInference } : {}),
+        },
+      }
+    : undefined;
   const sourceBundle = loadAgentSourceBundle(config);
   const ocConfig: Record<string, unknown> = {
     plugins: {
@@ -1168,6 +1198,15 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         ...(openShellPluginConfig ? { openshell: { enabled: true, config: openShellPluginConfig } } : {}),
       },
     },
+    ...(openShellWorkerProfile
+      ? {
+          cloudWorkers: {
+            profiles: {
+              openshell: openShellWorkerProfile,
+            },
+          },
+        }
+      : {}),
     // Enable diagnostics-otel plugin so the gateway emits OTLP traces
     ...(useOtel ? {
       diagnostics: {

@@ -5,6 +5,10 @@ gateway running in Podman on macOS. It describes the same runtime contract that
 the installer UI assembles automatically, including when OpenShell creates and
 removes sandbox containers.
 
+It also documents the experimental OpenShell WorkerProvider path. Unlike the
+tool sandbox backend, a worker receives its own OpenShell sandbox and connects
+back to the Gateway through a policy-authorized reverse Unix-socket forward.
+
 The recommended local layout keeps OpenClaw and OpenShell separate. OpenClaw
 does not receive the Podman socket and does not start nested containers.
 
@@ -27,6 +31,16 @@ The examples match the installer pins in `src/server/deployers/sandbox.ts`:
 
 Update the guide and installer constants together when changing these pins.
 
+For the WorkerProvider WIP, you also need:
+
+- an OpenClaw image built from the `openshell-session-workers` WIP branch;
+- a Linux static OpenShell CLI built from
+  `openshell-openclaw-worker-tunnel`; and
+- an OpenShell gateway and supervisor image built from that same OpenShell
+  branch.
+
+The released CLI and supervisor do not recognize the WIP SSH policy contract.
+
 ## Understand the local architecture
 
 ```text
@@ -43,12 +57,20 @@ openshell-sandbox-<scope>-<hash> container
 
 OpenClaw tool execution
   `-- ssh -> openshell ssh-proxy -> sandbox supervisor
+
+OpenClaw WorkerProvider WIP
+  `-- ssh -R -> sandbox-local gateway.sock -> worker -> Gateway loopback ingress
 ```
 
 The OpenShell gateway is the only component with the Podman socket. It creates
 sibling sandbox containers through the Podman API. The OpenClaw Gateway uses
 the OpenShell CLI for lifecycle calls and as the SSH `ProxyCommand` for command
 execution and file transfer.
+
+For a worker, OpenClaw also creates a Gateway-only loopback listener inside its
+own Podman container. The host-side SSH client creates a private Unix socket in
+the worker sandbox and forwards it back to that container-local listener. The
+worker never needs a published Gateway port or Podman-host network access.
 
 On local Podman, these are containers even if other OpenShell documentation
 uses the generic term _sandbox runtime_ or describes Kubernetes sandbox pods.
@@ -79,6 +101,57 @@ gateway-minted sandbox JWTs are enabled.
 The mounted Podman API socket is a privileged local control surface. Keep port
 `18080` bound to loopback and do not expose the gateway to an untrusted
 network.
+
+### Use the WorkerProvider WIP build
+
+For the WorkerProvider WIP, use the matching OpenShell gateway, supervisor,
+and Linux CLI from
+[`openshell-openclaw-worker-tunnel`](https://github.com/sallyom/OpenShell/tree/openshell-openclaw-worker-tunnel).
+Follow the same Podman, mTLS, state-volume, and client-TLS-volume setup above,
+but substitute the WIP gateway image and supervisor binary for the released
+ones. The modified gateway is required to enforce the reverse Unix-socket
+policy used by the worker tunnel.
+
+Keep `openshell-state` and `openshell-client-tls` private and preserve them
+across restarts. The client CLI used in the next section must resolve the same
+`openshell` gateway name and mTLS bundle as the OpenClaw container.
+
+## Configure OpenShell credentials and inference.local
+
+Do this on the trusted host where the OpenShell CLI has access to the client
+mTLS bundle. It configures the OpenShell gateway, not the installer or
+OpenClaw. The provider credential stays in OpenShell and is injected only by
+the `inference.local` router.
+
+For example, configure an Anthropic route without putting the key value in the
+command line:
+
+```bash
+export OPENSHELL_GATEWAY=openshell
+export ANTHROPIC_API_KEY=<your-key>
+
+openshell provider create \
+  --name anthropic \
+  --type anthropic \
+  --credential ANTHROPIC_API_KEY
+
+openshell inference set \
+  --provider anthropic \
+  --model claude-sonnet-4-5
+
+openshell inference get
+```
+
+The last command must report the provider and model selected above. In the
+installer, select **Use configured OpenShell inference.local (WIP)** and enter
+that provider/model, `anthropic` as the OpenClaw provider, and **Anthropic
+Messages** as the API.
+
+For OpenAI-compatible, Vertex, NVIDIA, and other supported providers, use the
+matching create command in the
+[OpenShell inference-routing guide](https://github.com/sallyom/OpenShell/blob/openshell-openclaw-worker-tunnel/docs/sandboxes/inference-routing.mdx).
+The installer never reads the provider credential or changes the gateway-wide
+route.
 
 ## Prepare a manually managed OpenClaw runtime
 
@@ -186,6 +259,17 @@ Treat the policy as part of the sandbox security boundary. Add endpoints and
 canonical executable paths deliberately instead of disabling policy
 enforcement to make a tool work.
 
+When testing the WorkerProvider WIP, add this static policy section:
+
+```yaml
+ssh:
+  remote_streamlocal_forward_root: /tmp
+```
+
+The installer adds this section only when **Enable OpenShell WorkerProvider
+(WIP)** is selected. It permits a reverse Unix listener only below a
+per-worker, owner-private child directory. It does not enable TCP forwarding.
+
 ### Configure OpenClaw
 
 Merge this fragment into `openclaw.json` for a containerized OpenClaw Gateway:
@@ -229,6 +313,46 @@ OpenClaw Gateway runs directly on the Mac, use `command: "openshell"` and
 
 Restart the OpenClaw Gateway after installing or updating the plugin. Starting
 OpenClaw registers the backend, but does not create a sandbox container.
+
+## Test the WorkerProvider WIP
+
+The installer form exposes this only for local OpenShell deployments. Select
+**Enable OpenShell WorkerProvider (WIP)** and provide the path on the Mac host
+to the modified Linux OpenShell CLI binary. The installer mounts that binary
+only for setup, copies it into the persistent OpenClaw state volume, and writes
+an `openshell` cloud-worker profile.
+
+Set the form's **Image** field to an OpenClaw image containing the
+`openshell-session-workers` branch. The stable OpenClaw image can install the
+ordinary OpenShell plugin but does not contain the WorkerProvider code.
+
+The generated profile uses Gateway-proxy inference by default. It is the
+recommended first proof because the Gateway continues to own model credentials
+and routing.
+
+To use one fixed OpenShell `inference.local` route instead, select **Use
+configured OpenShell inference.local (WIP)**. Before deploying, configure the
+provider, credentials, and Gateway-wide inference route in OpenShell. The
+installer does not read or store those credentials. Enter the provider and
+model reported by `openshell inference get`, the matching OpenClaw provider
+name, and the endpoint API dialect. It writes these settings into the worker
+profile and verifies the OpenShell provider/model when the worker is
+provisioned.
+
+An `inference.local` worker is fixed to that provider/model. OpenClaw rejects a
+session that requests a different model. Leave the option disabled to keep the
+worker on Gateway-proxy inference, including normal OpenClaw model routing.
+
+After deployment, dispatch a session with the `openshell` cloud-worker profile.
+Successful startup creates one OpenShell sandbox for that worker environment
+and a socket under `/tmp/ocw-<environment>-<epoch>/gateway.sock`. That socket
+is internal to the sandbox; do not publish the Gateway's worker ingress port.
+
+If the tunnel does not connect, first verify all three WIP components—the
+OpenClaw image, the CLI copied into the Gateway container, and the OpenShell
+gateway/supervisor image—were built from their corresponding branches. Then
+inspect the OpenClaw Gateway logs and the OpenShell supervisor logs. A policy
+without the `ssh` section rejects the reverse listener by design.
 
 ## Know when Podman creates a sandbox
 

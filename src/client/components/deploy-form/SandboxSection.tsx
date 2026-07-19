@@ -116,6 +116,112 @@ export function SandboxSection({ config, isClusterMode, isLocalMode, update, set
                   The default is the multi-arch OpenClaw 2026.7.1 UBI build validated with this installer. Bare names resolve through the OpenShell sandbox registry.
                 </div>
               </div>
+
+              {isLocalMode && (
+                <>
+                  <div className="form-group">
+                    <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={config.sandboxOpenShellWorkerEnabled}
+                        onChange={(e) =>
+                          setConfig((prev) => ({ ...prev, sandboxOpenShellWorkerEnabled: e.target.checked }))
+                        }
+                      />
+                      Enable OpenShell WorkerProvider (WIP)
+                    </label>
+                    <div className="hint">
+                      Adds an <code>openshell</code> cloud-worker profile. Use only with the OpenClaw
+                      WIP image and an OpenShell Gateway built with reverse Unix-socket forwarding.
+                    </div>
+                  </div>
+
+                  {config.sandboxOpenShellWorkerEnabled && (
+                    <>
+                      <div className="form-group">
+                        <label>OpenShell WIP CLI binary on this host</label>
+                        <input
+                          type="text"
+                          placeholder="/path/to/openshell"
+                          value={config.sandboxOpenShellCliHostPath}
+                          onChange={(e) => update("sandboxOpenShellCliHostPath", e.target.value)}
+                        />
+                        <div className="hint">
+                          The installer copies this modified Linux CLI into the OpenClaw state volume. The
+                          default public OpenShell CLI does not include the WIP policy contract.
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={config.sandboxOpenShellInferenceLocalEnabled}
+                            onChange={(e) =>
+                              setConfig((prev) => ({
+                                ...prev,
+                                sandboxOpenShellInferenceLocalEnabled: e.target.checked,
+                              }))
+                            }
+                          />
+                          Use configured OpenShell inference.local (WIP)
+                        </label>
+                        <div className="hint">
+                          OpenShell credentials and its Gateway-wide inference route remain external to the
+                          installer. This worker profile verifies that route before provisioning.
+                        </div>
+                      </div>
+
+                      {config.sandboxOpenShellInferenceLocalEnabled && (
+                        <>
+                          <div className="form-row">
+                            <div className="form-group">
+                              <label>OpenShell inference provider</label>
+                              <input
+                                type="text"
+                                placeholder="anthropic"
+                                value={config.sandboxOpenShellInferenceProvider}
+                                onChange={(e) => update("sandboxOpenShellInferenceProvider", e.target.value)}
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>OpenShell inference model</label>
+                              <input
+                                type="text"
+                                placeholder="claude-sonnet-4-5"
+                                value={config.sandboxOpenShellInferenceModel}
+                                onChange={(e) => update("sandboxOpenShellInferenceModel", e.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className="form-row">
+                            <div className="form-group">
+                              <label>OpenClaw provider for this model</label>
+                              <input
+                                type="text"
+                                placeholder="anthropic"
+                                value={config.sandboxOpenShellInferenceOpenClawProvider}
+                                onChange={(e) => update("sandboxOpenShellInferenceOpenClawProvider", e.target.value)}
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label>inference.local API</label>
+                              <select
+                                value={config.sandboxOpenShellInferenceApi}
+                                onChange={(e) => update("sandboxOpenShellInferenceApi", e.target.value)}
+                              >
+                                <option value="anthropic-messages">Anthropic Messages</option>
+                                <option value="openai-responses">OpenAI Responses</option>
+                                <option value="openai-completions">OpenAI Completions</option>
+                              </select>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
             </>
           )}
 

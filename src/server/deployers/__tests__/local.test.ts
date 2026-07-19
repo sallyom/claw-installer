@@ -15,6 +15,7 @@ import {
 } from "../local.js";
 import { localMaintenanceEntrypointArgs, localStateMaintenanceUserArgs } from "../local-runtime.js";
 import { __testing as localPluginsTesting } from "../local-plugins.js";
+import { buildOpenShellPolicyYaml } from "../sandbox.js";
 
 describe("shouldAlwaysPull", () => {
   it("returns true for :latest tag", () => {
@@ -546,6 +547,58 @@ describe("local OpenShell sandbox wiring", () => {
       "-v",
       "openshell-client-tls:/run/openshell-client-tls:ro",
     ]);
+  });
+
+  it("configures the WIP WorkerProvider with a locally built OpenShell CLI", () => {
+    const workerConfig = {
+      ...config,
+      sandboxOpenShellWorkerEnabled: true,
+      sandboxOpenShellCliHostPath: process.execPath,
+    };
+    const rendered = JSON.parse(buildOpenClawConfig(workerConfig, "gateway-token"));
+    const plan = localPluginsTesting.localPluginInstallPlan(workerConfig);
+    const script = localPluginsTesting.buildLocalPluginInstallScript(
+      plan.specs,
+      undefined,
+      plan.openshellCliMountPath,
+      buildOpenShellPolicyYaml(workerConfig),
+    );
+
+    expect(rendered.cloudWorkers.profiles.openshell).toEqual({
+      provider: "openshell",
+      install: "bundle",
+      settings: rendered.plugins.entries.openshell.config,
+    });
+    expect(buildOpenShellPolicyYaml(workerConfig)).toContain(
+      "remote_streamlocal_forward_root: /tmp",
+    );
+    expect(plan.openshellCliMountPath).toBe("/run/openshell-wip-cli/openshell");
+    expect(plan.mountArgs).toContain(`${process.execPath}:/run/openshell-wip-cli/openshell:ro`);
+    expect(script).toContain("install -m 0755 /run/openshell-wip-cli/openshell");
+    expect(script).not.toContain("NVIDIA/OpenShell/releases/download/v0.0.83");
+  });
+
+  it("configures one fixed OpenShell inference.local route for the worker", () => {
+    const workerConfig = {
+      ...config,
+      sandboxOpenShellWorkerEnabled: true,
+      sandboxOpenShellCliHostPath: process.execPath,
+      sandboxOpenShellInferenceLocalEnabled: true,
+      sandboxOpenShellInferenceProvider: "anthropic",
+      sandboxOpenShellInferenceOpenClawProvider: "anthropic",
+      sandboxOpenShellInferenceModel: "claude-sonnet-4-5",
+      sandboxOpenShellInferenceApi: "anthropic-messages" as const,
+    };
+
+    const rendered = JSON.parse(buildOpenClawConfig(workerConfig, "gateway-token"));
+
+    expect(rendered.cloudWorkers.profiles.openshell.settings.inference).toEqual({
+      mode: "local",
+      provider: "anthropic",
+      openclawProvider: "anthropic",
+      model: "claude-sonnet-4-5",
+      api: "anthropic-messages",
+    });
   });
 });
 

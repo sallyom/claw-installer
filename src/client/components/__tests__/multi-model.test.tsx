@@ -314,6 +314,35 @@ describe("Multi-model per provider", () => {
       expect(body.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
     });
 
+    it("includes the OpenShell WorkerProvider WIP settings for local deploys", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.sandboxEnabled = true;
+      config.sandboxBackend = "openshell";
+      config.sandboxOpenShellWorkerEnabled = true;
+      config.sandboxOpenShellCliHostPath = "/tmp/openshell";
+      config.sandboxOpenShellInferenceLocalEnabled = true;
+      config.sandboxOpenShellInferenceProvider = "anthropic";
+      config.sandboxOpenShellInferenceOpenClawProvider = "anthropic";
+      config.sandboxOpenShellInferenceModel = "claude-sonnet-4-5";
+
+      const body = buildDeployRequestBody({
+        mode: "local",
+        inferenceProvider: "anthropic",
+        config,
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+
+      expect(body.sandboxOpenShellWorkerEnabled).toBe(true);
+      expect(body.sandboxOpenShellCliHostPath).toBe("/tmp/openshell");
+      expect(body.sandboxOpenShellInferenceLocalEnabled).toBe(true);
+      expect(body.sandboxOpenShellInferenceProvider).toBe("anthropic");
+      expect(body.sandboxOpenShellInferenceOpenClawProvider).toBe("anthropic");
+      expect(body.sandboxOpenShellInferenceModel).toBe("claude-sonnet-4-5");
+      expect(body.sandboxOpenShellInferenceApi).toBe("anthropic-messages");
+    });
+
     it("includes OTEL TLS skip verify only when OTEL is enabled", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
@@ -586,6 +615,45 @@ describe("Multi-model per provider", () => {
 
       expect(env).toContain("SANDBOX_OPENSHELL_FROM=quay.io/sallyom/openclaw-openshell-sandbox:slim");
       expect(restored.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
+    });
+
+    it("round-trips the OpenShell WorkerProvider WIP settings through env files", () => {
+      const config = createInitialDeployFormConfig();
+      config.agentName = "test";
+      config.sandboxEnabled = true;
+      config.sandboxBackend = "openshell";
+      config.sandboxOpenShellWorkerEnabled = true;
+      config.sandboxOpenShellCliHostPath = "/tmp/openshell";
+      config.sandboxOpenShellInferenceLocalEnabled = true;
+      config.sandboxOpenShellInferenceProvider = "anthropic";
+      config.sandboxOpenShellInferenceOpenClawProvider = "anthropic";
+      config.sandboxOpenShellInferenceModel = "claude-sonnet-4-5";
+      const env = buildEnvFileContent({
+        config,
+        inferenceProvider: "anthropic",
+        isVertex: false,
+        suggestedNamespace: "test-ns",
+      });
+      const vars = Object.fromEntries(
+        env
+          .split("\n")
+          .filter((line) => line && !line.startsWith("#") && line.includes("="))
+          .map((line) => {
+            const index = line.indexOf("=");
+            return [line.slice(0, index), line.slice(index + 1)];
+          }),
+      );
+
+      const { config: restored } = applySavedVarsToConfig(vars, createInitialDeployFormConfig());
+
+      expect(env).toContain("SANDBOX_OPENSHELL_WORKER_ENABLED=true");
+      expect(env).toContain("SANDBOX_OPENSHELL_INFERENCE_LOCAL_ENABLED=true");
+      expect(restored.sandboxOpenShellWorkerEnabled).toBe(true);
+      expect(restored.sandboxOpenShellCliHostPath).toBe("/tmp/openshell");
+      expect(restored.sandboxOpenShellInferenceLocalEnabled).toBe(true);
+      expect(restored.sandboxOpenShellInferenceProvider).toBe("anthropic");
+      expect(restored.sandboxOpenShellInferenceOpenClawProvider).toBe("anthropic");
+      expect(restored.sandboxOpenShellInferenceModel).toBe("claude-sonnet-4-5");
     });
 
     it("round-trips the OTEL TLS skip verify option through env files", () => {

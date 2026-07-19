@@ -867,6 +867,30 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
   if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint.trim()) {
     validationErrors.push("OpenShell Gateway Endpoint is required when the OpenShell sandbox backend is enabled.");
   }
+  if (
+    config.sandboxEnabled
+    && config.sandboxBackend === "openshell"
+    && config.sandboxOpenShellWorkerEnabled
+    && !config.sandboxOpenShellCliHostPath.trim()
+  ) {
+    validationErrors.push("OpenShell WIP CLI binary is required when the OpenShell WorkerProvider WIP is enabled.");
+  }
+  if (
+    config.sandboxEnabled
+    && config.sandboxBackend === "openshell"
+    && config.sandboxOpenShellWorkerEnabled
+    && config.sandboxOpenShellInferenceLocalEnabled
+  ) {
+    if (!config.sandboxOpenShellInferenceProvider.trim()) {
+      validationErrors.push("OpenShell inference provider is required when inference.local is enabled.");
+    }
+    if (!config.sandboxOpenShellInferenceOpenClawProvider.trim()) {
+      validationErrors.push("OpenClaw inference provider is required when OpenShell inference.local is enabled.");
+    }
+    if (!config.sandboxOpenShellInferenceModel.trim()) {
+      validationErrors.push("OpenShell inference model is required when inference.local is enabled.");
+    }
+  }
   if (config.sandboxEnabled && !hasSandboxToolSelection) {
     validationErrors.push("Select at least one sandbox tool group or disable custom sandbox tool baseline.");
   }

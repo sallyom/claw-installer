@@ -68,6 +68,13 @@ export interface DeployConfig {
   sandboxOpenShellGatewayEndpoint?: string;
   sandboxOpenShellMode?: "mirror" | "remote";
   sandboxOpenShellFrom?: string;
+  sandboxOpenShellWorkerEnabled?: boolean;
+  sandboxOpenShellCliHostPath?: string;
+  sandboxOpenShellInferenceLocalEnabled?: boolean;
+  sandboxOpenShellInferenceProvider?: string;
+  sandboxOpenShellInferenceOpenClawProvider?: string;
+  sandboxOpenShellInferenceModel?: string;
+  sandboxOpenShellInferenceApi?: "anthropic-messages" | "openai-completions" | "openai-responses";
   sandboxToolPolicyEnabled?: boolean;
   sandboxToolAllowFiles?: boolean;
   sandboxToolAllowSessions?: boolean;

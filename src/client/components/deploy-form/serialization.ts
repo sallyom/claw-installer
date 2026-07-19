@@ -14,10 +14,18 @@ import type {
   DeployFormConfig,
   InferenceProvider,
   ModelEndpointOption,
+  OpenShellInferenceApi,
   SecretRefValue,
 } from "./types.js";
 
 const DEFAULT_OPENSHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell:latest";
+
+function parseOpenShellInferenceApi(value: string | undefined): OpenShellInferenceApi | undefined {
+  if (value === "anthropic-messages" || value === "openai-completions" || value === "openai-responses") {
+    return value;
+  }
+  return undefined;
+}
 
 export function createInitialDeployFormConfig(): DeployFormConfig {
   return {
@@ -74,6 +82,13 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
     sandboxOpenShellMode: "remote",
     sandboxOpenShellFrom: DEFAULT_OPENSHELL_SANDBOX_FROM,
+    sandboxOpenShellWorkerEnabled: false,
+    sandboxOpenShellCliHostPath: "",
+    sandboxOpenShellInferenceLocalEnabled: false,
+    sandboxOpenShellInferenceProvider: "",
+    sandboxOpenShellInferenceOpenClawProvider: "",
+    sandboxOpenShellInferenceModel: "",
+    sandboxOpenShellInferenceApi: "anthropic-messages",
     sandboxToolPolicyEnabled: false,
     sandboxToolAllowFiles: true,
     sandboxToolAllowSessions: true,
@@ -516,6 +531,33 @@ export function applySavedVarsToConfig(
           : prev.sandboxOpenShellMode,
       sandboxOpenShellFrom:
         getStringVar(vars, "SANDBOX_OPENSHELL_FROM", "sandboxOpenShellFrom") || prev.sandboxOpenShellFrom,
+      sandboxOpenShellWorkerEnabled:
+        vars.SANDBOX_OPENSHELL_WORKER_ENABLED === "true"
+        || vars.sandboxOpenShellWorkerEnabled === "true"
+        || prev.sandboxOpenShellWorkerEnabled,
+      sandboxOpenShellCliHostPath:
+        getStringVar(vars, "SANDBOX_OPENSHELL_CLI_HOST_PATH", "sandboxOpenShellCliHostPath")
+        || prev.sandboxOpenShellCliHostPath,
+      sandboxOpenShellInferenceLocalEnabled:
+        vars.SANDBOX_OPENSHELL_INFERENCE_LOCAL_ENABLED === "true"
+        || vars.sandboxOpenShellInferenceLocalEnabled === "true"
+        || prev.sandboxOpenShellInferenceLocalEnabled,
+      sandboxOpenShellInferenceProvider:
+        getStringVar(vars, "SANDBOX_OPENSHELL_INFERENCE_PROVIDER", "sandboxOpenShellInferenceProvider")
+        || prev.sandboxOpenShellInferenceProvider,
+      sandboxOpenShellInferenceOpenClawProvider:
+        getStringVar(
+          vars,
+          "SANDBOX_OPENSHELL_INFERENCE_OPENCLAW_PROVIDER",
+          "sandboxOpenShellInferenceOpenClawProvider",
+        ) || prev.sandboxOpenShellInferenceOpenClawProvider,
+      sandboxOpenShellInferenceModel:
+        getStringVar(vars, "SANDBOX_OPENSHELL_INFERENCE_MODEL", "sandboxOpenShellInferenceModel")
+        || prev.sandboxOpenShellInferenceModel,
+      sandboxOpenShellInferenceApi:
+        parseOpenShellInferenceApi(
+          getStringVar(vars, "SANDBOX_OPENSHELL_INFERENCE_API", "sandboxOpenShellInferenceApi"),
+        ) || prev.sandboxOpenShellInferenceApi,
       sandboxSshTarget:
         getStringVar(vars, "SANDBOX_SSH_TARGET", "sandboxSshTarget") || prev.sandboxSshTarget,
       sandboxSshWorkspaceRoot:
@@ -795,6 +837,34 @@ export function buildDeployRequestBody(params: {
       config.sandboxEnabled && config.sandboxBackend === "openshell"
         ? trimToUndefined(config.sandboxOpenShellFrom)
         : undefined,
+    sandboxOpenShellWorkerEnabled:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? config.sandboxOpenShellWorkerEnabled || undefined
+        : undefined,
+    sandboxOpenShellCliHostPath:
+      config.sandboxEnabled && config.sandboxBackend === "openshell" && config.sandboxOpenShellWorkerEnabled
+        ? trimToUndefined(config.sandboxOpenShellCliHostPath)
+        : undefined,
+    sandboxOpenShellInferenceLocalEnabled:
+      config.sandboxEnabled && config.sandboxBackend === "openshell" && config.sandboxOpenShellWorkerEnabled
+        ? config.sandboxOpenShellInferenceLocalEnabled || undefined
+        : undefined,
+    sandboxOpenShellInferenceProvider:
+      config.sandboxEnabled && config.sandboxBackend === "openshell" && config.sandboxOpenShellInferenceLocalEnabled
+        ? trimToUndefined(config.sandboxOpenShellInferenceProvider)
+        : undefined,
+    sandboxOpenShellInferenceOpenClawProvider:
+      config.sandboxEnabled && config.sandboxBackend === "openshell" && config.sandboxOpenShellInferenceLocalEnabled
+        ? trimToUndefined(config.sandboxOpenShellInferenceOpenClawProvider)
+        : undefined,
+    sandboxOpenShellInferenceModel:
+      config.sandboxEnabled && config.sandboxBackend === "openshell" && config.sandboxOpenShellInferenceLocalEnabled
+        ? trimToUndefined(config.sandboxOpenShellInferenceModel)
+        : undefined,
+    sandboxOpenShellInferenceApi:
+      config.sandboxEnabled && config.sandboxBackend === "openshell" && config.sandboxOpenShellInferenceLocalEnabled
+        ? config.sandboxOpenShellInferenceApi
+        : undefined,
     sandboxSshTarget:
       config.sandboxEnabled && config.sandboxBackend === "ssh"
         ? config.sandboxSshTarget || undefined
@@ -1036,6 +1106,13 @@ export function buildEnvFileContent(params: {
     `SANDBOX_OPENSHELL_GATEWAY_ENDPOINT=${config.sandboxOpenShellGatewayEndpoint}`,
     `SANDBOX_OPENSHELL_MODE=${config.sandboxOpenShellMode}`,
     `SANDBOX_OPENSHELL_FROM=${config.sandboxOpenShellFrom}`,
+    `SANDBOX_OPENSHELL_WORKER_ENABLED=${config.sandboxOpenShellWorkerEnabled}`,
+    `SANDBOX_OPENSHELL_CLI_HOST_PATH=${config.sandboxOpenShellCliHostPath}`,
+    `SANDBOX_OPENSHELL_INFERENCE_LOCAL_ENABLED=${config.sandboxOpenShellInferenceLocalEnabled}`,
+    `SANDBOX_OPENSHELL_INFERENCE_PROVIDER=${config.sandboxOpenShellInferenceProvider}`,
+    `SANDBOX_OPENSHELL_INFERENCE_OPENCLAW_PROVIDER=${config.sandboxOpenShellInferenceOpenClawProvider}`,
+    `SANDBOX_OPENSHELL_INFERENCE_MODEL=${config.sandboxOpenShellInferenceModel}`,
+    `SANDBOX_OPENSHELL_INFERENCE_API=${config.sandboxOpenShellInferenceApi}`,
     `SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`,
     `SANDBOX_SSH_WORKSPACE_ROOT=${config.sandboxSshWorkspaceRoot}`,
     `SANDBOX_SSH_IDENTITY_PATH=${config.sandboxSshIdentityPath}`,

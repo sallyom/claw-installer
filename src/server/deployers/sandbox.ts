@@ -81,8 +81,19 @@ network_policies:
       - { path: /usr/local/bin/npm }
 `;
 
+export function buildOpenShellPolicyYaml(config: DeployConfig): string {
+  if (!usesOpenShellWorker(config)) {
+    return OPEN_SHELL_POLICY_YAML;
+  }
+  return `${OPEN_SHELL_POLICY_YAML}\nssh:\n  remote_streamlocal_forward_root: /tmp\n`;
+}
+
 export function usesOpenShellSandbox(config: DeployConfig): boolean {
   return Boolean(config.sandboxEnabled && config.sandboxBackend === "openshell");
+}
+
+export function usesOpenShellWorker(config: DeployConfig): boolean {
+  return Boolean(usesOpenShellSandbox(config) && config.sandboxOpenShellWorkerEnabled);
 }
 
 export function buildOpenShellCliInstallScript(installDir: string): string {

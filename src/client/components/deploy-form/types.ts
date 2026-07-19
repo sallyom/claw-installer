@@ -82,6 +82,7 @@ export interface ModelEndpointOption {
 export type SubagentPolicy = "none" | "self" | "unrestricted";
 export type SandboxBackend = "ssh" | "openshell";
 export type OpenShellSandboxMode = "mirror" | "remote";
+export type OpenShellInferenceApi = "anthropic-messages" | "openai-completions" | "openai-responses";
 
 export interface DeployFormConfig {
   prefix: string;
@@ -137,6 +138,13 @@ export interface DeployFormConfig {
   sandboxOpenShellGatewayEndpoint: string;
   sandboxOpenShellMode: OpenShellSandboxMode;
   sandboxOpenShellFrom: string;
+  sandboxOpenShellWorkerEnabled: boolean;
+  sandboxOpenShellCliHostPath: string;
+  sandboxOpenShellInferenceLocalEnabled: boolean;
+  sandboxOpenShellInferenceProvider: string;
+  sandboxOpenShellInferenceOpenClawProvider: string;
+  sandboxOpenShellInferenceModel: string;
+  sandboxOpenShellInferenceApi: OpenShellInferenceApi;
   sandboxToolPolicyEnabled: boolean;
   sandboxToolAllowFiles: boolean;
   sandboxToolAllowSessions: boolean;
