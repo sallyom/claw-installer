@@ -19,9 +19,21 @@ You need:
 - the OpenShell-capable image
   `quay.io/sallyom/openclaw-openshell:latest` when OpenClaw runs in Podman
 
+To test an OpenClaw source worktree with its bundled OpenShell plugin, build a
+local runtime image from the installer checkout:
+
+```bash
+./openshell/build-openclaw-source-image.sh \
+  openclaw-openshell:worktree \
+  /path/to/openclaw-worktree
+```
+
+Use that image for the OpenClaw container and keep the OpenShell sandbox source
+set to a sandbox-capable image.
+
 The examples match the installer pins in `src/server/deployers/sandbox.ts`:
 
-- OpenShell CLI `0.0.83`
+- OpenShell CLI `0.0.92`
 - `@openclaw/openshell-sandbox@2026.7.1`
 - `quay.io/sallyom/openclaw-openshell:latest`
 
@@ -95,7 +107,7 @@ openclaw plugins install @openclaw/openshell-sandbox@2026.7.1
 openclaw plugins list
 ```
 
-Install OpenShell CLI `0.0.83` on the same `PATH` used by the OpenClaw Gateway.
+Install OpenShell CLI `0.0.92` on the same `PATH` used by the OpenClaw Gateway.
 The local deployer downloads the checksum-verified static Linux binary to:
 
 ```text
@@ -108,19 +120,19 @@ persistent home volume:
 ```bash
 mkdir -p /home/node/.openclaw/bin
 case "$(uname -m)" in
-  x86_64) target="x86_64-unknown-linux-musl"; checksum="1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821" ;;
-  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8" ;;
+  x86_64) target="x86_64-unknown-linux-musl"; checksum="db1a86fadea9c5483aef291fabd4ea1dfeacea908faa450952f2ab01de5f4035" ;;
+  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="a0352669b4a9583c5fbe26610d0afa4db56ab9283c4a603740e1261222de7e39" ;;
   *) echo "unsupported OpenShell CLI architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 archive="openshell-${target}.tar.gz"
-curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/v0.0.83/${archive}" -o "/tmp/${archive}"
+curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/v0.0.92/${archive}" -o "/tmp/${archive}"
 echo "${checksum}  /tmp/${archive}" | sha256sum -c -
 tar -xzf "/tmp/${archive}" -C /home/node/.openclaw/bin
 chmod 0755 /home/node/.openclaw/bin/openshell
 ```
 
 If OpenClaw runs directly on macOS, install only the matching CLI with
-`uv tool install openshell==0.0.83`. The all-in-one OpenShell macOS installer
+`uv tool install openshell==0.0.92`. The all-in-one OpenShell macOS installer
 also starts a native gateway, which is unnecessary when this Podman gateway is
 already running.
 
@@ -210,6 +222,7 @@ Merge this fragment into `openclaw.json` for a containerized OpenClaw Gateway:
         config: {
           command: "/home/node/.openclaw/bin/openshell",
           gatewayEndpoint: "https://host.containers.internal:18080",
+          workspace: "default",
           from: "quay.io/sallyom/openclaw-openshell:latest",
           mode: "remote",
           policy: "/home/node/.openclaw/openshell/policy.yaml",
@@ -220,6 +233,14 @@ Merge this fragment into `openclaw.json` for a containerized OpenClaw Gateway:
   },
 }
 ```
+
+`workspace` is the existing OpenShell control-plane Workspace used for sandbox
+resources. It defaults to `default`; the installer does not create Workspaces.
+This is separate from `mode`, which controls whether the OpenClaw-side or
+sandbox-side filesystem workspace is canonical. The installer omits the key
+for `default`, preserving compatibility with the currently pinned published
+plugin; selecting another Workspace requires an image that bundles the updated
+plugin or a correspondingly updated plugin package.
 
 The installer form accepts `https://localhost:18080` and rewrites it to
 `host.containers.internal` because OpenClaw itself runs in a container. If the

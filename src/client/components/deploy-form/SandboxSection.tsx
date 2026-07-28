@@ -90,7 +90,22 @@ export function SandboxSection({ config, isClusterMode, isLocalMode, update, set
                   </div>
                 </div>
                 <div className="form-group">
-                  <label>OpenShell Workspace Mode</label>
+                  <label>OpenShell Workspace</label>
+                  <input
+                    type="text"
+                    placeholder="default"
+                    value={config.sandboxOpenShellWorkspace}
+                    onChange={(e) => update("sandboxOpenShellWorkspace", e.target.value)}
+                  />
+                  <div className="hint">
+                    Existing OpenShell control-plane Workspace used for sandbox resources. The installer does not create it.
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Filesystem Workspace Mode</label>
                   <select
                     value={config.sandboxOpenShellMode}
                     onChange={(e) => update("sandboxOpenShellMode", e.target.value)}
@@ -102,18 +117,18 @@ export function SandboxSection({ config, isClusterMode, isLocalMode, update, set
                     Remote matches the OpenShell lab: the sandbox owns workspace state after its initial seed.
                   </div>
                 </div>
-              </div>
 
-              <div className="form-group">
-                <label>OpenShell Sandbox Source</label>
-                <input
-                  type="text"
-                  placeholder="quay.io/sallyom/openclaw-openshell:latest"
-                  value={config.sandboxOpenShellFrom}
-                  onChange={(e) => update("sandboxOpenShellFrom", e.target.value)}
-                />
-                <div className="hint">
-                  The default is the multi-arch OpenClaw 2026.7.1 UBI build validated with this installer. Bare names resolve through the OpenShell sandbox registry.
+                <div className="form-group">
+                  <label>OpenShell Sandbox Source</label>
+                  <input
+                    type="text"
+                    placeholder="quay.io/sallyom/openclaw-openshell:latest"
+                    value={config.sandboxOpenShellFrom}
+                    onChange={(e) => update("sandboxOpenShellFrom", e.target.value)}
+                  />
+                  <div className="hint">
+                    The default is the multi-arch OpenClaw 2026.7.1 UBI build validated with this installer. Bare names resolve through the OpenShell sandbox registry.
+                  </div>
                 </div>
               </div>
             </>

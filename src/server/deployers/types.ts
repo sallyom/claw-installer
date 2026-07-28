@@ -66,6 +66,7 @@ export interface DeployConfig {
   sandboxWorkspaceAccess?: "none" | "ro" | "rw";
   sandboxBackend?: "ssh" | "openshell";
   sandboxOpenShellGatewayEndpoint?: string;
+  sandboxOpenShellWorkspace?: string;
   sandboxOpenShellMode?: "mirror" | "remote";
   sandboxOpenShellFrom?: string;
   sandboxToolPolicyEnabled?: boolean;

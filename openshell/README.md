@@ -89,12 +89,19 @@ podman build -t registry/name/openclaw:openshell \
   .
 ```
 
-The helper builds the same Dockerfile and checks the OpenClaw version,
-`sandbox` account, and required runtime tools:
+The helper builds OpenClaw's standard Dockerfile from a local source checkout,
+bundles the checkout's OpenShell plugin, adds `ssh` and `rsync`, and checks the
+result:
 
 ```shell
-./openshell/build-openclaw-source-image.sh quay.io/yourname/openclaw:openshell
+./openshell/build-openclaw-source-image.sh \
+  openclaw-openshell:worktree \
+  /path/to/openclaw-worktree
 ```
+
+This local-source image is intended for OpenClaw runtime testing. Keep
+`sandboxOpenShellFrom` pointed at a sandbox-capable image such as
+`quay.io/sallyom/openclaw-openshell:latest`.
 
 The image installs `curl`, Git, OpenSSH client tools, `rsync`, and `tar`. It
 does not embed the OpenShell CLI or bundle the OpenShell plugin into
@@ -171,7 +178,7 @@ The NVIDIA OpenShell CLI is mounted inside the OpenClaw gateway container at:
 /openshell-bin/openshell
 ```
 
-The consolidated plugin init container downloads the OpenShell `0.0.83` static
+The consolidated plugin init container downloads the OpenShell `0.0.92` static
 Linux CLI for `x86_64` or `aarch64`, verifies its release checksum, and extracts
 it into an `openshell-cli` `emptyDir`. The gateway mounts that volume read-only
 and adds `/openshell-bin` to `PATH`.

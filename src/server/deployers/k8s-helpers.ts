@@ -478,11 +478,12 @@ function isConfiguredCodexModelRef(modelRef: string, config: DeployConfig): bool
   if (!shouldUseCodexOauth(config)) {
     return false;
   }
+  const normalizedModelRef = normalizeCodexModelRef(modelRef);
   const codexModelRefs = new Set([
     normalizeCodexModelRef(config.codexModel),
     ...(config.codexModels || []).map((model) => normalizeCodexModelRef(model)),
   ]);
-  return codexModelRefs.has(modelRef);
+  return codexModelRefs.has(normalizedModelRef);
 }
 
 /**
@@ -502,12 +503,15 @@ export function detectUnavailableProvider(
       return !config.anthropicApiKey && !config.anthropicApiKeyRef
         && config.inferenceProvider !== "anthropic";
     case "openai":
+      if (isConfiguredCodexModelRef(modelRef, config)) {
+        return false;
+      }
       return !config.openaiApiKey && !config.openaiApiKeyRef
         && config.inferenceProvider !== "openai";
     case CODEX_PROVIDER:
       return !isConfiguredCodexModelRef(modelRef, config);
     case OPENAI_CODEX_PROVIDER:
-      return true;
+      return !isConfiguredCodexModelRef(modelRef, config);
     case GOOGLE_PROVIDER:
       return !config.googleApiKey && !config.googleApiKeyRef
         && config.inferenceProvider !== GOOGLE_PROVIDER;
@@ -892,7 +896,23 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         ? { allow: [...pluginAllowlist, ...(openShellPluginConfig ? ["openshell"] : [])] }
         : {}),
       entries: {
-        ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, [CODEX_PLUGIN_ID]: { enabled: true } } : {}),
+        ...(useCodexOauth
+          ? {
+              [OPENAI_PROVIDER]: { enabled: true },
+              [CODEX_PLUGIN_ID]: {
+                enabled: true,
+                ...(openShellPluginConfig
+                  ? {
+                      config: {
+                        appServer: {
+                          experimental: { sandboxExecServer: true },
+                        },
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
         ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
         ...(config.onePasswordSecretsEnabled ? { [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
@@ -931,9 +951,9 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         models: buildConfiguredAgentModelCatalog(config, model, sourceBundle),
         ...(buildSandboxConfig(config) ? { sandbox: buildSandboxConfig(config) } : {}),
       },
-      list: [
-        {
-          id,
+      entries: Object.fromEntries([
+        [id, {
+          default: true,
           name: config.agentDisplayName || config.agentName,
           identity: { name: config.agentDisplayName || config.agentName },
           workspace: `~/.openclaw/workspace-${id}`,
@@ -942,18 +962,17 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
             : buildAgentModelConfig(config, model),
           subagents: sourceBundle?.mainAgent?.subagents || subagentConfig(config.subagentPolicy),
           ...(sourceBundle?.mainAgent?.tools ? { tools: sourceBundle.mainAgent.tools } : {}),
-        },
+        }],
         // Fix for #67: append deploy-time model as fallback for bundle subagents
-        ...((sourceBundle?.agents || []).map((entry) => ({
-          id: entry.id,
+        ...((sourceBundle?.agents || []).map((entry) => [entry.id, {
           name: entry.name || entry.id,
           ...(entry.name ? { identity: { name: entry.name } } : {}),
           workspace: `~/.openclaw/workspace-${entry.id}`,
           model: resolveSubagentModel(entry.model, model, config),
           ...(entry.subagents ? { subagents: entry.subagents } : {}),
           ...(entry.tools ? { tools: entry.tools } : {}),
-        }))),
-      ],
+        }])),
+      ]),
     },
     // Fix for #78: register all LiteLLM models (primary + secondary providers)
     // in the provider listing.  Exclude the primary model since it is already
@@ -976,7 +995,7 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
       },
     } : {}),
     skills: {
-      load: { extraDirs: skillExtraDirs, watch: true, watchDebounceMs: 1000 },
+      load: { extraDirs: skillExtraDirs, watch: true },
     },
     cron: { enabled: !!config.cronEnabled },
   };

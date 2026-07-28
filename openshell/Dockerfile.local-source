@@ -1,0 +1,12 @@
+ARG OPENCLAW_BASE_IMAGE
+FROM ${OPENCLAW_BASE_IMAGE}
+
+USER root
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      openssh-client \
+      rsync \
+    && rm -rf /var/lib/apt/lists/*
+
+USER node

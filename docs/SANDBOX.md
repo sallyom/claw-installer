@@ -80,7 +80,8 @@ Use these deploy form values:
 - `Sandbox Scope`: `agent` for one sandbox per agent, or `session` for one sandbox per session
 - `Workspace Access`: `rw`
 - `OpenShell Gateway Endpoint`: `https://localhost:18080` for local Podman, or the provisioned cluster-internal URL such as `http://openshell-alice.openshell-alice.svc.cluster.local:8080`
-- `OpenShell Workspace Mode`: `remote`
+- `OpenShell Workspace`: `default` or another existing OpenShell Workspace
+- `Filesystem Workspace Mode`: `remote`
 - `OpenShell Sandbox Source`: a full sandbox image reference, or leave the default when the approved image is already configured
 
 When OpenShell is enabled, the installer automatically installs `@openclaw/openshell-sandbox@2026.7.1` before gateway startup and writes a managed OpenShell policy file at `/home/node/.openclaw/openshell/policy.yaml`. Local deployments also copy the client-only mTLS bundle from the `openshell-client-tls` volume and persist the checksum-verified OpenShell CLI at `/home/node/.openclaw/bin/openshell`; cluster deployments mount the CLI at `/openshell-bin/openshell`.

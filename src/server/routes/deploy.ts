@@ -361,6 +361,7 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   config.containerRunArgs = trimOptional(config.containerRunArgs);
   config.localFileOwner = trimOptional(config.localFileOwner);
   config.sandboxOpenShellGatewayEndpoint = trimOptional(config.sandboxOpenShellGatewayEndpoint);
+  config.sandboxOpenShellWorkspace = trimOptional(config.sandboxOpenShellWorkspace) || "default";
   config.podmanSecretMappings = normalizePodmanSecretMappings(config.podmanSecretMappings);
   config.modelFallbacks = normalizeModelFallbacks(config.modelFallbacks);
   config.otelEndpoint = trimOptional(config.otelEndpoint);
@@ -512,6 +513,26 @@ router.post("/", deploymentRateLimit, async (req, res) => {
   if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint?.trim()) {
     res.status(400).json({
       error: "OpenShell sandbox requires sandboxOpenShellGatewayEndpoint",
+    });
+    return;
+  }
+  if (
+    config.sandboxEnabled
+    && config.sandboxBackend === "openshell"
+    && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.sandboxOpenShellWorkspace || "")
+  ) {
+    res.status(400).json({
+      error: "OpenShell workspace must contain lowercase alphanumeric characters or single hyphens",
+    });
+    return;
+  }
+  if (
+    config.sandboxEnabled
+    && config.sandboxBackend === "openshell"
+    && (config.sandboxOpenShellWorkspace?.length || 0) > 19
+  ) {
+    res.status(400).json({
+      error: "OpenShell workspace must be at most 19 characters",
     });
     return;
   }

@@ -102,7 +102,8 @@ For local deploys, the installer now follows the upstream OpenClaw secret model 
 - generated `openclaw.json` uses env-backed SecretRefs instead of storing those raw values directly
 - you can enable Vault SecretRef wiring from the form, or provide `secrets.providers` JSON and explicit SecretRef overrides for other `env`, `file`, or `exec` providers
 - for Podman setups, you can also use the **Podman secret mappings** field to expand `podman secret create` entries into runtime `--secret` flags automatically
-- OpenAI Codex is OAuth-based: the installer reads the Codex CLI `auth.json` on the installer host, imports inline OAuth token material into the OpenClaw auth profile `openai:chatgpt-default`, and configures `codex/*` model refs with the Codex runtime
+- OpenAI Codex is OAuth-based: the installer reads the Codex CLI `auth.json` on the installer host, imports inline OAuth token material into the OpenClaw auth profile `openai:chatgpt-default`, and configures canonical `openai/*` model refs with the Codex runtime
+- when Codex OAuth and the OpenShell sandbox are both enabled, the installer opts into the Codex sandbox exec-server bridge so native Codex shell execution runs through OpenShell
 
 This means the container still receives the credentials it needs, but `openclaw.json` does not embed the plaintext API keys or Telegram bot token.
 
@@ -187,7 +188,8 @@ installer values:
 
 - `Sandbox Backend`: `OpenShell`
 - `OpenShell Gateway Endpoint`: `https://localhost:18080`
-- `OpenShell Workspace Mode`: `remote`
+- `OpenShell Workspace`: `default` or another existing OpenShell Workspace
+- `Filesystem Workspace Mode`: `remote`
 
 The installer rewrites the loopback endpoint to
 `host.containers.internal` for the OpenClaw container. It also selects the
@@ -247,7 +249,7 @@ Before starting the gateway, the installer runs an init script inside the contai
 3. Copies agent workspace files (`AGENTS.md`, `SOUL.md`, etc.) to the agent workspace
 4. Sets permissions for the `node` user
 
-If OpenAI Codex is selected, the installer then runs a separate one-off import step that writes `auth-profiles.json` for the main agent and any bundled subagents. The generated `openclaw.json` contains non-secret routing metadata for `openai:chatgpt-default` plus model-scoped Codex runtime policy on `codex/*` refs; the OAuth access and refresh tokens live in the agent auth profile store. This is separate from OpenAI API-key auth, so deployments can use Codex OAuth for agent turns and `OPENAI_API_KEY` for embeddings or image generation.
+If OpenAI Codex is selected, the installer then runs a separate one-off import step that asks OpenClaw to initialize each agent's current SQLite database before merging the OAuth profile into its auth store. The generated `openclaw.json` contains non-secret routing metadata for `openai:chatgpt-default` plus model-scoped Codex runtime policy on canonical `openai/*` refs; the OAuth access and refresh tokens live only in the agent auth profile store. This is separate from OpenAI API-key auth, so deployments can use Codex OAuth for agent turns and `OPENAI_API_KEY` for embeddings or image generation.
 
 ### GCP credentials (Vertex AI)
 

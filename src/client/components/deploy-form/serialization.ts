@@ -72,6 +72,7 @@ export function createInitialDeployFormConfig(): DeployFormConfig {
     sandboxScope: "session",
     sandboxWorkspaceAccess: "rw",
     sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+    sandboxOpenShellWorkspace: "default",
     sandboxOpenShellMode: "remote",
     sandboxOpenShellFrom: DEFAULT_OPENSHELL_SANDBOX_FROM,
     sandboxToolPolicyEnabled: false,
@@ -510,6 +511,9 @@ export function applySavedVarsToConfig(
       sandboxOpenShellGatewayEndpoint:
         getStringVar(vars, "SANDBOX_OPENSHELL_GATEWAY_ENDPOINT", "sandboxOpenShellGatewayEndpoint")
         || prev.sandboxOpenShellGatewayEndpoint,
+      sandboxOpenShellWorkspace:
+        getStringVar(vars, "SANDBOX_OPENSHELL_WORKSPACE", "sandboxOpenShellWorkspace")
+        || prev.sandboxOpenShellWorkspace,
       sandboxOpenShellMode:
         getStringVar(vars, "SANDBOX_OPENSHELL_MODE", "sandboxOpenShellMode") === "remote"
           ? "remote"
@@ -787,6 +791,10 @@ export function buildDeployRequestBody(params: {
       config.sandboxEnabled && config.sandboxBackend === "openshell"
         ? config.sandboxOpenShellGatewayEndpoint || undefined
         : undefined,
+    sandboxOpenShellWorkspace:
+      config.sandboxEnabled && config.sandboxBackend === "openshell"
+        ? config.sandboxOpenShellWorkspace || "default"
+        : undefined,
     sandboxOpenShellMode:
       config.sandboxEnabled && config.sandboxBackend === "openshell"
         ? config.sandboxOpenShellMode
@@ -1034,6 +1042,7 @@ export function buildEnvFileContent(params: {
     `SANDBOX_SCOPE=${config.sandboxScope}`,
     `SANDBOX_WORKSPACE_ACCESS=${config.sandboxWorkspaceAccess}`,
     `SANDBOX_OPENSHELL_GATEWAY_ENDPOINT=${config.sandboxOpenShellGatewayEndpoint}`,
+    `SANDBOX_OPENSHELL_WORKSPACE=${config.sandboxOpenShellWorkspace}`,
     `SANDBOX_OPENSHELL_MODE=${config.sandboxOpenShellMode}`,
     `SANDBOX_OPENSHELL_FROM=${config.sandboxOpenShellFrom}`,
     `SANDBOX_SSH_TARGET=${config.sandboxSshTarget}`,
