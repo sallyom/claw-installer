@@ -36,16 +36,16 @@ data:
             "anthropic/claude-sonnet-4-6": { "alias": "claude-sonnet-4-6" }
           }
         },
-        "list": [
-          {
-            "id": "alice_myagent",
+        "entries": {
+          "alice_myagent": {
+            "default": true,
             "name": "My Agent",
             "identity": { "name": "My Agent" },
             "workspace": "~/.openclaw/workspace-alice_myagent",
             "model": { "primary": "anthropic/claude-sonnet-4-6" },
             "subagents": { "allowAgents": ["*"] }
           }
-        ]
+        }
       },
       "skills": {
         "load": {
@@ -53,8 +53,7 @@ data:
             "~/.openclaw/skills",
             "~/.openclaw/workspace-alice_myagent/skills"
           ],
-          "watch": true,
-          "watchDebounceMs": 1000
+          "watch": true
         }
       },
       "cron": { "enabled": true }

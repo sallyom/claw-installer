@@ -171,9 +171,10 @@ export function buildLocalManagedAuthProfilesJson(config: DeployConfig): string 
 export function buildLocalManagedAuthProfilesImportScript(agentIds: string[], sourcePath: string, localFileOwner?: string): string {
   const sqliteImports = Array.from(new Set(agentIds))
     .map((agentId) =>
-      `if [ -f '${sourcePath}' ]; then OPENCLAW_AUTH_IMPORT_AGENT_ID='${agentId}' OPENCLAW_AUTH_IMPORT_SOURCE='${sourcePath}' node <<'EOF_OPENCLAW_AUTH_IMPORT'\n${localManagedAuthProfilesSqliteImportScript()}\nEOF_OPENCLAW_AUTH_IMPORT\nfi`
+      `if [ -f '${sourcePath}' ]; then\nnode openclaw.mjs models auth order clear --provider installer-bootstrap --agent '${agentId}' >/dev/null\nOPENCLAW_AUTH_IMPORT_AGENT_ID='${agentId}' OPENCLAW_AUTH_IMPORT_SOURCE='${sourcePath}' node <<'EOF_OPENCLAW_AUTH_IMPORT'\n${localManagedAuthProfilesSqliteImportScript()}\nEOF_OPENCLAW_AUTH_IMPORT\nfi`
     );
   return [
+    "set -eu",
     ...sqliteImports,
     runtimeOwnershipFixupCommand(localFileOwner),
   ].join("\n");
@@ -181,7 +182,7 @@ export function buildLocalManagedAuthProfilesImportScript(agentIds: string[], so
 
 function localManagedAuthProfilesSqliteImportScript(): string {
   return [
-    "const { existsSync, mkdirSync, readFileSync, chmodSync } = require('node:fs');",
+    "const { existsSync, readFileSync, chmodSync } = require('node:fs');",
     "const path = require('node:path');",
     "let DatabaseSync;",
     "try { ({ DatabaseSync } = require('node:sqlite')); } catch { process.exit(0); }",
@@ -191,16 +192,12 @@ function localManagedAuthProfilesSqliteImportScript(): string {
     "const incoming = JSON.parse(readFileSync(sourcePath, 'utf8'));",
     "if (!incoming || typeof incoming !== 'object' || !incoming.profiles || typeof incoming.profiles !== 'object') process.exit(0);",
     "const agentDir = `/home/node/.openclaw/agents/${agentId}/agent`;",
-    "mkdirSync(agentDir, { recursive: true, mode: 0o700 });",
     "const dbPath = path.join(agentDir, 'openclaw-agent.sqlite');",
+    "if (!existsSync(dbPath)) throw new Error(`OpenClaw did not initialize the auth database for ${agentId}`);",
     "const db = new DatabaseSync(dbPath);",
     "try {",
     "  db.exec('PRAGMA busy_timeout = 5000');",
-    "  db.exec('CREATE TABLE IF NOT EXISTS schema_meta (meta_key TEXT NOT NULL PRIMARY KEY, role TEXT NOT NULL, schema_version INTEGER NOT NULL, agent_id TEXT, app_version TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)');",
-    "  db.exec('CREATE TABLE IF NOT EXISTS auth_profile_store (store_key TEXT NOT NULL PRIMARY KEY, store_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
-    "  db.exec('CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT NOT NULL PRIMARY KEY, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
     "  const now = Date.now();",
-    "  db.prepare('INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(meta_key) DO UPDATE SET role=excluded.role, schema_version=excluded.schema_version, agent_id=excluded.agent_id, updated_at=excluded.updated_at').run('primary', 'agent', 1, agentId, null, now, now);",
     "  const row = db.prepare(\"SELECT store_json FROM auth_profile_store WHERE store_key = 'primary'\").get();",
     "  let existing = { version: 1, profiles: {} };",
     "  if (row && typeof row.store_json === 'string') {",
@@ -542,6 +539,7 @@ export function buildSavedInstanceEnvContent(config: DeployConfig, name: string)
       if (config.sandboxOpenShellGatewayEndpoint) {
         lines.push(`SANDBOX_OPENSHELL_GATEWAY_ENDPOINT=${config.sandboxOpenShellGatewayEndpoint}`);
       }
+      lines.push(`SANDBOX_OPENSHELL_WORKSPACE=${config.sandboxOpenShellWorkspace || "default"}`);
       lines.push(`SANDBOX_OPENSHELL_MODE=${config.sandboxOpenShellMode || "remote"}`);
       if (config.sandboxOpenShellFrom) {
         lines.push(`SANDBOX_OPENSHELL_FROM=${config.sandboxOpenShellFrom}`);
@@ -685,6 +683,10 @@ async function importLocalManagedAuthProfiles(params: {
         ...localMaintenanceEntrypointArgs(),
         ...localStateMaintenanceUserArgs(params.config.localFileOwner),
         ...localStateMountArgs(params.config),
+        "-e", `HOME=${OPENCLAW_LOCAL_HOME}`,
+        "-e", `TMPDIR=${OPENCLAW_LOCAL_TMP_DIR}`,
+        "-e", `OPENCLAW_CONFIG_DIR=${OPENCLAW_LOCAL_STATE_DIR}`,
+        "-e", `OPENCLAW_STATE_DIR=${OPENCLAW_LOCAL_STATE_DIR}`,
         "--secret", `${secretName},type=mount`,
         params.image,
         "sh", "-c", buildLocalManagedAuthProfilesImportScript(params.agentIds, secretPath, params.config.localFileOwner),
@@ -710,6 +712,10 @@ async function importLocalManagedAuthProfiles(params: {
       ...localMaintenanceEntrypointArgs(),
       "--user", "0",
       ...localStateMountArgs(params.config),
+      "-e", `HOME=${OPENCLAW_LOCAL_HOME}`,
+      "-e", `TMPDIR=${OPENCLAW_LOCAL_TMP_DIR}`,
+      "-e", `OPENCLAW_CONFIG_DIR=${OPENCLAW_LOCAL_STATE_DIR}`,
+      "-e", `OPENCLAW_STATE_DIR=${OPENCLAW_LOCAL_STATE_DIR}`,
       "-v", bindMountSpec(authProfileImportDir, "/tmp/openclaw-auth-import", "ro"),
       params.image,
       "sh", "-c", buildLocalManagedAuthProfilesImportScript(
@@ -1161,7 +1167,23 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
     plugins: {
       ...(pluginAllowlist.length > 0 ? { allow: pluginAllowlist } : {}),
       entries: {
-        ...(useCodexOauth ? { [OPENAI_PROVIDER]: { enabled: true }, codex: { enabled: true } } : {}),
+        ...(useCodexOauth
+          ? {
+              [OPENAI_PROVIDER]: { enabled: true },
+              codex: {
+                enabled: true,
+                ...(openShellPluginConfig
+                  ? {
+                      config: {
+                        appServer: {
+                          experimental: { sandboxExecServer: true },
+                        },
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {}),
         ...(useOtel ? { "diagnostics-otel": { enabled: true } } : {}),
         ...(config.vaultSecretsEnabled ? { [VAULT_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
         ...(config.onePasswordSecretsEnabled ? { [ONEPASSWORD_SECRET_PROVIDER_PLUGIN_ID]: { enabled: true } } : {}),
@@ -1208,9 +1230,9 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
         models: buildConfiguredAgentModelCatalog(config, model, sourceBundle),
         ...(buildSandboxConfig(config) ? { sandbox: buildSandboxConfig(config) } : {}),
       },
-      list: [
-        {
-          id: agentId,
+      entries: Object.fromEntries([
+        [agentId, {
+          default: true,
           name: config.agentDisplayName || config.agentName,
           identity: { name: config.agentDisplayName || config.agentName },
           workspace: `~/.openclaw/workspace-${agentId}`,
@@ -1219,18 +1241,17 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
             : buildAgentModelConfig(config, model),
           subagents: sourceBundle?.mainAgent?.subagents || subagentConfig(config.subagentPolicy),
           ...(sourceBundle?.mainAgent?.tools ? { tools: sourceBundle.mainAgent.tools } : {}),
-        },
+        }],
         // Fix for #67: append deploy-time model as fallback for bundle subagents
-        ...((sourceBundle?.agents || []).map((entry) => ({
-          id: entry.id,
+        ...((sourceBundle?.agents || []).map((entry) => [entry.id, {
           name: entry.name || entry.id,
           ...(entry.name ? { identity: { name: entry.name } } : {}),
           workspace: `~/.openclaw/workspace-${entry.id}`,
           model: resolveSubagentModel(entry.model, model, config),
           ...(entry.subagents ? { subagents: entry.subagents } : {}),
           ...(entry.tools ? { tools: entry.tools } : {}),
-        }))),
-      ],
+        }])),
+      ]),
     },
     // Fix for #78: register all LiteLLM models (primary + secondary providers)
     // in the provider listing.  Exclude the primary model since it is already
@@ -1253,7 +1274,6 @@ export function buildOpenClawConfig(config: DeployConfig, gatewayToken: string):
       load: {
         extraDirs: ["~/.openclaw/skills"],
         watch: true,
-        watchDebounceMs: 1000,
       },
     },
     cron: { enabled: !!config.cronEnabled },

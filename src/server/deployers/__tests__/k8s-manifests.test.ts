@@ -144,6 +144,7 @@ describe("k8s state sync manifests", () => {
         sandboxEnabled: true,
         sandboxBackend: "openshell",
         sandboxOpenShellGatewayEndpoint: "http://openshell.openshell-alpha.svc.cluster.local:8080",
+        sandboxOpenShellWorkspace: "team-alpha",
       }),
     );
 
@@ -154,13 +155,13 @@ describe("k8s state sync manifests", () => {
 
     expect(pluginInit?.image).toBe("quay.io/sallyom/openclaw-openshell:latest");
     expect(gatewayContainer?.image).toBe("quay.io/sallyom/openclaw-openshell:latest");
-    expect(pluginInit?.command?.[2]).toContain("NVIDIA/OpenShell/releases/download/v0.0.83");
-    expect(pluginInit?.command?.[2]).toContain("1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821");
-    expect(pluginInit?.command?.[2]).toContain("17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8");
-    expect(pluginInit?.command?.[2]).toContain("if node openclaw.mjs plugins list | grep -q openshell; then");
+    expect(pluginInit?.command?.[2]).toContain("NVIDIA/OpenShell/releases/download/v0.0.92");
+    expect(pluginInit?.command?.[2]).toContain("db1a86fadea9c5483aef291fabd4ea1dfeacea908faa450952f2ab01de5f4035");
+    expect(pluginInit?.command?.[2]).toContain("a0352669b4a9583c5fbe26610d0afa4db56ab9283c4a603740e1261222de7e39");
+    expect(pluginInit?.command?.[2]).toContain("if node openclaw.mjs plugins inspect openshell --json");
     expect(pluginInit?.command?.[2]).toContain("OpenShell plugin is bundled in the image; skipping package installation.");
     expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins install '@openclaw/openshell-sandbox@2026.7.1' --force");
-    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins list | grep -q openshell");
+    expect(pluginInit?.command?.[2]).toContain("node openclaw.mjs plugins inspect openshell --json");
     expect(initContainers.find((container) => container.name === "install-openshell-plugin")).toBeUndefined();
     expect(initContainers.find((container) => container.name === "install-openshell-cli")).toBeUndefined();
     expect(pluginInit?.env).toEqual(
@@ -354,8 +355,12 @@ describe("k8s state sync manifests", () => {
     expect(initScript).not.toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
     expect(gatewayVolumeMounts).toContain("/openclaw-secrets");
     expect(gatewayScript).toContain("/openclaw-secrets/OPENAI_CODEX_AUTH_PROFILES_JSON");
+    expect(gatewayScript).toMatch(/^set -eu\n/);
     expect(gatewayScript).toContain("openclaw-agent.sqlite");
     expect(gatewayScript).toContain("auth_profile_store");
+    expect(gatewayScript).toContain("models auth order clear --provider installer-bootstrap --agent 'openclaw-alpha'");
+    expect(gatewayScript).not.toContain("CREATE TABLE");
+    expect(gatewayScript).not.toContain("schema_meta");
     expect(gatewayScript).toContain('"openclaw-alpha"');
     expect(gatewayScript).not.toContain("doctor --non-interactive --fix");
   });
@@ -403,25 +408,29 @@ describe("k8s state sync manifests", () => {
     expect(initScript).not.toContain("codex-refresh-token");
   });
 
-  it("does not install the external Codex plugin for a Codex OAuth gateway", () => {
+  it("installs or verifies the external Codex plugin for a Codex OAuth gateway", () => {
     const deployment = deploymentManifest(
       "openclaw-alpha-openclaw",
       makeConfig({
-        inferenceProvider: "vertex-anthropic",
+        inferenceProvider: "openai-codex",
         codexModel: "gpt-5.5",
       }),
     );
 
-    const names = deployment.spec?.template.spec?.initContainers?.map((container) => container.name) ?? [];
+    const pluginInit = deployment.spec?.template.spec?.initContainers?.find(
+      (container) => container.name === "install-openclaw-plugins",
+    );
+    const script = pluginInit?.command?.[2] ?? "";
 
-    expect(names).not.toContain("install-codex-plugin");
+    expect(script).toContain("plugins inspect codex --json");
+    expect(script).toContain("plugins install '@openclaw/codex' --force");
   });
 
   it("does not install the Codex plugin when Codex OAuth is not configured", () => {
     const deployment = deploymentManifest("openclaw-alpha-openclaw", config);
     const names = deployment.spec?.template.spec?.initContainers?.map((container) => container.name) ?? [];
 
-    expect(names).not.toContain("install-codex-plugin");
+    expect(names).not.toContain("install-openclaw-plugins");
   });
 
   it("uses the dedicated openclaw service account for non-A2A deployments", () => {

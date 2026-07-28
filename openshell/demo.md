@@ -182,7 +182,7 @@ Deploy OpenShell with a unique release name:
 
 ```shell
 helm install openshell-bob oci://ghcr.io/nvidia/openshell/helm-chart \
-  --version 0.0.83 \
+  --version 0.0.92 \
   -n openshell-bob \
   -f openshell/configs/openshell-values-openshift.yaml
 ```

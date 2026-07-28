@@ -16,6 +16,7 @@ export {
   OPENAI_CODEX_PROVIDER,
   OPENAI_PROVIDER,
 };
+export const CODEX_PLUGIN_SPEC = "@openclaw/codex";
 export const DEFAULT_CODEX_PROFILE_ID = `${OPENAI_PROVIDER}:chatgpt-default`;
 export const CODEX_AUTH_PROFILES_SECRET_KEY = "OPENAI_CODEX_AUTH_PROFILES_JSON";
 
@@ -90,21 +91,21 @@ export function normalizeCodexOauthProfileId(value?: string): string {
 
 export function normalizeCodexModelRef(modelRef?: string): string {
   const trimmed = modelRef?.trim() || DEFAULT_CODEX_MODEL;
-  if (trimmed.startsWith(`${CODEX_PROVIDER}/`)) {
+  if (trimmed.startsWith(`${OPENAI_PROVIDER}/`)) {
     return trimmed;
   }
-  if (trimmed.startsWith(`${OPENAI_PROVIDER}/`)) {
-    return `${CODEX_PROVIDER}/${trimmed.slice(`${OPENAI_PROVIDER}/`.length)}`;
+  if (trimmed.startsWith(`${CODEX_PROVIDER}/`)) {
+    return `${OPENAI_PROVIDER}/${trimmed.slice(`${CODEX_PROVIDER}/`.length)}`;
   }
   if (trimmed.startsWith(`${OPENAI_CODEX_PROVIDER}/`)) {
-    return `${CODEX_PROVIDER}/${trimmed.slice(`${OPENAI_CODEX_PROVIDER}/`.length)}`;
+    return `${OPENAI_PROVIDER}/${trimmed.slice(`${OPENAI_CODEX_PROVIDER}/`.length)}`;
   }
-  return `${CODEX_PROVIDER}/${trimmed}`;
+  return `${OPENAI_PROVIDER}/${trimmed}`;
 }
 
 export function codexModelIdFromRef(modelRef?: string): string {
   const ref = normalizeCodexModelRef(modelRef);
-  return ref.slice(`${CODEX_PROVIDER}/`.length);
+  return ref.slice(`${OPENAI_PROVIDER}/`.length);
 }
 
 export function shouldUseCodexOauth(config: DeployConfig): boolean {

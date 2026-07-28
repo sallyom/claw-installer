@@ -297,11 +297,12 @@ describe("Multi-model per provider", () => {
       expect(body.openrouterApiKey).toBeUndefined();
     });
 
-    it("includes custom OpenShell sandbox source when the OpenShell backend is enabled", () => {
+    it("includes OpenShell workspace and custom sandbox source when the backend is enabled", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
       config.sandboxEnabled = true;
       config.sandboxBackend = "openshell";
+      config.sandboxOpenShellWorkspace = "team-alpha";
       config.sandboxOpenShellFrom = "quay.io/sallyom/openclaw-openshell-sandbox:slim";
       const body = buildDeployRequestBody({
         mode: "openshift",
@@ -311,6 +312,7 @@ describe("Multi-model per provider", () => {
         suggestedNamespace: "test-ns",
       });
 
+      expect(body.sandboxOpenShellWorkspace).toBe("team-alpha");
       expect(body.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
     });
 
@@ -560,11 +562,12 @@ describe("Multi-model per provider", () => {
       expect(decoded).toEqual(["git:github.com/example/custom-openclaw-plugin", "/app/extensions/custom"]);
     });
 
-    it("round-trips the OpenShell sandbox source through env files", () => {
+    it("round-trips the OpenShell workspace and sandbox source through env files", () => {
       const config = createInitialDeployFormConfig();
       config.agentName = "test";
       config.sandboxEnabled = true;
       config.sandboxBackend = "openshell";
+      config.sandboxOpenShellWorkspace = "team-alpha";
       config.sandboxOpenShellFrom = "quay.io/sallyom/openclaw-openshell-sandbox:slim";
       const env = buildEnvFileContent({
         config,
@@ -584,7 +587,9 @@ describe("Multi-model per provider", () => {
 
       const { config: restored } = applySavedVarsToConfig(vars, createInitialDeployFormConfig());
 
+      expect(env).toContain("SANDBOX_OPENSHELL_WORKSPACE=team-alpha");
       expect(env).toContain("SANDBOX_OPENSHELL_FROM=quay.io/sallyom/openclaw-openshell-sandbox:slim");
+      expect(restored.sandboxOpenShellWorkspace).toBe("team-alpha");
       expect(restored.sandboxOpenShellFrom).toBe("quay.io/sallyom/openclaw-openshell-sandbox:slim");
     });
 

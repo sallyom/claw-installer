@@ -96,10 +96,11 @@ describe("model config generation", () => {
       codexModels: ["gpt-5.4-mini"],
     });
 
-    expect(normalizeModelRef(config, "gpt-5.5")).toBe("codex/gpt-5.5");
-    expect(normalizeModelRef(config, "openai-codex/gpt-5.5")).toBe("codex/gpt-5.5");
-    expect(normalizeModelRef(config, "openai/gpt-5.5")).toBe("codex/gpt-5.5");
-    expect(deriveModel(config)).toBe("codex/gpt-5.5");
+    expect(normalizeModelRef(config, "gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(normalizeModelRef(config, "codex/gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(normalizeModelRef(config, "openai-codex/gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(normalizeModelRef(config, "openai/gpt-5.5")).toBe("openai/gpt-5.5");
+    expect(deriveModel(config)).toBe("openai/gpt-5.5");
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       plugins?: {
@@ -126,12 +127,12 @@ describe("model config generation", () => {
       mode: "oauth",
     });
     expect(rendered.auth?.order?.openai).toEqual(["openai:chatgpt-default"]);
-    expect(rendered.agents?.defaults?.model?.primary).toBe("codex/gpt-5.5");
+    expect(rendered.agents?.defaults?.model?.primary).toBe("openai/gpt-5.5");
     expect(rendered.agents?.defaults?.models?.["openai-codex/gpt-5.5"]).toBeUndefined();
-    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]).toBeUndefined();
+    expect(rendered.agents?.defaults?.models?.["codex/gpt-5.5"]).toBeUndefined();
     expect(rendered.agents?.defaults?.models).toMatchObject({
-      "codex/gpt-5.5": { alias: "gpt-5.5", agentRuntime: { id: "codex" } },
-      "codex/gpt-5.4-mini": { alias: "gpt-5.4-mini", agentRuntime: { id: "codex" } },
+      "openai/gpt-5.5": { alias: "gpt-5.5", agentRuntime: { id: "codex" } },
+      "openai/gpt-5.4-mini": { alias: "gpt-5.4-mini", agentRuntime: { id: "codex" } },
     });
   });
 
@@ -169,8 +170,8 @@ describe("model config generation", () => {
       profiles?: Record<string, { provider?: string; type?: string }>;
     };
 
-    expect(rendered.agents?.defaults?.model?.primary).toBe("codex/gpt-5.5");
-    expect(rendered.agents?.defaults?.models?.["codex/gpt-5.5"]?.agentRuntime).toEqual({
+    expect(rendered.agents?.defaults?.model?.primary).toBe("openai/gpt-5.5");
+    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]?.agentRuntime).toEqual({
       id: "codex",
     });
     expect(rendered.auth?.profiles?.["openai:chatgpt-default"]).toEqual({
@@ -217,6 +218,7 @@ describe("model config generation", () => {
       sandboxEnabled: true,
       sandboxBackend: "openshell",
       sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+      sandboxOpenShellWorkspace: "team-alpha",
     }), "gateway-token") as {
       plugins?: { entries?: Record<string, { config?: Record<string, unknown> }> };
     };
@@ -227,6 +229,7 @@ describe("model config generation", () => {
       gatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
       policy: "/home/node/.openclaw/openshell/policy.yaml",
       timeoutSeconds: 180,
+      workspace: "team-alpha",
     });
   });
 
@@ -238,8 +241,10 @@ describe("model config generation", () => {
       sandboxScope: "session",
       sandboxWorkspaceAccess: "rw",
       sandboxOpenShellGatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
+      sandboxOpenShellWorkspace: "team-alpha",
       sandboxOpenShellMode: "mirror",
       sandboxOpenShellFrom: "quay.io/sallyom/openclaw-openshell-sandbox:slim",
+      codexOauthProfileId: "openai:chatgpt-default",
     });
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
@@ -261,6 +266,14 @@ describe("model config generation", () => {
       workspaceAccess: "rw",
     });
     expect(rendered.plugins?.allow).toEqual(expect.arrayContaining(["openshell"]));
+    expect(rendered.plugins?.entries?.codex).toEqual({
+      enabled: true,
+      config: {
+        appServer: {
+          experimental: { sandboxExecServer: true },
+        },
+      },
+    });
     expect(rendered.plugins?.entries?.openshell).toEqual({
       enabled: true,
       config: {
@@ -269,6 +282,7 @@ describe("model config generation", () => {
         gatewayEndpoint: "http://openshell-alice.openshell-alice.svc.cluster.local:8080",
         policy: "/home/node/.openclaw/openshell/policy.yaml",
         timeoutSeconds: 180,
+        workspace: "team-alpha",
       },
     });
   });
@@ -301,7 +315,7 @@ describe("model config generation", () => {
     expect(rendered.plugins?.entries?.openai?.enabled).toBe(true);
     expect(rendered.plugins?.entries?.codex?.enabled).toBe(true);
     expect(rendered.agents?.defaults?.model?.primary).toBe("anthropic-vertex/claude-sonnet-4-6");
-    expect(rendered.agents?.defaults?.models?.["codex/gpt-5.5"]).toMatchObject({
+    expect(rendered.agents?.defaults?.models?.["openai/gpt-5.5"]).toMatchObject({
       alias: "gpt-5.5",
       agentRuntime: { id: "codex" },
     });
@@ -509,13 +523,13 @@ describe("model config generation", () => {
         defaults?: {
           models?: Record<string, { alias?: string }>;
         };
-        list?: Array<{
+        entries?: Record<string, {
           model?: { primary?: string; fallbacks?: string[] };
         }>;
       };
     };
 
-    expect(rendered.agents?.list?.[0]?.model).toEqual({
+    expect(rendered.agents?.entries?.["openclaw-demo"]?.model).toEqual({
       primary: "anthropic/claude-sonnet-4-6",
       fallbacks: ["endpoint/google/gemma-4-26B-A4B-it"],
     });
@@ -595,15 +609,15 @@ describe("model config generation", () => {
 
     const rendered = buildOpenClawConfig(config, "gateway-token") as {
       agents?: {
-        list?: Array<{
-          id?: string;
+        entries?: Record<string, {
+          default?: boolean;
           identity?: { name?: string };
         }>;
       };
     };
 
-    expect(rendered.agents?.list?.[0]).toMatchObject({
-      id: "openclaw-joe",
+    expect(rendered.agents?.entries?.["openclaw-joe"]).toMatchObject({
+      default: true,
       identity: { name: "Joe" },
     });
   });
@@ -1100,7 +1114,7 @@ describe("model config generation", () => {
         defaults?: {
           model?: { primary?: string; fallbacks?: string[] };
         };
-        list?: Array<{
+        entries?: Record<string, {
           model?: { primary?: string; fallbacks?: string[] };
         }>;
       };
@@ -1113,7 +1127,7 @@ describe("model config generation", () => {
         "endpoint/llama-4-scout-17b-16e-w4a16",
       ],
     });
-    expect(rendered.agents?.list?.[0]?.model).toEqual({
+    expect(rendered.agents?.entries?.["openclaw-demo"]?.model).toEqual({
       primary: "anthropic/claude-sonnet-4-6",
       fallbacks: [
         "openai/gpt-5",
@@ -1411,11 +1425,11 @@ describe("detectUnavailableProvider", () => {
     expect(detectUnavailableProvider("codex/gpt-5.5", config)).toBe(false);
     expect(detectUnavailableProvider("codex/gpt-5.2", config)).toBe(false);
     expect(detectUnavailableProvider("codex/gpt-5.4", config)).toBe(true);
-    expect(detectUnavailableProvider("openai/gpt-5.2", config)).toBe(true);
-    expect(detectUnavailableProvider("openai-codex/gpt-5.2", config)).toBe(true);
+    expect(detectUnavailableProvider("openai/gpt-5.2", config)).toBe(false);
+    expect(detectUnavailableProvider("openai-codex/gpt-5.2", config)).toBe(false);
   });
 
-  it("falls back from subagent OpenAI refs when only Codex OAuth is configured", () => {
+  it("keeps configured subagent OpenAI refs when Codex OAuth supplies them", () => {
     const config = makeConfig({
       inferenceProvider: "openai-codex",
       codexModels: ["gpt-5.2"],
@@ -1423,11 +1437,11 @@ describe("detectUnavailableProvider", () => {
 
     expect(resolveSubagentModel(
       { primary: "openai/gpt-5.2" },
-      "codex/gpt-5.5",
+      "openai/gpt-5.5",
       config,
     )).toEqual({
-      primary: "codex/gpt-5.5",
-      fallbacks: ["openai/gpt-5.2"],
+      primary: "openai/gpt-5.2",
+      fallbacks: ["openai/gpt-5.5"],
     });
   });
 
@@ -1525,6 +1539,7 @@ describe("MCP servers from agent source", () => {
       "~/.openclaw/workspace-team-manager/skills",
       "~/.openclaw/workspace-builder/skills",
     ]);
+    expect(rendered.skills?.load).not.toHaveProperty("watchDebounceMs");
   });
 
   it("can allow gateway web fetch in the sandbox tool policy", () => {

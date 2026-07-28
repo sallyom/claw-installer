@@ -135,6 +135,7 @@ export interface DeployFormConfig {
   sandboxScope: string;
   sandboxWorkspaceAccess: string;
   sandboxOpenShellGatewayEndpoint: string;
+  sandboxOpenShellWorkspace: string;
   sandboxOpenShellMode: OpenShellSandboxMode;
   sandboxOpenShellFrom: string;
   sandboxToolPolicyEnabled: boolean;

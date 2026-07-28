@@ -180,6 +180,7 @@ export function parseSavedLocalInstanceConfig(savedVars: Record<string, string>)
     sandboxWorkspaceAccess:
       (savedVars.SANDBOX_WORKSPACE_ACCESS as "none" | "ro" | "rw") || undefined,
     sandboxOpenShellGatewayEndpoint: savedVars.SANDBOX_OPENSHELL_GATEWAY_ENDPOINT || undefined,
+    sandboxOpenShellWorkspace: savedVars.SANDBOX_OPENSHELL_WORKSPACE || undefined,
     sandboxOpenShellMode: (savedVars.SANDBOX_OPENSHELL_MODE as "mirror" | "remote") || undefined,
     sandboxSshTarget: savedVars.SANDBOX_SSH_TARGET || undefined,
     sandboxSshWorkspaceRoot: savedVars.SANDBOX_SSH_WORKSPACE_ROOT || undefined,

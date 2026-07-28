@@ -867,6 +867,20 @@ export default function DeployForm({ onDeployStarted, instanceCount, onShowInsta
   if (config.sandboxEnabled && config.sandboxBackend === "openshell" && !config.sandboxOpenShellGatewayEndpoint.trim()) {
     validationErrors.push("OpenShell Gateway Endpoint is required when the OpenShell sandbox backend is enabled.");
   }
+  if (
+    config.sandboxEnabled
+    && config.sandboxBackend === "openshell"
+    && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.sandboxOpenShellWorkspace.trim())
+  ) {
+    validationErrors.push("OpenShell Workspace must contain lowercase alphanumeric characters or single hyphens.");
+  }
+  if (
+    config.sandboxEnabled
+    && config.sandboxBackend === "openshell"
+    && config.sandboxOpenShellWorkspace.trim().length > 19
+  ) {
+    validationErrors.push("OpenShell Workspace must be at most 19 characters.");
+  }
   if (config.sandboxEnabled && !hasSandboxToolSelection) {
     validationErrors.push("Select at least one sandbox tool group or disable custom sandbox tool baseline.");
   }

@@ -111,4 +111,18 @@ describe("parseSavedLocalInstanceConfig", () => {
     expect(parsed.agentSourceGitPath).toBe("teams/platform");
   });
 
+  it("restores the selected OpenShell workspace", () => {
+    const config = makeConfig({
+      sandboxEnabled: true,
+      sandboxBackend: "openshell",
+      sandboxOpenShellGatewayEndpoint: "https://localhost:17670",
+      sandboxOpenShellWorkspace: "team-alpha",
+    });
+
+    const savedVars = parseEnvFile(buildSavedInstanceEnvContent(config, "openclaw-demo"));
+    const parsed = parseSavedLocalInstanceConfig(savedVars);
+
+    expect(parsed.sandboxOpenShellWorkspace).toBe("team-alpha");
+  });
+
 });

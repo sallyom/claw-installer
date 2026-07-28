@@ -21,7 +21,11 @@ import {
   MANAGED_VAULT_HELPER_PATH,
   OPENCLAW_SERVICE_ACCOUNT_NAME,
 } from "./vault-helper.js";
-import { CODEX_AUTH_PROFILES_SECRET_KEY } from "./codex-oauth.js";
+import {
+  CODEX_AUTH_PROFILES_SECRET_KEY,
+  CODEX_PLUGIN_SPEC,
+  shouldUseCodexOauth,
+} from "./codex-oauth.js";
 import {
   buildOpenShellCliInstallScript,
   OPEN_SHELL_PLUGIN_SPEC,
@@ -51,6 +55,7 @@ function configuredPluginInstallSpecs(config: DeployConfig): string[] {
     ...(config.pluginInstallSpecs ?? []),
     ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
     ...(usesDirectAnthropicVertex(config) ? [ANTHROPIC_VERTEX_PLUGIN_SPEC] : []),
+    ...(shouldUseCodexOauth(config) ? [CODEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPEN_SHELL_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();
@@ -91,7 +96,7 @@ function managedAuthProfilesSqliteImportScript(agentIds: string[], sourcePath: s
     return "";
   }
   const nodeScript = [
-    "const { existsSync, mkdirSync, readFileSync, chmodSync } = require('node:fs');",
+    "const { existsSync, readFileSync, chmodSync } = require('node:fs');",
     "const path = require('node:path');",
     "let DatabaseSync;",
     "try { ({ DatabaseSync } = require('node:sqlite')); } catch { process.exit(0); }",
@@ -103,16 +108,12 @@ function managedAuthProfilesSqliteImportScript(agentIds: string[], sourcePath: s
     "if (!incoming || typeof incoming !== 'object' || !incoming.profiles || typeof incoming.profiles !== 'object') process.exit(0);",
     "for (const agentId of agentIds) {",
     "  const agentDir = path.join(runtimeDir, 'agents', agentId, 'agent');",
-    "  mkdirSync(agentDir, { recursive: true, mode: 0o700 });",
     "  const dbPath = path.join(agentDir, 'openclaw-agent.sqlite');",
+    "  if (!existsSync(dbPath)) throw new Error(`OpenClaw did not initialize the auth database for ${agentId}`);",
     "  const db = new DatabaseSync(dbPath);",
     "  try {",
     "    db.exec('PRAGMA busy_timeout = 5000');",
-    "    db.exec('CREATE TABLE IF NOT EXISTS schema_meta (meta_key TEXT NOT NULL PRIMARY KEY, role TEXT NOT NULL, schema_version INTEGER NOT NULL, agent_id TEXT, app_version TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)');",
-    "    db.exec('CREATE TABLE IF NOT EXISTS auth_profile_store (store_key TEXT NOT NULL PRIMARY KEY, store_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
-    "    db.exec('CREATE TABLE IF NOT EXISTS auth_profile_state (state_key TEXT NOT NULL PRIMARY KEY, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL)');",
     "    const now = Date.now();",
-    "    db.prepare('INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(meta_key) DO UPDATE SET role=excluded.role, schema_version=excluded.schema_version, agent_id=excluded.agent_id, updated_at=excluded.updated_at').run('primary', 'agent', 1, agentId, null, now, now);",
     "    const row = db.prepare(\"SELECT store_json FROM auth_profile_store WHERE store_key = 'primary'\").get();",
     "    let existing = { version: 1, profiles: {} };",
     "    if (row && typeof row.store_json === 'string') {",
@@ -138,12 +139,20 @@ function managedAuthProfilesSqliteImportScript(agentIds: string[], sourcePath: s
 }
 
 function gatewayStartupScript(managedAgentIds: string[]): string {
+  const authProfilesPath = `/openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY}`;
   return [
+    "set -eu",
     "umask 007",
+    `if [ -f '${authProfilesPath}' ]; then`,
+    ...managedAgentIds.map(
+      (agentId) =>
+        `node openclaw.mjs models auth order clear --provider installer-bootstrap --agent '${agentId}' >/dev/null`,
+    ),
     managedAuthProfilesSqliteImportScript(
       managedAgentIds,
-      `/openclaw-secrets/${CODEX_AUTH_PROFILES_SECRET_KEY}`,
+      authProfilesPath,
     ),
+    "fi",
     "exec node openclaw.mjs gateway run --bind lan --port 18789",
   ].filter((line) => line.length > 0).join("\n");
 }
@@ -202,17 +211,20 @@ function configuredPluginsInstallScript(specs: string[]): string {
     ...(specs.includes(OPEN_SHELL_PLUGIN_SPEC)
       ? [buildOpenShellCliInstallScript(OPENSHELL_CLI_MOUNT_DIR)]
       : []),
-    ...specs.flatMap((spec) => spec === OPEN_SHELL_PLUGIN_SPEC
+    ...specs.flatMap((spec) => spec === OPEN_SHELL_PLUGIN_SPEC || spec === CODEX_PLUGIN_SPEC
       ? [
-          "if node openclaw.mjs plugins list | grep -q openshell; then",
-          '  echo "OpenShell plugin is bundled in the image; skipping package installation."',
+          `if node openclaw.mjs plugins inspect ${spec === OPEN_SHELL_PLUGIN_SPEC ? "openshell" : "codex"} --json >/dev/null 2>&1; then`,
+          `  echo "${spec === OPEN_SHELL_PLUGIN_SPEC ? "OpenShell" : "Codex"} plugin is bundled in the image; skipping package installation."`,
           "else",
           pluginInstallCommand(spec),
           "fi",
         ]
       : [pluginInstallCommand(spec)]),
     ...(specs.includes(OPEN_SHELL_PLUGIN_SPEC)
-      ? ["node openclaw.mjs plugins list | grep -q openshell"]
+      ? ["node openclaw.mjs plugins inspect openshell --json >/dev/null"]
+      : []),
+    ...(specs.includes(CODEX_PLUGIN_SPEC)
+      ? ["node openclaw.mjs plugins inspect codex --json >/dev/null"]
       : []),
     ...(specs.includes(ANTHROPIC_VERTEX_PLUGIN_SPEC)
       ? [`node openclaw.mjs plugins list | grep -q ${shellQuote(ANTHROPIC_VERTEX_PROVIDER)}`]

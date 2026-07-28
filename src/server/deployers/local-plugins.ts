@@ -10,6 +10,7 @@ import {
   OPEN_SHELL_POLICY_YAML,
   usesOpenShellSandbox,
 } from "./sandbox.js";
+import { CODEX_PLUGIN_SPEC, shouldUseCodexOauth } from "./codex-oauth.js";
 import {
   bindMountSpec,
   localMaintenanceEntrypointArgs,
@@ -85,6 +86,7 @@ function nonFatalPluginInstallCommand(spec: string): string {
 
 function buildLocalPluginInstallScript(specs: string[], localFileOwner?: string): string {
   const useOpenShell = specs.includes(OPEN_SHELL_PLUGIN_SPEC);
+  const useCodex = specs.includes(CODEX_PLUGIN_SPEC);
   const policy = Buffer.from(OPEN_SHELL_POLICY_YAML).toString("base64");
   return [
     "set -eu",
@@ -101,16 +103,19 @@ function buildLocalPluginInstallScript(specs: string[], localFileOwner?: string)
           `install -m 0600 ${OPEN_SHELL_LOCAL_TLS_MOUNT_DIR}/tls.key ${OPEN_SHELL_LOCAL_TLS_DIR}/tls.key`,
         ]
       : []),
-    ...specs.flatMap((spec) => spec === OPEN_SHELL_PLUGIN_SPEC
+    ...specs.flatMap((spec) => spec === OPEN_SHELL_PLUGIN_SPEC || spec === CODEX_PLUGIN_SPEC
       ? [
-          "if node openclaw.mjs plugins list | grep -q openshell; then",
-          '  echo "OpenShell plugin is bundled in the image; skipping package installation."',
+          `if node openclaw.mjs plugins inspect ${spec === OPEN_SHELL_PLUGIN_SPEC ? "openshell" : "codex"} --json >/dev/null 2>&1; then`,
+          `  echo "${spec === OPEN_SHELL_PLUGIN_SPEC ? "OpenShell" : "Codex"} plugin is bundled in the image; skipping package installation."`,
           "else",
-          nonFatalPluginInstallCommand(spec),
+          spec === CODEX_PLUGIN_SPEC
+            ? `  node openclaw.mjs plugins install ${shellQuote(spec)} --force`
+            : nonFatalPluginInstallCommand(spec),
           "fi",
         ]
       : [nonFatalPluginInstallCommand(spec)]),
-    ...(useOpenShell ? ["node openclaw.mjs plugins list | grep -q openshell"] : []),
+    ...(useOpenShell ? ["node openclaw.mjs plugins inspect openshell --json >/dev/null"] : []),
+    ...(useCodex ? ["node openclaw.mjs plugins inspect codex --json >/dev/null"] : []),
     runtimeOwnershipFixupCommand(localFileOwner),
   ].join("\n");
 }
@@ -121,6 +126,7 @@ function configuredPluginInstallSpecs(config: DeployConfig): string[] {
   for (const spec of [
     ...(config.pluginInstallSpecs ?? []),
     ...(config.onePasswordSecretsEnabled ? [ONEPASSWORD_PLUGIN_SPEC] : []),
+    ...(shouldUseCodexOauth(config) ? [CODEX_PLUGIN_SPEC] : []),
     ...(usesOpenShellSandbox(config) ? [OPEN_SHELL_PLUGIN_SPEC] : []),
   ]) {
     const trimmed = spec.trim();

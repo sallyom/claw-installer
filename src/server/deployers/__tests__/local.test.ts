@@ -192,6 +192,10 @@ describe("local Vault SecretRef wiring", () => {
 
     expect(script).toContain("openclaw-agent.sqlite");
     expect(script).toContain("auth_profile_store");
+    expect(script).toMatch(/^set -eu\n/);
+    expect(script).toContain("models auth order clear --provider installer-bootstrap --agent 'openclaw-demo'");
+    expect(script).not.toContain("CREATE TABLE");
+    expect(script).not.toContain("schema_meta");
     expect(script).not.toContain("auth-profiles.json");
     expect(script).not.toContain("doctor --non-interactive --fix");
   });
@@ -220,6 +224,7 @@ describe("local Vault SecretRef wiring", () => {
         integrationId: "vault",
       },
     });
+    expect(rendered.skills.load).not.toHaveProperty("watchDebounceMs");
     expect(rendered.plugins.allow).toEqual(expect.arrayContaining(["vault"]));
     expect(rendered.plugins.entries.vault).toEqual({ enabled: true });
     expect(rendered.models.providers.openai).toMatchObject({
@@ -488,6 +493,21 @@ describe("local 1Password SecretRef wiring", () => {
 
     expect(plan.specs).toEqual(["git:github.com/sallyom/claw-1password"]);
   });
+
+  it("installs or verifies the Codex plugin for Codex OAuth", () => {
+    const plan = localPluginsTesting.localPluginInstallPlan({
+      mode: "local",
+      agentName: "demo",
+      agentDisplayName: "Demo",
+      inferenceProvider: "openai-codex",
+      codexOauthProfileId: "openai:chatgpt-default",
+    });
+    const script = localPluginsTesting.buildLocalPluginInstallScript(plan.specs);
+
+    expect(plan.specs).toEqual(["@openclaw/codex"]);
+    expect(script).toContain("plugins inspect codex --json");
+    expect(script).toContain("plugins install '@openclaw/codex' --force");
+  });
 });
 
 describe("local OpenShell sandbox wiring", () => {
@@ -499,7 +519,9 @@ describe("local OpenShell sandbox wiring", () => {
     sandboxEnabled: true,
     sandboxBackend: "openshell" as const,
     sandboxOpenShellGatewayEndpoint: "https://localhost:18080",
+    sandboxOpenShellWorkspace: "openclaw-test",
     sandboxOpenShellMode: "remote" as const,
+    codexOauthProfileId: "openai:chatgpt-default",
   };
 
   it("renders the plugin config with a Podman-reachable gateway endpoint", () => {
@@ -510,6 +532,14 @@ describe("local OpenShell sandbox wiring", () => {
       mode: "all",
     });
     expect(rendered.plugins.allow).toContain("openshell");
+    expect(rendered.plugins.entries.codex).toEqual({
+      enabled: true,
+      config: {
+        appServer: {
+          experimental: { sandboxExecServer: true },
+        },
+      },
+    });
     expect(rendered.plugins.entries.openshell).toEqual({
       enabled: true,
       config: {
@@ -519,6 +549,7 @@ describe("local OpenShell sandbox wiring", () => {
         mode: "remote",
         policy: "/home/node/.openclaw/openshell/policy.yaml",
         timeoutSeconds: 180,
+        workspace: "openclaw-test",
       },
     });
   });
@@ -534,14 +565,17 @@ describe("local OpenShell sandbox wiring", () => {
     const plan = localPluginsTesting.localPluginInstallPlan(config);
     const script = localPluginsTesting.buildLocalPluginInstallScript(plan.specs);
 
-    expect(plan.specs).toEqual(["@openclaw/openshell-sandbox@2026.7.1"]);
-    expect(script).toContain("NVIDIA/OpenShell/releases/download/v0.0.83");
-    expect(script).toContain("1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821");
-    expect(script).toContain("17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8");
+    expect(plan.specs).toEqual([
+      "@openclaw/codex",
+      "@openclaw/openshell-sandbox@2026.7.1",
+    ]);
+    expect(script).toContain("NVIDIA/OpenShell/releases/download/v0.0.92");
+    expect(script).toContain("db1a86fadea9c5483aef291fabd4ea1dfeacea908faa450952f2ab01de5f4035");
+    expect(script).toContain("a0352669b4a9583c5fbe26610d0afa4db56ab9283c4a603740e1261222de7e39");
     expect(script).toContain("base64 -d > /home/node/.openclaw/openshell/policy.yaml");
     expect(script).toContain("/run/openshell-client-tls/ca.crt");
     expect(script).toContain("/home/node/.config/openshell/gateways/openshell/mtls/tls.key");
-    expect(script).toContain("node openclaw.mjs plugins list | grep -q openshell");
+    expect(script).toContain("node openclaw.mjs plugins inspect openshell --json");
     expect(plan.mountArgs).toEqual([
       "-v",
       "openshell-client-tls:/run/openshell-client-tls:ro",

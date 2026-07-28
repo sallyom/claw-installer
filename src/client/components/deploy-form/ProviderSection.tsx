@@ -551,7 +551,7 @@ export function ProviderSection({
                 onChange={(e) => update("codexModel", e.target.value)}
               />
               <div className="hint">
-                The primary model is used as <code>codex/&lt;model&gt;</code> with ChatGPT OAuth.
+                The primary model is used as <code>openai/&lt;model&gt;</code> with the Codex runtime and ChatGPT OAuth.
               </div>
             </div>
             <div className="form-group">
@@ -622,7 +622,7 @@ export function ProviderSection({
                 + Add Model
               </button>
               <div className="hint">
-                Additional models appear in the OpenClaw model picker as <code>codex/&lt;model&gt;</code> with ChatGPT OAuth.
+                Additional models appear in the OpenClaw model picker as <code>openai/&lt;model&gt;</code> with the Codex runtime and ChatGPT OAuth.
               </div>
             </div>
           </>

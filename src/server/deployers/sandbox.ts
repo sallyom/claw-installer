@@ -8,7 +8,7 @@ function nonEmpty(value?: string): string | undefined {
 export const OPEN_SHELL_POLICY_PATH = "/home/node/.openclaw/openshell/policy.yaml";
 export const DEFAULT_OPEN_SHELL_SANDBOX_FROM = "quay.io/sallyom/openclaw-openshell:latest";
 export const OPEN_SHELL_PLUGIN_SPEC = "@openclaw/openshell-sandbox@2026.7.1";
-export const OPEN_SHELL_CLI_VERSION = "0.0.83";
+export const OPEN_SHELL_CLI_VERSION = "0.0.92";
 
 export const OPEN_SHELL_POLICY_YAML = `version: 1
 filesystem_policy:
@@ -90,8 +90,8 @@ export function buildOpenShellCliInstallScript(installDir: string): string {
   return [
     `mkdir -p ${installDir}`,
     'case "$(uname -m)" in',
-    '  x86_64) target="x86_64-unknown-linux-musl"; checksum="1307199935caece720eb63faa8f7df88a6201c846efc411bf3c1ef8a789c6821" ;;',
-    '  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="17e718f9820756b1e507176c7562d5b463a8e5108d55980fc933e731e6154db8" ;;',
+    '  x86_64) target="x86_64-unknown-linux-musl"; checksum="db1a86fadea9c5483aef291fabd4ea1dfeacea908faa450952f2ab01de5f4035" ;;',
+    '  aarch64|arm64) target="aarch64-unknown-linux-musl"; checksum="a0352669b4a9583c5fbe26610d0afa4db56ab9283c4a603740e1261222de7e39" ;;',
     '  *) echo "unsupported OpenShell CLI architecture: $(uname -m)" >&2; exit 1 ;;',
     "esac",
     'archive="openshell-${target}.tar.gz"',
@@ -107,10 +107,12 @@ export function buildOpenShellPluginConfig(config: DeployConfig): Record<string,
   if (!config.sandboxEnabled || config.sandboxBackend !== "openshell") {
     return undefined;
   }
+  const workspace = nonEmpty(config.sandboxOpenShellWorkspace) || "default";
   return {
     from: nonEmpty(config.sandboxOpenShellFrom) || DEFAULT_OPEN_SHELL_SANDBOX_FROM,
     mode: config.sandboxOpenShellMode || "remote",
     gatewayEndpoint: nonEmpty(config.sandboxOpenShellGatewayEndpoint),
+    ...(workspace === "default" ? {} : { workspace }),
     policy: OPEN_SHELL_POLICY_PATH,
     timeoutSeconds: 180,
   };
